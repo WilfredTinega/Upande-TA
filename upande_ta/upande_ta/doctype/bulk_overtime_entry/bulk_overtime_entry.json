@@ -1,0 +1,101 @@
+{
+ "actions": [],
+ "creation": "2026-04-14 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "department",
+  "column_break_entry_1",
+  "overtime_type",
+  "hours_worked",
+  "column_break_entry_2",
+  "row_status",
+  "verification_type",
+  "remarks"
+ ],
+ "fields": [
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "employee.department",
+   "fieldname": "department",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Department",
+   "options": "Department",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_entry_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "overtime_type",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Overtime Type",
+   "options": "Overtime Type"
+  },
+  {
+   "fieldname": "hours_worked",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Hours Worked",
+   "precision": "2",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_entry_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Pending",
+   "fieldname": "row_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Row Status",
+   "options": "\nPending\nApproved\nRejected"
+  },
+  {
+   "fieldname": "verification_type",
+   "fieldtype": "Select",
+   "label": "Verification Type",
+   "options": "\nBiometric\nManual"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-04-16 09:09:00.074506",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Bulk Overtime Entry",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
