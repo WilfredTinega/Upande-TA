@@ -1,6 +1,7 @@
 {
  "actions": [],
  "allow_import": 1,
+ "allow_rename": 1,
  "autoname": "naming_series:",
  "creation": "2026-04-14 00:00:00",
  "doctype": "DocType",
@@ -8,6 +9,8 @@
  "engine": "InnoDB",
  "field_order": [
   "naming_series",
+  "column_break_wgqy",
+  "bulk_overtime_title",
   "section_control",
   "purpose",
   "company",
@@ -57,7 +60,6 @@
    "reqd": 1
   },
   {
-   "default": "David & Jacob",
    "fieldname": "company",
    "fieldtype": "Link",
    "in_standard_filter": 1,
@@ -183,11 +185,22 @@
    "options": "Bulk Overtime",
    "print_hide": 1,
    "read_only": 1
+  },
+  {
+   "fieldname": "column_break_wgqy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "bulk_overtime_title",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Bulk Overtime",
+   "read_only": 1
   }
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2026-04-16 09:08:43.351443",
+ "modified": "2026-04-16 12:53:20.962241",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime",
@@ -243,9 +256,10 @@
  ],
  "row_format": "Dynamic",
  "search_fields": "company,department,from_date,to_date,purpose",
+ "show_title_field_in_link": 1,
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
- "title_field": "department",
+ "title_field": "bulk_overtime_title",
  "track_changes": 1
 }
