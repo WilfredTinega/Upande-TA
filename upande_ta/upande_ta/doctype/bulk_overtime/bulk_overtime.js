@@ -3,8 +3,8 @@
 
 frappe.ui.form.on("Bulk Overtime", {
 	setup(frm) {
-		frm.set_query("department", () => ({ filters: { company: frm.doc.company } }));
-		frm.set_query("branch", () => ({ filters: { company: frm.doc.company } }));
+		frm.set_query("department", () => ({}));
+		frm.set_query("branch", () => ({}));
 	},
 
 	onload(frm) {
@@ -27,7 +27,7 @@ frappe.ui.form.on("Bulk Overtime", {
 	},
 
 	get_employees(frm) {
-		const mandatory = ["company", "from_date", "to_date"];
+		const mandatory = ["from_date", "to_date"];
 		const missing = mandatory.filter(f => !frm.doc[f]);
 
 		if (missing.length) {
@@ -54,7 +54,6 @@ frappe.ui.form.on("Bulk Overtime", {
 		});
 	},
 
-	company(frm) { frm.events.clear_entries(frm); },
 	branch(frm) { frm.events.clear_entries(frm); },
 	department(frm) { frm.events.clear_entries(frm); },
 	designation(frm) { frm.events.clear_entries(frm); },

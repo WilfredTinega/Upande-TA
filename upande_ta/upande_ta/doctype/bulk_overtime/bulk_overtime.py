@@ -18,7 +18,6 @@ class BulkOvertime(Document):
 				frappe.throw("To Date cannot be a future date. Today is <b>%s</b>." % frappe.utils.today())
 
 			existing = frappe.db.get_value("Bulk Overtime", filters={
-				"company": self.company,
 				"name": ("!=", self.name or ""),
 				"docstatus": ("!=", 2),
 				"from_date": ("<=", self.to_date),
@@ -71,7 +70,7 @@ class BulkOvertime(Document):
 	def fill_employee_details(self):
 		self.bulk_overtime_entries = []
 
-		filters = {"company": self.company, "status": "Active"}
+		filters = {"status": "Active"}
 		if self.department:
 			filters["department"] = self.department
 		if self.get("branch"):
@@ -233,7 +232,7 @@ class BulkOvertime(Document):
 		ad = frappe.get_doc({
 			"doctype": "Additional Salary",
 			"employee": employee,
-			"company": self.company,
+			"company": frappe.defaults.get_global_default("company"),
 			"salary_component": salary_component,
 			"amount": amount,
 			"payroll_date": self.to_date,
