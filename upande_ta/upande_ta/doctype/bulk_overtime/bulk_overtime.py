@@ -3,6 +3,7 @@
 
 import frappe
 from frappe.model.document import Document
+from frappe.utils import add_days, date_diff, getdate
 
 WORKING_HOURS_PER_MONTH = 199.33
 
@@ -13,9 +14,6 @@ class BulkOvertime(Document):
 		if self.from_date and self.to_date:
 			if frappe.utils.getdate(self.from_date) > frappe.utils.getdate(self.to_date):
 				frappe.throw("From Date cannot be after To Date.")
-
-			if frappe.utils.getdate(self.to_date) > frappe.utils.getdate(frappe.utils.today()):
-				frappe.throw("To Date cannot be a future date. Today is <b>%s</b>." % frappe.utils.today())
 
 			existing = frappe.db.get_value("Bulk Overtime", filters={
 				"name": ("!=", self.name or ""),
@@ -94,18 +92,26 @@ class BulkOvertime(Document):
 		emp_ids = [e.name for e in employees]
 		hours_map = self.get_overtime_hours(emp_ids)
 
+		# Rebuild the child table
+		self.set("bulk_overtime_entries", [])
+		from_date = getdate(self.from_date)
+		total_days = date_diff(self.to_date, self.from_date) + 1
+
 		for emp in employees:
-			ot = hours_map.get(emp.name, {"normal": 0, "holiday": 0})
-			if ot["normal"] > 0 or ot["holiday"] > 0:
-				self.append("bulk_overtime_entries", {
-					"employee": emp.name,
-					"employee_name": emp.employee_name,
-					"department": emp.department,
-					"normal_hours": ot["normal"],
-					"holiday_hours": ot["holiday"],
-					"row_status": "Pending",
-					"verification_type": "Biometric",
-				})
+			for day_offset in range(total_days):
+				overtime_date = add_days(from_date, day_offset)
+				self.append(
+					"bulk_overtime_entries",
+					{
+						"employee": emp.name,
+						"employee_name": emp.employee_name,
+						"department": emp.department,
+						"overtime_date": overtime_date,
+						"overtime_type": None,
+						"hours_requested": self.default_requested_hours or 0,
+						"row_status": "Pending",
+					},
+				)
 
 		self.number_of_employees = len(self.bulk_overtime_entries)
 
