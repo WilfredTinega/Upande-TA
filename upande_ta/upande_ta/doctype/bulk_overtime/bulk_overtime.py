@@ -4,6 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.utils import add_days, date_diff, getdate
 
 
 class BulkOvertime(Document):
@@ -44,18 +45,24 @@ class BulkOvertime(Document):
 
 		# Rebuild the child table
 		self.set("bulk_overtime_entries", [])
+		from_date = getdate(self.from_date)
+		total_days = date_diff(self.to_date, self.from_date) + 1
+
 		for emp in employees:
-			self.append(
-				"bulk_overtime_entries",
-				{
-					"employee": emp.employee,
-					"employee_name": emp.employee_name,
-					"department": emp.department,
-					"overtime_type": None,
-					"hours_worked": 0,
-					"row_status": "Pending",
-				},
-			)
+			for day_offset in range(total_days):
+				overtime_date = add_days(from_date, day_offset)
+				self.append(
+					"bulk_overtime_entries",
+					{
+						"employee": emp.employee,
+						"employee_name": emp.employee_name,
+						"department": emp.department,
+						"overtime_date": overtime_date,
+						"overtime_type": None,
+						"hours_requested": self.default_requested_hours or 0,
+						"row_status": "Pending",
+					},
+				)
 
 		self.number_of_employees = len(self.bulk_overtime_entries)
 

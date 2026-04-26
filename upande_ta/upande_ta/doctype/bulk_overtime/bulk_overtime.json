@@ -26,6 +26,7 @@
   "to_date",
   "section_request_details",
   "reason_for_overtime",
+  "default_requested_hours",
   "section_entries",
   "bulk_overtime_entries",
   "section_notes",
@@ -152,6 +153,14 @@
    "label": "Reason for Overtime",
    "mandatory_depends_on": "eval:doc.purpose === 'Request'",
    "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.purpose === 'Request'",
+   "fieldname": "default_requested_hours",
+   "fieldtype": "Float",
+   "label": "Default Requested Hours",
+   "precision": "1",
+   "description": "Set once to fill Hours Requested for fetched employees in request stage."
   },
   {
    "fieldname": "section_entries",
