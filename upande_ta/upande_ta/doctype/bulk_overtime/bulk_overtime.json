@@ -58,7 +58,6 @@
    "reqd": 1
   },
   {
-   "default": "David & Jacob",
    "fieldname": "company",
    "fieldtype": "Link",
    "in_standard_filter": 1,
