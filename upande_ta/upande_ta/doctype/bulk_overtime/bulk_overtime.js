@@ -3,11 +3,10 @@
 
 frappe.ui.form.on("Bulk Overtime", {
 	setup(frm) {
-		frm.set_query("department", () => ({}));
-		frm.set_query("branch", () => ({}));
-	},
-
-<<<<<<< HEAD
+		// Restrict Department dropdown to the selected company
+		frm.set_query("department", () => ({
+			filters: { company: frm.doc.company },
+		}));
 		// Restrict Branch dropdown to the selected company
 		frm.set_query("branch", () => ({
 			filters: { company: frm.doc.company },
@@ -24,24 +23,12 @@ frappe.ui.form.on("Bulk Overtime", {
 				status: "Active"
 			}
 		}));
-=======
-	onload(frm) {
-		if (frm.is_new()) {
-			if (!frm.doc.to_date) {
-				frm.set_value("to_date", frappe.datetime.get_today());
-			}
-			if (!frm.doc.from_date) {
-				frm.set_value("from_date", frappe.datetime.add_days(frappe.datetime.get_today(), -30));
-			}
-		}
->>>>>>> main
 	},
 
 	refresh(frm) {
 		if (frm.doc.docstatus === 0 && !frm.is_new()) {
 			frm.add_custom_button(__("Get Employees"), () => {
 				frm.events.get_employees(frm);
-<<<<<<< HEAD
 			}).toggleClass(
 				"btn-primary",
 				!(frm.doc.bulk_overtime_entries || []).length,
@@ -66,14 +53,6 @@ frappe.ui.form.on("Bulk Overtime", {
 		}
 	},
 
-	// ── Employee fetching with proper filters ─────────────────────────────────
-
-=======
-			}).toggleClass("btn-primary", !(frm.doc.bulk_overtime_entries || []).length);
-		}
-	},
-
->>>>>>> main
 	get_employees(frm) {
 		const mandatory = ["from_date", "to_date"];
 		const missing = mandatory.filter(f => !frm.doc[f]);
@@ -86,8 +65,6 @@ frappe.ui.form.on("Bulk Overtime", {
 			});
 			return;
 		}
-<<<<<<< HEAD
-		
 		// Validate that department or branch is selected for filtering
 		if (!frm.doc.department && !frm.doc.branch) {
 			frappe.confirm(
@@ -120,22 +97,6 @@ frappe.ui.form.on("Bulk Overtime", {
 				frm.refresh();
 				frm.scroll_to_field("bulk_overtime_entries");
 			});
-=======
-
-		return frappe.call({
-			doc: frm.doc,
-			method: "fill_employee_details",
-			freeze: true,
-			freeze_message: __("Fetching Employees…"),
-		}).then(r => {
-			if (r.docs?.[0]?.bulk_overtime_entries) {
-				frm.dirty();
-				frm.save();
-			}
-			frm.refresh();
-			frm.scroll_to_field("bulk_overtime_entries");
-		});
->>>>>>> main
 	},
 	
 	// ── Overtime Request Summary Field (Gap 1 fix) ───────────────────────────

@@ -15,9 +15,6 @@ class BulkOvertime(Document):
 			if frappe.utils.getdate(self.from_date) > frappe.utils.getdate(self.to_date):
 				frappe.throw("From Date cannot be after To Date.")
 
-			if frappe.utils.getdate(self.to_date) > frappe.utils.getdate(frappe.utils.today()):
-				frappe.throw("To Date cannot be a future date. Today is <b>%s</b>." % frappe.utils.today())
-
 			existing = frappe.db.get_value("Bulk Overtime", filters={
 				"name": ("!=", self.name or ""),
 				"docstatus": ("!=", 2),
@@ -95,7 +92,6 @@ class BulkOvertime(Document):
 		emp_ids = [e.name for e in employees]
 		hours_map = self.get_overtime_hours(emp_ids)
 
-<<<<<<< HEAD
 		# Rebuild the child table
 		self.set("bulk_overtime_entries", [])
 		from_date = getdate(self.from_date)
@@ -107,7 +103,7 @@ class BulkOvertime(Document):
 				self.append(
 					"bulk_overtime_entries",
 					{
-						"employee": emp.employee,
+						"employee": emp.name,
 						"employee_name": emp.employee_name,
 						"department": emp.department,
 						"overtime_date": overtime_date,
@@ -116,20 +112,6 @@ class BulkOvertime(Document):
 						"row_status": "Pending",
 					},
 				)
-=======
-		for emp in employees:
-			ot = hours_map.get(emp.name, {"normal": 0, "holiday": 0})
-			if ot["normal"] > 0 or ot["holiday"] > 0:
-				self.append("bulk_overtime_entries", {
-					"employee": emp.name,
-					"employee_name": emp.employee_name,
-					"department": emp.department,
-					"normal_hours": ot["normal"],
-					"holiday_hours": ot["holiday"],
-					"row_status": "Pending",
-					"verification_type": "Biometric",
-				})
->>>>>>> main
 
 		self.number_of_employees = len(self.bulk_overtime_entries)
 
