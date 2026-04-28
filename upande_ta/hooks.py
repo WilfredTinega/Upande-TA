@@ -133,34 +133,22 @@ after_migrate = "upande_ta.setup.after_migrate"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	"Employee Checkin": {
+		"validate": "upande_ta.upande_ta.overrides.employee_checkin.prevent_duplicate"
+	}
+}
 
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"upande_ta.tasks.all"
-# 	],
-# 	"daily": [
-# 		"upande_ta.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"upande_ta.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"upande_ta.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"upande_ta.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+	"cron": {
+		"30 1 * * *": [
+			"upande_ta.upande_ta.overrides.employee_checkin.auto_close_open_ins"
+		]
+	}
+}
 
 # Testing
 # -------
