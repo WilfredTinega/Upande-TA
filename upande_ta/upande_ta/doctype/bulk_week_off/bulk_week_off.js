@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Upande LTD and contributors
 // For license information, please see license.txt
 
-frappe.ui.form.on("Bulk Holiday Assignment", {
+frappe.ui.form.on("Bulk Week Off", {
     setup: function (frm) {
         frm.set_query("department", function () {
             if (frm.doc.company) {
@@ -85,7 +85,7 @@ frappe.ui.form.on("Bulk Holiday Assignment", {
     },
 
     fetch_employees: function (frm) {
-        if (!frm.doc.company || !frm.doc.holiday_list || frm.doc.docstatus !== 0) {
+        if (!frm.doc.company || frm.doc.docstatus !== 0) {
             return;
         }
 
