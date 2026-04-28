@@ -7,7 +7,7 @@ from frappe.model.document import Document
 from frappe.utils import getdate
 
 
-class BulkHolidayAssignment(Document):
+class BulkWeekOff(Document):
 
     def validate(self):
         if not self.employees:
@@ -81,8 +81,8 @@ class BulkHolidayAssignment(Document):
             except Exception:
                 failed.append(row.employee)
                 frappe.log_error(
-                    title="Bulk Holiday Assignment Error",
-                    message="Failed to assign holiday list %s to employee %s"
+                    title="Bulk Week Off Error",
+                    message="Failed to assign week off %s to employee %s"
                     % (self.holiday_list, row.employee),
                 )
 

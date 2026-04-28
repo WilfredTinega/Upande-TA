@@ -1,0 +1,76 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-04-28 14:51:17.834846",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "server_ip",
+  "server_port",
+  "end_point",
+  "column_break_mpcr",
+  "is_delete",
+  "is_update"
+ ],
+ "fields": [
+  {
+   "fieldname": "server_ip",
+   "fieldtype": "Data",
+   "label": "Server IP"
+  },
+  {
+   "fieldname": "server_port",
+   "fieldtype": "Data",
+   "label": "Server Port"
+  },
+  {
+   "fieldname": "end_point",
+   "fieldtype": "Data",
+   "label": "End Point"
+  },
+  {
+   "default": "0",
+   "description": "If enabled it will allow to delete users on that selected device even if the list is empty but the list of employee are the same",
+   "fieldname": "is_delete",
+   "fieldtype": "Check",
+   "label": "is Delete?"
+  },
+  {
+   "default": "0",
+   "description": "If enabled it will allow to update users on that selected device even if the list is empty but the list of employees are the same",
+   "fieldname": "is_update",
+   "fieldtype": "Check",
+   "label": "Is Update?"
+  },
+  {
+   "fieldname": "column_break_mpcr",
+   "fieldtype": "Column Break"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-04-28 18:06:40.245136",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Server Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

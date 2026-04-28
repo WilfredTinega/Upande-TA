@@ -1,0 +1,73 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:device_sn",
+ "creation": "2026-04-28 13:43:19.085298",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "device_sn",
+  "device_location",
+  "column_break_ijjz",
+  "section_break_ixnh",
+  "device_users"
+ ],
+ "fields": [
+  {
+   "fieldname": "device_sn",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Device Serial Number",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "device_users",
+   "fieldtype": "Table",
+   "label": "Device Users",
+   "options": "Device Users"
+  },
+  {
+   "fieldname": "device_location",
+   "fieldtype": "Data",
+   "label": "Device Location"
+  },
+  {
+   "fieldname": "column_break_ijjz",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_ixnh",
+   "fieldtype": "Section Break"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-28 14:56:39.543212",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Biometric Users",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "device_location"
+}

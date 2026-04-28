@@ -1,0 +1,141 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-04-28 13:38:15.093396",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "user_id",
+  "employee_name",
+  "privilege",
+  "status",
+  "command_status",
+  "column_break_iapu",
+  "enrollment_date",
+  "actions_section",
+  "add",
+  "column_break_nzmf",
+  "update",
+  "column_break_bkwi",
+  "delete",
+  "section_break_oddd",
+  "add_user",
+  "column_break_wela",
+  "update_user",
+  "column_break_qlva",
+  "delete_user"
+ ],
+ "fields": [
+  {
+   "fieldname": "user_id",
+   "fieldtype": "Data",
+   "label": "User ID"
+  },
+  {
+   "fieldname": "enrollment_date",
+   "fieldtype": "Datetime",
+   "label": "Date"
+  },
+  {
+   "fieldname": "column_break_iapu",
+   "fieldtype": "Column Break"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_oddd",
+   "fieldtype": "Section Break",
+   "label": "Payload Commands"
+  },
+  {
+   "fieldname": "delete_user",
+   "fieldtype": "Text",
+   "label": "Delete User"
+  },
+  {
+   "fieldname": "add_user",
+   "fieldtype": "Text",
+   "label": "Add User"
+  },
+  {
+   "fieldname": "update_user",
+   "fieldtype": "Text",
+   "label": "Update User"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "actions_section",
+   "fieldtype": "Section Break",
+   "label": "User Actions"
+  },
+  {
+   "fieldname": "column_break_nzmf",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_bkwi",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "add",
+   "fieldtype": "Button",
+   "label": "Add"
+  },
+  {
+   "fieldname": "update",
+   "fieldtype": "Button",
+   "label": "Update"
+  },
+  {
+   "fieldname": "delete",
+   "fieldtype": "Button",
+   "label": "Delete"
+  },
+  {
+   "fieldname": "column_break_wela",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_qlva",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "label": "Employee Name"
+  },
+  {
+   "fieldname": "privilege",
+   "fieldtype": "Select",
+   "label": "Privilege",
+   "options": "0\n14"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "\nActive\nPending Delete\nDeleted"
+  },
+  {
+   "fieldname": "command_status",
+   "fieldtype": "Select",
+   "label": "Command Status",
+   "options": "\nPending\nSent\nSuccess\nFailed"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-04-28 14:17:10.608702",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Device Users",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
