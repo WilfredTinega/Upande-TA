@@ -85,9 +85,9 @@ app_license = "mit"
 # Installation
 # ------------
 
-# before_install = "upande_ta.install.before_install"
-after_install = "upande_ta.setup.after_install"
-after_migrate = "upande_ta.setup.after_migrate"
+# # before_install = "upande_ta.install.before_install"
+# after_install = "upande_ta.setup.after_install"
+# after_migrate = "upande_ta.setup.after_migrate"
 
 # Uninstallation
 # ------------

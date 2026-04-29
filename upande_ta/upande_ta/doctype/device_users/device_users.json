@@ -6,6 +6,7 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "employee",
   "user_id",
   "employee_name",
   "privilege",
@@ -28,8 +29,18 @@
  ],
  "fields": [
   {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee"
+  },
+  {
+   "fetch_from": "employee.attendance_device_id",
+   "fetch_if_empty": 1,
    "fieldname": "user_id",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "User ID"
   },
   {
@@ -100,8 +111,11 @@
    "fieldtype": "Column Break"
   },
   {
+   "fetch_from": "employee.employee_name",
+   "fetch_if_empty": 1,
    "fieldname": "employee_name",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Employee Name"
   },
   {

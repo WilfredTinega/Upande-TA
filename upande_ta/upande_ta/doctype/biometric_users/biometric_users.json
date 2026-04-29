@@ -15,9 +15,10 @@
  "fields": [
   {
    "fieldname": "device_sn",
-   "fieldtype": "Data",
+   "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Device Serial Number",
+   "options": "Biometric Device",
    "reqd": 1,
    "unique": 1
   },
@@ -28,9 +29,12 @@
    "options": "Device Users"
   },
   {
+   "fetch_from": "device_sn.device_name",
+   "fetch_if_empty": 1,
    "fieldname": "device_location",
    "fieldtype": "Data",
-   "label": "Device Location"
+   "label": "Device Location",
+   "read_only": 1
   },
   {
    "fieldname": "column_break_ijjz",
@@ -44,7 +48,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-04-28 14:56:39.543212",
+ "modified": "2026-04-29 14:25:27.384791",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Users",
