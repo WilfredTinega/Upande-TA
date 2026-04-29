@@ -1,0 +1,176 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:BIO-{employee}-{bio_type}-{bio_no}",
+ "creation": "2026-04-29 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "column_break_emp",
+  "bio_type",
+  "bio_no",
+  "bio_index",
+  "section_break_meta",
+  "valid",
+  "major_ver",
+  "minor_ver",
+  "size",
+  "column_break_meta",
+  "source_device",
+  "captured_at",
+  "section_break_template",
+  "template"
+ ],
+ "fields": [
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_emp",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "bio_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Type",
+   "options": "\nFingerprint\nFace\nPalm\nCard",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "bio_no",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Slot No"
+  },
+  {
+   "default": "0",
+   "fieldname": "bio_index",
+   "fieldtype": "Int",
+   "label": "Index"
+  },
+  {
+   "fieldname": "section_break_meta",
+   "fieldtype": "Section Break",
+   "label": "Metadata"
+  },
+  {
+   "default": "1",
+   "fieldname": "valid",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Valid"
+  },
+  {
+   "default": "0",
+   "fieldname": "major_ver",
+   "fieldtype": "Int",
+   "label": "Major Ver"
+  },
+  {
+   "default": "0",
+   "fieldname": "minor_ver",
+   "fieldtype": "Int",
+   "label": "Minor Ver"
+  },
+  {
+   "fieldname": "size",
+   "fieldtype": "Int",
+   "label": "Size"
+  },
+  {
+   "fieldname": "column_break_meta",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "source_device",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Source Device"
+  },
+  {
+   "fieldname": "captured_at",
+   "fieldtype": "Datetime",
+   "label": "Captured At"
+  },
+  {
+   "fieldname": "section_break_template",
+   "fieldtype": "Section Break",
+   "label": "Template"
+  },
+  {
+   "fieldname": "template",
+   "fieldtype": "Long Text",
+   "label": "Template (TMP)"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-29 15:57:10.338605",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "BioData Template",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR User",
+   "share": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "employee_name",
+ "track_changes": 1
+}
