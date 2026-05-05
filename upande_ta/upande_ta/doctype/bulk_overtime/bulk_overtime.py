@@ -15,14 +15,17 @@ class BulkOvertime(Document):
 			if frappe.utils.getdate(self.from_date) > frappe.utils.getdate(self.to_date):
 				frappe.throw("From Date cannot be after To Date.")
 
-			existing = frappe.db.get_value("Bulk Overtime", filters={
+			existing_docs = frappe.db.get_all("Bulk Overtime", filters={
 				"name": ("!=", self.name or ""),
 				"docstatus": ("!=", 2),
 				"from_date": ("<=", self.to_date),
 				"to_date": (">=", self.from_date),
-			}, fieldname=["name", "bulk_overtime_title", "from_date", "to_date"], as_dict=True)
+			}, fields=["name", "bulk_overtime_title", "from_date", "to_date", "department"])
 
-			if existing:
+			for existing in existing_docs:
+				if self.department and existing.department and self.department != existing.department:
+					continue
+
 				new_from = frappe.utils.getdate(self.from_date)
 				ex_from = frappe.utils.getdate(existing.from_date)
 
@@ -34,7 +37,6 @@ class BulkOvertime(Document):
 							existing.name,
 							existing.bulk_overtime_title or existing.name,
 							existing.from_date,
-							existing.to_date,
 							before_date,
 						)
 					)
@@ -71,12 +73,8 @@ class BulkOvertime(Document):
 		filters = {"status": "Active"}
 		if self.department:
 			filters["department"] = self.department
-		if self.get("branch"):
-			filters["branch"] = self.branch
 		if self.get("designation"):
 			filters["designation"] = self.designation
-		if self.get("grade"):
-			filters["grade"] = self.grade
 
 		employees = frappe.get_all(
 			"Employee",
@@ -98,22 +96,20 @@ class BulkOvertime(Document):
 		total_days = date_diff(self.to_date, self.from_date) + 1
 
 		for emp in employees:
-			for day_offset in range(total_days):
-				overtime_date = add_days(from_date, day_offset)
-				self.append(
-					"bulk_overtime_entries",
-					{
-						"employee": emp.name,
-						"employee_name": emp.employee_name,
-						"department": emp.department,
-						"overtime_date": overtime_date,
-						"overtime_type": None,
-						"hours_requested": self.default_requested_hours or 0,
-						"row_status": "Pending",
-					},
-				)
+			self.append(
+				"bulk_overtime_entries",
+				{
+					"employee": emp.name,
+					"employee_name": emp.employee_name,
+					"department": emp.department,
+					"overtime_date": self.from_date,
+					"overtime_type": None,
+					"hours_requested": self.default_requested_hours or 0,
+					"row_status": "Pending",
+				},
+			)
 
-		self.number_of_employees = len(self.bulk_overtime_entries)
+		self.number_of_employees = len(employees)
 
 	def get_overtime_hours(self, employee_list):
 		if not employee_list:
