@@ -10,7 +10,6 @@
   "naming_series",
   "company",
   "column_break_ufzn",
-  "purpose",
   "shift_approver",
   "section_period",
   "from_date",
@@ -41,13 +40,7 @@
    "reqd": 1,
    "set_only_once": 1
   },
-  {
-   "fieldname": "purpose",
-   "fieldtype": "Select",
-   "in_standard_filter": 1,
-   "label": "Purpose",
-   "options": "\nRequest\nApproval\nVerification"
-  },
+
   {
    "fieldname": "company",
    "fieldtype": "Link",
@@ -120,15 +113,12 @@
    "label": "Request Details"
   },
   {
-   "depends_on": "eval:doc.purpose === 'Request'",
    "fieldname": "reason_for_overtime",
    "fieldtype": "Small Text",
    "label": "Reason for Overtime",
-   "mandatory_depends_on": "eval:doc.purpose === 'Request'",
    "reqd": 1
   },
   {
-   "depends_on": "eval:doc.purpose === 'Request'",
    "description": "Set once to fill Hours Requested for fetched employees in request stage.",
    "fieldname": "default_requested_hours",
    "fieldtype": "Float",

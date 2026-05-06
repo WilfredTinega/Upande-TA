@@ -3,7 +3,7 @@
 
 import frappe
 from frappe.model.document import Document
-from frappe.utils import add_days, date_diff, getdate
+from frappe.utils import add_days, date_diff, flt, getdate
 
 WORKING_HOURS_PER_MONTH = 199.33
 
@@ -60,6 +60,10 @@ class BulkOvertime(Document):
 					  "July", "August", "September", "October", "November", "December"]
 			self.bulk_overtime_title = "%s %s" % (months[dt.month - 1], dt.year)
 
+		for row in self.bulk_overtime_entries:
+			if row.overtime_date and not row.overtime_type:
+				row.overtime_type = self.get_overtime_type(row.employee, row.overtime_date)
+
 	def on_submit(self):
 		self.create_additional_salaries()
 
@@ -103,7 +107,7 @@ class BulkOvertime(Document):
 					"employee_name": emp.employee_name,
 					"department": emp.department,
 					"overtime_date": self.from_date,
-					"overtime_type": None,
+					"overtime_type": self.get_overtime_type(emp.name, self.from_date),
 					"hours_requested": self.default_requested_hours or 0,
 					"row_status": "Pending",
 				},
@@ -175,6 +179,25 @@ class BulkOvertime(Document):
 			for emp, vals in result.items()
 		}
 
+	
+	@frappe.whitelist()
+	def get_overtime_type(self, employee, overtime_date):
+		if not employee or not overtime_date:
+			return None
+
+		ot_date = getdate(overtime_date)
+		if ot_date.weekday() >= 5:
+			return "Holiday Overtime"
+
+		holiday_list = frappe.db.get_value("Employee", employee, "holiday_list")
+		if holiday_list and frappe.db.exists(
+			"Holiday",
+			{"parent": holiday_list, "holiday_date": ot_date},
+		):
+			return "Holiday Overtime"
+
+		return "Normal Overtime"
+
 	def create_additional_salaries(self):
 		created = 0
 		errors = []
@@ -183,8 +206,13 @@ class BulkOvertime(Document):
 			if row.row_status == "Rejected":
 				continue
 
-			if row.normal_hours <= 0 and row.holiday_hours <= 0:
+			# Use actual hours where available, otherwise fall back to requested hours.
+			hours = flt(row.hours_done or row.hours_requested or 0)
+			if hours <= 0:
 				continue
+
+			if not row.overtime_type:
+				row.overtime_type = "Normal Overtime"
 
 			ssa = frappe.db.get_value(
 				"Salary Structure Assignment",
@@ -202,19 +230,17 @@ class BulkOvertime(Document):
 
 			hourly_rate = ssa.base / WORKING_HOURS_PER_MONTH
 
-			if row.normal_hours > 0:
-				normal_amount = round(hourly_rate * 1.5 * float(row.normal_hours), 2)
+			if "Holiday" in row.overtime_type:
+				amount = round(hourly_rate * 2.0 * hours, 2)
 				self.make_additional_salary(
-					row.employee, "Overtime 1.5", normal_amount, row.name
+					row.employee, "Overtime 2.0", amount, row.name
 				)
-				created = created + 1
-
-			if row.holiday_hours > 0:
-				holiday_amount = round(hourly_rate * 2.0 * float(row.holiday_hours), 2)
+			else:
+				amount = round(hourly_rate * 1.5 * hours, 2)
 				self.make_additional_salary(
-					row.employee, "Overtime 2.0", holiday_amount, row.name
+					row.employee, "Overtime 1.5", amount, row.name
 				)
-				created = created + 1
+			created += 1
 
 		if errors:
 			frappe.msgprint(
