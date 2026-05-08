@@ -10,8 +10,51 @@ class BiometricUser(Document):
     pass
 
 
+def _get_user_row(device_sn, user_id):
+    rows = frappe.get_all(
+        "Biometric User",
+        filters={"device_sn": device_sn, "user_id": user_id},
+        fields=["name"],
+        limit=1,
+    )
+    if not rows:
+        return None
+    return frappe.get_doc("Biometric User", rows[0].name)
+
+
+def _delete_user_row(device_sn, user_id):
+    existing = _get_user_row(device_sn, user_id)
+    if not existing:
+        return False
+    frappe.delete_doc(
+        "Biometric User", existing.name,
+        ignore_permissions=True, force=True,
+    )
+    return True
+
+
+def _upsert_user_row(device_sn, user_id, values):
+    existing = _get_user_row(device_sn, user_id)
+    if existing:
+        for k, v in values.items():
+            existing.set(k, v)
+        existing.save(ignore_permissions=True)
+        return existing
+    row = frappe.get_doc({
+        "doctype":   "Biometric User",
+        "device_sn": device_sn,
+        "user_id":   user_id,
+        **values,
+    })
+    row.insert(ignore_permissions=True)
+    return row
+
+
 @frappe.whitelist()
 def send_device_command(name, command_type, override=None):
+    if not frappe.db.get_single_value("Biometric Setting", "enable_users"):
+        frappe.throw("Enable Users")
+
     doc = frappe.get_doc("Biometric User", name)
 
     if isinstance(override, str):
@@ -30,30 +73,28 @@ def send_device_command(name, command_type, override=None):
 
     tpl = None
 
-    if command_type in ("Add User", "Update User"):
+    if command_type == "Add User":
         if not user_id or not employee_name:
             frappe.throw("User ID and Employee Name are required")
 
         tpl = _get_template_row(doc.employee)
         command = _build_userinfo_command(cmd_id, user_id, employee_name, privilege, tpl)
 
-        if command_type == "Add User":
-            doc.add_user = command
-        else:
-            doc.update_user = command
-
-        doc.command_status = "Pending"
-        doc.status         = "Active"
-        doc.employee_name  = employee_name
-        doc.privilege      = privilege
-        doc.save(ignore_permissions=True)
+        _upsert_user_row(device_sn, user_id, {
+            "employee":       doc.employee,
+            "employee_name":  employee_name,
+            "privilege":      privilege,
+            "status":         "Active",
+            "command_status": "Pending",
+            "add_user":       command,
+        })
 
     elif command_type == "Delete User":
         if not user_id:
             frappe.throw("User ID is required")
 
         command = f"C:{cmd_id}:DATA DELETE USERINFO\tPIN={user_id}"
-        frappe.delete_doc("Biometric User", name, ignore_permissions=True)
+        _delete_user_row(device_sn, user_id)
 
     else:
         frappe.throw(f"Unknown command type: {command_type}")
@@ -191,6 +232,9 @@ def get_server_settings():
 
 @frappe.whitelist()
 def bulk_command(device_sn, users, command_type):
+    if not frappe.db.get_single_value("Biometric Setting", "enable_users"):
+        frappe.throw("Enable Users")
+
     if isinstance(users, str):
         users = json.loads(users)
 
@@ -212,11 +256,10 @@ def bulk_command(device_sn, users, command_type):
                 continue
 
             cmd_id = frappe.generate_hash(length=10)
-            record_name = f"{device_sn}-{user_id}"
 
             tpl = None
 
-            if command_type in ("Add User", "Update User"):
+            if command_type == "Add User":
                 if not employee_name:
                     failed.append({"user_id": user_id, "reason": "Missing name"})
                     continue
@@ -230,38 +273,19 @@ def bulk_command(device_sn, users, command_type):
                 tpl = _get_template_row(employee)
                 command = _build_userinfo_command(cmd_id, user_id, employee_name, privilege, tpl)
 
-                if frappe.db.exists("Biometric User", record_name):
-                    rec = frappe.get_doc("Biometric User", record_name)
-                    rec.employee_name  = employee_name
-                    rec.privilege      = privilege
-                    rec.command_status = "Pending"
-                    rec.status         = "Active"
-                    if employee and not rec.employee:
-                        rec.employee = employee
-                    if command_type == "Add User":
-                        rec.add_user = command
-                    else:
-                        rec.update_user = command
-                    rec.save(ignore_permissions=True)
-                else:
-                    rec = frappe.get_doc({
-                        "doctype":         "Biometric User",
-                        "device_sn":       device_sn,
-                        "user_id":         user_id,
-                        "employee":        employee,
-                        "employee_name":   employee_name,
-                        "privilege":       privilege,
-                        "status":          "Active",
-                        "command_status":  "Pending",
-                        "enrollment_date": now,
-                        "add_user":        command if command_type == "Add User" else ""
-                    })
-                    rec.insert(ignore_permissions=True)
+                _upsert_user_row(device_sn, user_id, {
+                    "employee":        employee,
+                    "employee_name":   employee_name,
+                    "privilege":       privilege,
+                    "status":          "Active",
+                    "command_status":  "Pending",
+                    "enrollment_date": now,
+                    "add_user":        command,
+                })
 
             elif command_type == "Delete User":
                 command = f"C:{cmd_id}:DATA DELETE USERINFO\tPIN={user_id}"
-                if frappe.db.exists("Biometric User", record_name):
-                    frappe.delete_doc("Biometric User", record_name, ignore_permissions=True)
+                _delete_user_row(device_sn, user_id)
 
             else:
                 frappe.throw(f"Unknown command type: {command_type}")
@@ -333,7 +357,7 @@ def _build_userinfo_command(cmd_id, user_id, employee_name, fallback_privilege, 
 
     privilege      = field("privilege")     or str(fallback_privilege or "0")
     password       = field("password")
-    card           = field("card")          or "0"
+    card           = field("card")
     vice_card      = field("vice_card")
     user_group     = field("user_group")    or "1"
     timezone_group = field("timezone_group")
@@ -373,9 +397,6 @@ def _queue_biodata_for_user(device_sn, user_id, employee=None, tpl=None):
     if tpl is None:
         tpl = _get_template_row(employee)
     if not tpl:
-        return 0
-
-    if tpl.get("source_device") == device_sn:
         return 0
 
     sent = 0

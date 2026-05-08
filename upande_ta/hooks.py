@@ -87,7 +87,12 @@ app_license = "mit"
 
 # # before_install = "upande_ta.install.before_install"
 # after_install = "upande_ta.setup.after_install"
-# after_migrate = "upande_ta.setup.after_migrate"
+
+# Restore Biometric Setting-driven scheduled jobs after every migrate (Frappe's
+# scheduler sync deletes Scheduled Job Type rows whose method isn't declared in
+# any app's scheduler_events — our jobs are user-configured per Biometric Setting,
+# so we re-upsert them here).
+after_migrate = ["upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.resync_scheduled_jobs"]
 
 # Uninstallation
 # ------------

@@ -21,6 +21,10 @@ frappe.ui.form.on("Biometric Setting", {
 	},
 
 	get_checkin: function(frm) {
+		if (!frm.doc.enable_checkin) {
+			frappe.msgprint(__("Enable Checkin"));
+			return;
+		}
 		if (!frm.doc.start_date || !frm.doc.end_date) {
 			frappe.msgprint("Set both Start Date and End Date.");
 			return;
@@ -65,6 +69,10 @@ frappe.ui.form.on("Biometric Setting", {
 	},
 
 	get_bio: function(frm) {
+		if (!frm.doc.enable_bio_templates) {
+			frappe.msgprint(__("Enable Bio Templates"));
+			return;
+		}
 		const sn = frm.doc.biodata_device_picker;
 		if (!sn) {
 			frappe.msgprint("Pick a device above first.");
@@ -164,18 +172,17 @@ frappe.ui.form.on("Biometric Setting", {
 
 function run_with_progress(title, message, call_args) {
 	let pct = 5;
-	frappe.show_progress(title, pct, 100, message);
+	frappe.show_progress(title, pct, 100, message, true);
 	const tick = setInterval(() => {
 		if (pct < 90) {
 			pct += 5;
-			frappe.show_progress(title, pct, 100, message);
+			frappe.show_progress(title, pct, 100, message, true);
 		}
 	}, 400);
 
 	const stop = () => {
 		clearInterval(tick);
-		frappe.show_progress(title, 100, 100, __("Done"));
-		setTimeout(() => frappe.hide_progress(), 300);
+		frappe.show_progress(title, 100, 100, __("Done"), true);
 	};
 	const fail = () => {
 		clearInterval(tick);
@@ -246,6 +253,10 @@ function render_users_tab(frm) {
 	`);
 
 	const open_bulk = (cmd) => {
+		if (!frm.doc.enable_users) {
+			frappe.msgprint(__("Enable Users"));
+			return;
+		}
 		open_bulk_user_dialog(cmd, sn, loc, () => render_users_tab(frm));
 	};
 
@@ -304,6 +315,10 @@ function render_user_list(wrapper, device_sn, users, frm) {
 	`);
 
 	container.find(".user-row-delete").on("click", function() {
+		if (!frm.doc.enable_users) {
+			frappe.msgprint(__("Enable Users"));
+			return;
+		}
 		const row_name = $(this).data("row");
 		const u = users.find(x => x.row_name === row_name);
 		frappe.confirm(`Delete ${u.employee_name} (PIN ${u.user_id}) from device?`, () => {
