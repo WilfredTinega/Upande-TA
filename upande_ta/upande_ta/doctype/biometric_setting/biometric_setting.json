@@ -1,0 +1,213 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-05-08 14:56:33.591294",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "poll_attendance_tab",
+  "start_date",
+  "column_break_papq",
+  "end_date",
+  "column_break_poll_att",
+  "get_checkin",
+  "poll_devices_section",
+  "poll_devices",
+  "users_tab",
+  "users_device_picker",
+  "column_break_zgkt",
+  "device_location",
+  "section_break_iurc",
+  "users_html",
+  "biodata_tab",
+  "biodata_device_picker",
+  "column_break_biodata",
+  "biodata_device_location",
+  "column_break_gozy",
+  "get_bio",
+  "section_break_biodata",
+  "bio_templates",
+  "server_settings_tab",
+  "server_ip",
+  "server_port",
+  "end_point",
+  "column_break_server",
+  "section_break_asec",
+  "devices"
+ ],
+ "fields": [
+  {
+   "fieldname": "server_settings_tab",
+   "fieldtype": "Tab Break",
+   "label": "Server Settings"
+  },
+  {
+   "fieldname": "server_ip",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Server IP",
+   "reqd": 1
+  },
+  {
+   "fieldname": "server_port",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Server Port",
+   "reqd": 1
+  },
+  {
+   "fieldname": "end_point",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "End Point",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_server",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "devices",
+   "fieldtype": "Table",
+   "label": "Devices",
+   "options": "Biometric Device"
+  },
+  {
+   "fieldname": "users_tab",
+   "fieldtype": "Tab Break",
+   "label": "Users"
+  },
+  {
+   "fieldname": "users_device_picker",
+   "fieldtype": "Select",
+   "label": "Device"
+  },
+  {
+   "fieldname": "device_location",
+   "fieldtype": "Data",
+   "label": "Device Location",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_iurc",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "users_html",
+   "fieldtype": "HTML",
+   "label": "Users"
+  },
+  {
+   "fieldname": "biodata_tab",
+   "fieldtype": "Tab Break",
+   "label": "Bio Templates"
+  },
+  {
+   "fieldname": "biodata_device_picker",
+   "fieldtype": "Select",
+   "label": "Device"
+  },
+  {
+   "fieldname": "column_break_biodata",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "biodata_device_location",
+   "fieldtype": "Data",
+   "label": "Device Location",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_biodata",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "bio_templates",
+   "fieldtype": "Table",
+   "label": "Bio Templates",
+   "options": "Biometric Template"
+  },
+  {
+   "fieldname": "poll_attendance_tab",
+   "fieldtype": "Tab Break",
+   "label": "Checkin"
+  },
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Date",
+   "label": "Start Date"
+  },
+  {
+   "fieldname": "end_date",
+   "fieldtype": "Date",
+   "label": "End Date"
+  },
+  {
+   "fieldname": "column_break_poll_att",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "poll_devices_section",
+   "fieldtype": "Section Break",
+   "label": "Devices"
+  },
+  {
+   "fieldname": "get_bio",
+   "fieldtype": "Button",
+   "label": "Get BioData"
+  },
+  {
+   "fieldname": "get_checkin",
+   "fieldtype": "Button",
+   "label": "Get Checkin"
+  },
+  {
+   "fieldname": "column_break_gozy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_papq",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_asec",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "poll_devices",
+   "fieldtype": "Table",
+   "label": "Devices to Poll",
+   "options": "Biometric Checkin"
+  },
+  {
+   "fieldname": "column_break_zgkt",
+   "fieldtype": "Column Break"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-05-08 19:14:48.441053",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Biometric Setting",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

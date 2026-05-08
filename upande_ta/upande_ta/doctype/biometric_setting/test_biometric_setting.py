@@ -13,9 +13,9 @@ IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 
 
 
-class IntegrationTestServerSettings(IntegrationTestCase):
+class IntegrationTestBiometricSetting(IntegrationTestCase):
 	"""
-	Integration tests for ServerSettings.
+	Integration tests for BiometricSetting.
 	Use this class for testing interactions between multiple components.
 	"""
 
