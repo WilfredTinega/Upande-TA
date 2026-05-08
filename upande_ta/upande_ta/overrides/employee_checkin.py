@@ -46,7 +46,8 @@ def auto_close_open_ins(target_date=None):
 		WHERE time BETWEEN %(start)s AND %(end)s
 		  AND employee IS NOT NULL
 		GROUP BY employee
-		HAVING in_count >= 2 AND out_count = 0
+		HAVING (in_count >= 2 AND out_count = 0)
+		    OR (in_count > 2)
 		""",
 		{"start": day_start, "end": day_end},
 		as_dict=True
@@ -54,29 +55,36 @@ def auto_close_open_ins(target_date=None):
 
 	flipped = 0
 	for r in rows:
-		last_in = frappe.db.get_value(
+		last_log = frappe.db.get_value(
 			"Employee Checkin",
 			{
 				"employee":   r.employee,
-				"log_type":   "IN",
 				"time":       ["between", [day_start, day_end]],
 				"attendance": ["in", ["", None]],
 			},
-			["name", "time"],
+			["name", "log_type", "time"],
 			order_by="time desc"
 		)
-		if not last_in:
+		if not last_log:
 			continue
 
-		name = last_in[0]
+		name, last_log_type, _last_time = last_log
+		if last_log_type != "IN":
+			continue
+
 		try:
 			doc = frappe.get_doc("Employee Checkin", name)
 			doc.flags.ignore_validate = True
 			doc.log_type = "OUT"
+			if r.out_count == 0:
+				reason = _("last log of {0} with no OUT recorded").format(frappe.utils.format_date(target_date))
+			else:
+				reason = _("last log of {0} is IN with {1} INs and {2} OUTs recorded").format(
+					frappe.utils.format_date(target_date), int(r.in_count), int(r.out_count)
+				)
 			doc.add_comment(
 				"Comment",
-				_("Auto-corrected by scheduler: flipped IN → OUT (last log of {0} with no OUT recorded).")
-				.format(frappe.utils.format_date(target_date))
+				_("Auto-corrected by scheduler: flipped IN → OUT ({0}).").format(reason)
 			)
 			doc.save(ignore_permissions=True)
 			flipped += 1
