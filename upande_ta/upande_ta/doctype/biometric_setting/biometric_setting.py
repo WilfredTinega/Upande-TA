@@ -1,36 +1,183 @@
 # Copyright (c) 2026, Upande LTD and contributors
 # For license information, please see license.txt
 
+from datetime import timedelta
+
 import frappe
 from frappe.model.document import Document
+from frappe.utils import now_datetime
 from upande_ta.upande_ta.doctype.biometric_user.biometric_user import _post_to_nodered
 
 
-_FREQUENCY_SCRIPTS = {
-	"checkin_event_frequency":  "Biometric: Poll Attendance",
-	"users_event_frequency":    "Biometric: Sync Users",
-	"biodata_event_frequency":  "Biometric: Sync BioData",
+SCHEDULER_TASKS = [
+	("checkin", "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_checkin",      "Biometric: Poll Attendance"),
+	("users",   "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_users_sync",   "Biometric: Sync Users"),
+	("biodata", "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_biodata_sync", "Biometric: Sync BioData"),
+]
+
+_TASK_BY_PREFIX = {prefix: (method, label) for prefix, method, label in SCHEDULER_TASKS}
+
+_PREFIX_ENABLE = {
+	"checkin": "enable_checkin",
+	"users":   "enable_users",
+	"biodata": "enable_bio_templates",
+}
+
+_FREQUENCY_WINDOWS = {
+	"All":          timedelta(hours=1),
+	"Hourly":       timedelta(hours=1),
+	"Hourly Long":  timedelta(hours=1),
+	"Daily":        timedelta(days=1),
+	"Daily Long":   timedelta(days=1),
+	"Weekly":       timedelta(days=7),
+	"Weekly Long":  timedelta(days=7),
+	"Monthly":      timedelta(days=30),
+	"Monthly Long": timedelta(days=30),
+	"Yearly":       timedelta(days=365),
+	"Cron":         timedelta(hours=1),
 }
 
 
 class BiometricSetting(Document):
 	def on_update(self):
-		for fieldname, script_name in _FREQUENCY_SCRIPTS.items():
-			frequency = self.get(fieldname)
-			if not frequency:
+		self._sync_scheduled_jobs()
+
+	def _sync_scheduled_jobs(self, force=False):
+		"""Mirror the user's frequency/cron/enabled choices into Scheduled Job Type rows.
+
+		One Scheduled Job Type per task, keyed by `method`. Same pattern Frappe's
+		Server Script uses (see core/doctype/server_script/server_script.py).
+
+		Per-task short-circuit: if none of (frequency, cron, enabled) changed for a
+		task on this save, skip it entirely.
+
+		Pass force=True to upsert all tasks regardless (used by after_migrate, since
+		Frappe's sync_jobs deletes Scheduled Job Type rows whose method isn't
+		declared in any app's scheduler_events).
+		"""
+		for prefix, method, _label in SCHEDULER_TASKS:
+			fields = (
+				f"{prefix}_event_frequency",
+				f"{prefix}_cron_format",
+				_PREFIX_ENABLE[prefix],
+			)
+			if not force and not any(self.has_value_changed(f) for f in fields):
 				continue
-			if not frappe.db.exists("Server Script", script_name):
-				continue
-			current = frappe.db.get_value("Server Script", script_name, "event_frequency")
-			if current != frequency:
-				frappe.db.set_value(
-					"Server Script", script_name, "event_frequency", frequency
-				)
+			self._upsert_scheduled_job(prefix, method)
+
+	def _upsert_scheduled_job(self, prefix, method):
+		frequency = (self.get(f"{prefix}_event_frequency") or "").strip()
+		cron_format = (self.get(f"{prefix}_cron_format") or "").strip()
+		enabled = bool(self.get(_PREFIX_ENABLE[prefix]))
+
+		stopped = 1 if (not enabled or not frequency) else 0
+		if frequency == "Cron" and not cron_format:
+			stopped = 1
+
+		# Frappe parses cron_format unconditionally even for stopped rows, and a
+		# Cron-frequency row with empty cron_format crashes sync_jobs. Downgrade
+		# to Daily placeholder when there's no usable cron string.
+		effective_frequency = "Daily" if (frequency == "Cron" and not cron_format) else frequency
+
+		job_name = frappe.db.get_value("Scheduled Job Type", {"method": method})
+
+		if not job_name:
+			if stopped:
+				return
+			job = frappe.new_doc("Scheduled Job Type")
+			job.method = method
+			job.create_log = effective_frequency not in ("All", "Cron")
+			job.frequency = effective_frequency
+			job.cron_format = cron_format if effective_frequency == "Cron" else ""
+			job.stopped = 0
+			job.insert(ignore_permissions=True)
+			return
+
+		new_frequency = effective_frequency or "Daily"  # placeholder for stopped rows (required field)
+		new_cron = cron_format if effective_frequency == "Cron" else ""
+
+		current = frappe.db.get_value(
+			"Scheduled Job Type",
+			job_name,
+			["frequency", "cron_format", "stopped"],
+			as_dict=True,
+		)
+		updates = {}
+		if current.frequency != new_frequency:
+			updates["frequency"] = new_frequency
+		if (current.cron_format or "") != new_cron:
+			updates["cron_format"] = new_cron
+		if int(current.stopped or 0) != stopped:
+			updates["stopped"] = stopped
+
+		if updates:
+			frappe.db.set_value("Scheduled Job Type", job_name, updates)
+
+
+@frappe.whitelist()
+def resync_scheduled_jobs():
+	"""Re-upsert all Biometric Setting-driven scheduled jobs from current settings.
+
+	Wired into hooks.after_migrate because Frappe's sync_jobs deletes any
+	Scheduled Job Type whose method isn't declared in scheduler_events.
+	"""
+	doc = frappe.get_single("Biometric Setting")
+	doc._sync_scheduled_jobs(force=True)
+	frappe.db.commit()
+	return {
+		"jobs": frappe.get_all(
+			"Scheduled Job Type",
+			filters={"method": ["like", "%biometric_setting%"]},
+			fields=["method", "frequency", "cron_format", "stopped"],
+			order_by="method",
+		)
+	}
+
+
+def _window_for(prefix):
+	"""Compute (start_dt, end_dt) for a scheduled run of `prefix` based on its
+	configured frequency. End is now; start is now - frequency_delta.
+	"""
+	doc = frappe.get_single("Biometric Setting")
+	freq = (doc.get(f"{prefix}_event_frequency") or "").strip()
+	delta = _FREQUENCY_WINDOWS.get(freq, timedelta(hours=1))
+	end = now_datetime()
+	start = end - delta
+	return start, end
+
+
+def _poll_attendance(start_dt, end_dt, devices):
+	"""Send one ATTLOG poll per device for [start_dt, end_dt]."""
+	queued = []
+	failed = []
+	for device_sn in devices:
+		try:
+			cmd_id = frappe.generate_hash(length=10)
+			command = (
+				f"C:{cmd_id}:DATA QUERY ATTLOG"
+				f"\tStartTime={start_dt:%Y-%m-%d %H:%M:%S}"
+				f"\tEndTime={end_dt:%Y-%m-%d %H:%M:%S}"
+			)
+			_post_to_nodered({
+				"command_id":   cmd_id,
+				"command_type": "Poll Attendance",
+				"device_sn":    device_sn,
+				"start_date":   start_dt.strftime("%Y-%m-%d"),
+				"end_date":     end_dt.strftime("%Y-%m-%d"),
+				"command":      command,
+			})
+			queued.append({"device": device_sn, "command_id": cmd_id})
+		except Exception as e:
+			failed.append({"device": device_sn, "reason": str(e)})
+	return queued, failed
 
 
 @frappe.whitelist()
 def poll_devices():
 	doc = frappe.get_single("Biometric Setting")
+
+	if not doc.enable_checkin:
+		frappe.throw("Enable Checkin")
 
 	if not doc.start_date or not doc.end_date:
 		frappe.throw("Start Date and End Date are required")
@@ -86,22 +233,76 @@ def poll_devices():
 	}
 
 
-_BIODATA_QUERIES = [
-	("FINGERTMP", "Fingerprint"),
-	("FACE",      "Face"),
-	("BIOPHOTO",  "BioPhoto"),
-	("USERINFO",  "Password"),
-	("BIODATA",   "Palm"),
-]
+def run_checkin():
+	"""Scheduled run: poll attendance for the window implied by checkin_event_frequency."""
+	settings = frappe.get_single("Biometric Setting")
+	if not settings.enable_checkin:
+		return {"skipped": True, "reason": "enable_checkin is off"}
+	devices = [row.device for row in (settings.poll_devices or []) if row.device]
+	if not devices:
+		return {"skipped": True, "reason": "No devices in poll_devices table"}
+	start, end = _window_for("checkin")
+	queued, failed = _poll_attendance(start, end, devices)
+	return {
+		"status": "done",
+		"window": {"start": str(start), "end": str(end)},
+		"queued": len(queued),
+		"failed": len(failed),
+	}
 
 
-@frappe.whitelist()
-def request_biodata(device_sn, pin=None):
-	if not device_sn:
-		frappe.throw("Please select a device first")
+def run_users_sync():
+	"""Scheduled run: refresh enrolled users from each device via DATA QUERY USERINFO."""
+	settings = frappe.get_single("Biometric Setting")
+	if not settings.enable_users:
+		return {"skipped": True, "reason": "enable_users is off"}
+	devices = [row.device_sn for row in (settings.devices or []) if row.device_sn]
+	if not devices:
+		return {"skipped": True, "reason": "No devices in devices table"}
 
+	queued = []
+	failed = []
+	for device_sn in devices:
+		try:
+			cmd_id = frappe.generate_hash(length=10)
+			command = f"C:{cmd_id}:DATA QUERY USERINFO"
+			_post_to_nodered({
+				"command_id":    cmd_id,
+				"command_type":  "Poll Users",
+				"device_sn":     device_sn,
+				"user_id":       "",
+				"employee_name": "",
+				"command":       command,
+			})
+			queued.append({"device": device_sn, "command_id": cmd_id})
+		except Exception as e:
+			failed.append({"device": device_sn, "reason": str(e)})
+	return {"status": "done", "queued": len(queued), "failed": len(failed)}
+
+
+def run_biodata_sync():
+	"""Scheduled run: poll all biodata tables for every device."""
+	settings = frappe.get_single("Biometric Setting")
+	if not settings.enable_bio_templates:
+		return {"skipped": True, "reason": "enable_bio_templates is off"}
+	devices = [row.device_sn for row in (settings.devices or []) if row.device_sn]
+	if not devices:
+		return {"skipped": True, "reason": "No devices in devices table"}
+
+	results = []
+	for device_sn in devices:
+		try:
+			results.append(request_biodata_internal(device_sn))
+		except Exception as e:
+			results.append({"device_sn": device_sn, "error": str(e)})
+	return {"status": "done", "devices": len(devices), "results": results}
+
+
+def request_biodata_internal(device_sn, pin=None):
+	"""Same body as request_biodata, without the enable check / whitelist guard.
+	Used by run_biodata_sync (which has already gated on enable_bio_templates).
+	"""
 	pin = (str(pin).strip() if pin else "")
-
 	cache_key = f"poll_biodata_filter:{device_sn}"
 	if pin:
 		frappe.cache().set_value(cache_key, pin, expires_in_sec=300)
@@ -111,7 +312,6 @@ def request_biodata(device_sn, pin=None):
 	queued = []
 	for table, label in _BIODATA_QUERIES:
 		cmd_id = frappe.generate_hash(length=10)
-
 		parts = [f"C:{cmd_id}:DATA QUERY {table}"]
 		if pin:
 			parts.append(f"PIN={pin}")
@@ -127,14 +327,28 @@ def request_biodata(device_sn, pin=None):
 			"employee_name": "",
 			"command":       command,
 		})
-		queued.append({"table": table, "command_id": cmd_id, "command": command})
+		queued.append({"table": table, "command_id": cmd_id})
+	return {"device_sn": device_sn, "pin": pin or None, "queued": queued}
 
-	return {
-		"status":    "queued",
-		"device_sn": device_sn,
-		"pin":       pin or None,
-		"queued":    queued,
-	}
+
+_BIODATA_QUERIES = [
+	("FINGERTMP", "Fingerprint"),
+	("FACE",      "Face"),
+	("BIOPHOTO",  "BioPhoto"),
+	("USERINFO",  "Password"),
+	("BIODATA",   "Palm"),
+]
+
+
+@frappe.whitelist()
+def request_biodata(device_sn, pin=None):
+	if not frappe.db.get_single_value("Biometric Setting", "enable_bio_templates"):
+		frappe.throw("Enable Bio Templates")
+	if not device_sn:
+		frappe.throw("Please select a device first")
+	out = request_biodata_internal(device_sn, pin)
+	out["status"] = "queued"
+	return out
 
 
 _USER_FIELDS = {
