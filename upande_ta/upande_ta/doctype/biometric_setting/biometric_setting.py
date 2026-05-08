@@ -137,13 +137,29 @@ def request_biodata(device_sn, pin=None):
 	}
 
 
-_BIOTEMPLATE_TRACKED_FIELDS = (
-	"bio_type", "type_code", "bio_no", "bio_index", "valid",
-	"major_ver", "minor_ver", "size", "template", "source_device",
-	"privilege", "password", "card", "vice_card", "user_group",
-	"timezone_group", "verify_mode", "start_datetime", "end_datetime",
-	"raw_log",
-)
+_USER_FIELDS = {
+	"card":           "card",
+	"vice_card":      "vice_card",
+	"password":       "password",
+	"privilege":      "privilege",
+	"group":          "user_group",
+	"timezone_group": "timezone_group",
+	"verify_mode":    "verify_mode",
+	"start_datetime": "start_datetime",
+	"end_datetime":   "end_datetime",
+}
+
+_BIO_PREFIX = {
+	"fingerprint": "fp",
+	"face":        "face",
+	"palm":        "palm",
+}
+
+_BIO_TEMPLATE_FIELD = {
+	"fp":   "fingerprint_template",
+	"face": "face_template",
+	"palm": "palm_template",
+}
 
 
 def _str(v):
@@ -159,17 +175,28 @@ def _int(v, default=0):
 
 @frappe.whitelist(allow_guest=True)
 def store_biotemplate():
-	data       = frappe.request.get_json() or {}
-	bio_type   = _str(data.get("bio_type"))
-	device_sn  = _str(data.get("device_sn") or data.get("source_device"))
-	user_id    = _str(data.get("user_id") or data.get("employee_id") or data.get("employee"))
+	data      = frappe.request.get_json() or {}
+	bio_type  = _str(data.get("bio_type"))
+	device_sn = _str(data.get("device_sn") or data.get("source_device"))
+	user_id   = _str(data.get("user_id") or data.get("employee_id") or data.get("employee"))
 
 	if not user_id:
 		frappe.response["http_status_code"] = 400
 		frappe.response["message"] = {"status": "error", "error": "Missing user_id"}
 		return
 
-	is_user_record = bio_type.lower() == "user"
+	kind = bio_type.lower()
+	is_user_record = kind == "user"
+	prefix = _BIO_PREFIX.get(kind)
+
+	if not is_user_record and not prefix:
+		frappe.response["http_status_code"] = 400
+		frappe.response["message"] = {
+			"status": "error",
+			"error":  f"Unsupported bio_type: {bio_type!r}",
+		}
+		return
+
 	if not is_user_record and not _str(data.get("template")):
 		frappe.response["http_status_code"] = 400
 		frappe.response["message"] = {"status": "error", "error": "Missing template"}
@@ -196,34 +223,22 @@ def store_biotemplate():
 
 	now = frappe.utils.now_datetime()
 
+	new_values = {"source_device": device_sn}
+
 	if is_user_record:
-		new_values = {
-			"privilege":      _str(data.get("privilege")),
-			"password":       _str(data.get("password")),
-			"card":           _str(data.get("card")),
-			"vice_card":      _str(data.get("vice_card")),
-			"user_group":     _str(data.get("group")),
-			"timezone_group": _str(data.get("timezone_group")),
-			"verify_mode":    _str(data.get("verify_mode")),
-			"start_datetime": _str(data.get("start_datetime")),
-			"end_datetime":   _str(data.get("end_datetime")),
-			"source_device":  device_sn,
-			"raw_log":        _str(data.get("raw_log")),
-		}
+		for src, dst in _USER_FIELDS.items():
+			new_values[dst] = _str(data.get(src))
 	else:
-		new_values = {
-			"bio_type":      bio_type or "Fingerprint",
-			"type_code":     _str(data.get("type_code")),
-			"bio_no":        _int(data.get("bio_no")),
-			"bio_index":     _int(data.get("bio_index")),
-			"valid":         _int(data.get("valid"), 1),
-			"major_ver":     _int(data.get("major_ver")),
-			"minor_ver":     _int(data.get("minor_ver")),
-			"size":          _int(data.get("size")),
-			"template":      _str(data.get("template")),
-			"source_device": device_sn,
-			"raw_log":       _str(data.get("raw_log")),
-		}
+		new_values.update({
+			f"{prefix}_bio_no":    _int(data.get("bio_no")),
+			f"{prefix}_bio_index": _int(data.get("bio_index")),
+			f"{prefix}_valid":     _int(data.get("valid"), 1),
+			f"{prefix}_major_ver": _int(data.get("major_ver")),
+			f"{prefix}_minor_ver": _int(data.get("minor_ver")),
+			f"{prefix}_size":      _int(data.get("size")),
+			f"{prefix}_raw_log":   _str(data.get("raw_log")),
+			_BIO_TEMPLATE_FIELD[prefix]: _str(data.get("template")),
+		})
 
 	existing = frappe.db.get_value(
 		"Biometric Template",
@@ -232,15 +247,12 @@ def store_biotemplate():
 			"parentfield": "bio_templates",
 			"employee":    employee_name,
 		},
-		("name",) + _BIOTEMPLATE_TRACKED_FIELDS,
+		("name",) + tuple(new_values),
 		as_dict=True,
 	)
 
 	if existing:
-		changed = {
-			k: v for k, v in new_values.items()
-			if existing.get(k) != v
-		}
+		changed = {k: v for k, v in new_values.items() if existing.get(k) != v}
 		if changed:
 			changed["captured_at"] = now
 			frappe.db.set_value(
@@ -264,18 +276,15 @@ def store_biotemplate():
 		)[0][0]) or 1
 
 		row = frappe.get_doc({
-			"doctype":       "Biometric Template",
-			"name":          row_name,
-			"parent":        "Biometric Setting",
-			"parenttype":    "Biometric Setting",
-			"parentfield":   "bio_templates",
-			"idx":           idx,
-			"employee":      employee_name,
-			"employee_name": _str(data.get("employee_name")) or frappe.db.get_value(
-				"Employee", employee_name, "employee_name"
-			),
-			"user_id":       user_id,
-			"captured_at":   now,
+			"doctype":     "Biometric Template",
+			"name":        row_name,
+			"parent":      "Biometric Setting",
+			"parenttype":  "Biometric Setting",
+			"parentfield": "bio_templates",
+			"idx":         idx,
+			"employee":    employee_name,
+			"user_id":     user_id,
+			"captured_at": now,
 			**new_values,
 		})
 		row.db_insert()
@@ -286,101 +295,6 @@ def store_biotemplate():
 		"status":   status,
 		"employee": employee_name,
 		"user_id":  user_id,
-		"bio_type": new_values.get("bio_type") or bio_type,
-		"row_name": row_name,
-	}
-
-
-@frappe.whitelist(allow_guest=True)
-def store_biodata():
-	data        = frappe.request.get_json() or {}
-	user_id     = str(data.get("user_id")   or "").strip()
-	device_sn   = str(data.get("device_sn") or "").strip()
-	bio_type    = str(data.get("bio_type")  or "Fingerprint").strip()
-	bio_no      = int(data.get("bio_no")    or 0)
-	bio_index   = int(data.get("bio_index") or 0)
-	valid       = int(data.get("valid")     or 1)
-	major_ver   = int(data.get("major_ver") or 0)
-	minor_ver   = int(data.get("minor_ver") or 0)
-	size        = int(data.get("size")      or 0)
-	template    = str(data.get("template")  or "").strip()
-
-	if not user_id or not template:
-		frappe.response["http_status_code"] = 400
-		frappe.response["message"] = {
-			"status": "error",
-			"error":  "Missing user_id or template"
-		}
-		return
-
-	if device_sn:
-		wanted_pin = frappe.cache().get_value(f"poll_biodata_filter:{device_sn}")
-		if wanted_pin and str(wanted_pin).strip() != user_id:
-			frappe.response["message"] = {
-				"status": "skipped",
-				"reason": f"PIN {user_id} filtered out (requested {wanted_pin})"
-			}
-			return
-
-	employee_name = frappe.db.get_value(
-		"Employee",
-		{"attendance_device_id": user_id},
-		"name"
-	)
-
-	if not employee_name:
-		frappe.response["message"] = {
-			"status": "skipped",
-			"reason": f"No employee found for PIN {user_id}"
-		}
-		return
-
-	settings = frappe.get_single("Biometric Setting")
-	now = frappe.utils.now_datetime()
-
-	existing = next(
-		(
-			r for r in (settings.bio_templates or [])
-			if r.employee == employee_name
-			and r.bio_type == bio_type
-			and (r.bio_no or 0) == bio_no
-			and (r.source_device or "") == device_sn
-		),
-		None
-	)
-
-	if existing:
-		existing.bio_index   = bio_index
-		existing.valid       = valid
-		existing.major_ver   = major_ver
-		existing.minor_ver   = minor_ver
-		existing.size        = size
-		existing.template    = template
-		existing.captured_at = now
-		row = existing
-	else:
-		row = settings.append("bio_templates", {
-			"employee":      employee_name,
-			"bio_type":      bio_type,
-			"bio_no":        bio_no,
-			"bio_index":     bio_index,
-			"valid":         valid,
-			"major_ver":     major_ver,
-			"minor_ver":     minor_ver,
-			"size":          size,
-			"template":      template,
-			"source_device": device_sn,
-			"captured_at":   now
-		})
-
-	settings.save(ignore_permissions=True)
-	frappe.db.commit()
-
-	frappe.response["message"] = {
-		"status":   "stored",
-		"employee": employee_name,
-		"user_id":  user_id,
 		"bio_type": bio_type,
-		"bio_no":   bio_no,
-		"row_name": row.name
+		"row_name": row_name,
 	}

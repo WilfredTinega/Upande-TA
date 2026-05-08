@@ -88,7 +88,7 @@ def get_devices():
         {
             "name":            d.device_sn,
             "device_sn":       d.device_sn,
-            "device_location": d.device_name or d.device_sn
+            "device_location": d.device_location or d.device_sn
         }
         for d in (settings.devices or [])
     ]
