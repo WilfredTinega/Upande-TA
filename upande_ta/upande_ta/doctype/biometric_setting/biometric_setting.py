@@ -121,17 +121,28 @@ def resync_scheduled_jobs():
 	Wired into hooks.after_migrate because Frappe's sync_jobs deletes any
 	Scheduled Job Type whose method isn't declared in scheduler_events.
 	"""
-	doc = frappe.get_single("Biometric Setting")
-	doc._sync_scheduled_jobs(force=True)
-	frappe.db.commit()
-	return {
-		"jobs": frappe.get_all(
-			"Scheduled Job Type",
-			filters={"method": ["like", "%biometric_setting%"]},
-			fields=["method", "frequency", "cron_format", "stopped"],
-			order_by="method",
+	try:
+		doc = frappe.get_single("Biometric Setting")
+		doc._sync_scheduled_jobs(force=True)
+		frappe.db.commit()
+		return {
+			"jobs": frappe.get_all(
+				"Scheduled Job Type",
+				filters={"method": ["like", "%biometric_setting%"]},
+				fields=["method", "frequency", "cron_format", "stopped"],
+				order_by="method",
+			)
+		}
+	except Exception:
+		# Don't fail `bench migrate` because of this hook. Schema mismatches
+		# on child tables (e.g. tabBiometric Device missing parent/parenttype
+		# columns) make get_single() raise — log and move on so the rest of
+		# the migration completes.
+		frappe.log_error(
+			title="Biometric Setting: resync_scheduled_jobs skipped",
+			message=frappe.get_traceback(),
 		)
-	}
+		return {"jobs": [], "skipped": True}
 
 
 def _window_for(prefix):

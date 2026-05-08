@@ -152,7 +152,10 @@ scheduler_events = {
 		"30 1 * * *": [
 			"upande_ta.upande_ta.overrides.employee_checkin.auto_close_open_ins"
 		]
-	}
+	},
+	"daily": [
+		"upande_ta.upande_ta.doctype.bulk_week_off.bulk_week_off.submit_due_employee_transfers"
+	]
 }
 
 # Testing

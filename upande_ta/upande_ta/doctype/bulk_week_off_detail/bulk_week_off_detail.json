@@ -3,15 +3,16 @@
  "actions": [],
  "creation": "2026-04-16 15:26:32.979184",
  "doctype": "DocType",
+ "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "employee",
   "employee_name",
   "department",
-  "branch",
   "designation",
   "current_holiday_list",
-  "assigned_off_day"
+  "assigned_off_day",
+  "employee_transfer"
  ],
  "fields": [
   {
@@ -19,6 +20,7 @@
    "fieldname": "employee",
    "fieldtype": "Link",
    "in_list_view": 1,
+   "in_standard_filter": 1,
    "label": "Employee",
    "options": "Employee",
    "reqd": 1
@@ -40,14 +42,6 @@
    "in_list_view": 1,
    "label": "Department",
    "options": "Department",
-   "read_only": 1
-  },
-  {
-   "fetch_from": "employee.branch",
-   "fieldname": "branch",
-   "fieldtype": "Link",
-   "label": "Branch",
-   "options": "Branch",
    "read_only": 1
   },
   {
@@ -73,13 +67,22 @@
   {
    "fieldname": "assigned_off_day",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Assigned Off Day",
    "options": "Holiday List"
+  },
+  {
+   "fieldname": "employee_transfer",
+   "fieldtype": "Link",
+   "label": "Employee Transfer",
+   "no_copy": 1,
+   "options": "Employee Transfer",
+   "read_only": 1
   }
  ],
  "istable": 1,
  "links": [],
- "modified": "2026-04-16 15:57:13.962275",
+ "modified": "2026-05-09 02:04:44.274522",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Week Off Detail",

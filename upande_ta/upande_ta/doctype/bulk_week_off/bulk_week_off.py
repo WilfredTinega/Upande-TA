@@ -14,6 +14,7 @@ class BulkWeekOff(Document):
             frappe.throw(_("Please add employees before saving."))
         self.check_duplicate_employees()
         self.validate_from_date()
+        self.validate_assigned_off_days()
 
     def check_duplicate_employees(self):
         employees = []
@@ -42,98 +43,139 @@ class BulkWeekOff(Document):
                 )
             )
 
+    def validate_assigned_off_days(self):
+        for row in self.employees:
+            if not row.assigned_off_day:
+                frappe.throw(
+                    _("Row {0}: Assigned Off Day is required for employee {1}.").format(
+                        row.idx, frappe.bold(row.employee)
+                    )
+                )
+            if row.assigned_off_day == row.current_holiday_list:
+                frappe.throw(
+                    _("Row {0}: Assigned Off Day is the same as the current one for employee {1}. Remove the row or pick a different Holiday List.").format(
+                        row.idx, frappe.bold(row.employee)
+                    )
+                )
+
     def on_submit(self):
-        self.assign_holiday_list()
+        self.create_employee_transfers()
 
     def on_cancel(self):
-        self.remove_holiday_list()
+        self.cancel_employee_transfers()
 
-    def assign_holiday_list(self):
-        success = 0
+    def create_employee_transfers(self):
+        created = 0
+        submitted = 0
+        deferred = []
         failed = []
-        has_hla = frappe.db.exists("DocType", "Holiday List Assignment")
+        today = getdate()
+        transfer_date = getdate(self.from_date)
 
         for row in self.employees:
             try:
-                frappe.db.set_value(
-                    "Employee", row.employee, "holiday_list", self.holiday_list,
-                    update_modified=False
-                )
+                transfer = frappe.get_doc({
+                    "doctype": "Employee Transfer",
+                    "employee": row.employee,
+                    "transfer_date": self.from_date,
+                    "transfer_details": [
+                        {
+                            "property": _("Holiday List"),
+                            "fieldname": "holiday_list",
+                            "current": row.current_holiday_list or "",
+                            "new": row.assigned_off_day,
+                        }
+                    ],
+                })
+                transfer.insert(ignore_permissions=True)
+                created += 1
+                row.db_set("employee_transfer", transfer.name, update_modified=False)
 
-                if has_hla:
-                    existing = frappe.db.exists("Holiday List Assignment", {
-                        "assigned_to": row.employee,
-                        "from_date": self.from_date,
-                        "docstatus": 1
-                    })
-                    if not existing:
-                        hla = frappe.get_doc({
-                            "doctype": "Holiday List Assignment",
-                            "applicable_for": "Employee",
-                            "assigned_to": row.employee,
-                            "holiday_list": self.holiday_list,
-                            "from_date": self.from_date,
-                        })
-                        hla.insert(ignore_permissions=True)
-                        hla.submit()
-
-                success = success + 1
+                # HRMS blocks submit when transfer_date > today (before_submit).
+                # Submit immediately when allowed; otherwise leave as Draft.
+                # The scheduled job submit_due_employee_transfers picks up
+                # drafts on/after their transfer_date.
+                if transfer_date <= today:
+                    transfer.submit()
+                    submitted += 1
+                else:
+                    deferred.append(row.employee)
             except Exception:
                 failed.append(row.employee)
                 frappe.log_error(
-                    title="Bulk Week Off Error",
-                    message="Failed to assign week off %s to employee %s"
-                    % (self.holiday_list, row.employee),
+                    title="Bulk Week Off: Employee Transfer creation failed",
+                    message=frappe.get_traceback(),
                 )
 
-        if success:
-            msg = _("Holiday List {0} assigned to {1} employee(s).").format(
-                frappe.bold(self.holiday_list), success
+        if created:
+            frappe.msgprint(
+                _("Created {0} Employee Transfer(s); submitted {1}.").format(
+                    created, submitted
+                ),
+                alert=True,
+                indicator="green",
             )
-            if has_hla:
-                msg = msg + " " + _("Holiday List Assignment records created.")
-            frappe.msgprint(msg, alert=True, indicator="green")
-
+        if deferred:
+            frappe.msgprint(
+                _("Left as Draft because the transfer date is in the future: {0}").format(
+                    ", ".join(deferred)
+                ),
+                indicator="orange",
+            )
         if failed:
             frappe.msgprint(
-                _("Failed to assign holiday list to: {0}").format(
+                _("Failed to create Employee Transfer for: {0}").format(
                     ", ".join(failed)
                 ),
                 indicator="red",
             )
 
-    def remove_holiday_list(self):
-        success = 0
-        has_hla = frappe.db.exists("DocType", "Holiday List Assignment")
-
+    def cancel_employee_transfers(self):
+        cancelled = 0
+        skipped = []
         for row in self.employees:
-            current = frappe.db.get_value(
-                "Employee", row.employee, "holiday_list"
-            )
-            if current == self.holiday_list:
-                frappe.db.set_value(
-                    "Employee", row.employee, "holiday_list", "",
-                    update_modified=False
+            transfer_name = getattr(row, "employee_transfer", None)
+            if transfer_name and frappe.db.exists("Employee Transfer", transfer_name):
+                transfer_names = [transfer_name]
+            else:
+                # Fallback for rows created before the link field existed.
+                transfer_names = frappe.get_all(
+                    "Employee Transfer",
+                    filters={
+                        "employee": row.employee,
+                        "transfer_date": self.from_date,
+                        "docstatus": ["<", 2],
+                    },
+                    pluck="name",
                 )
 
-            if has_hla:
-                hla_name = frappe.db.exists("Holiday List Assignment", {
-                    "assigned_to": row.employee,
-                    "holiday_list": self.holiday_list,
-                    "from_date": self.from_date,
-                    "docstatus": 1
-                })
-                if hla_name:
-                    hla = frappe.get_doc("Holiday List Assignment", hla_name)
-                    hla.cancel()
+            for name in transfer_names:
+                try:
+                    transfer = frappe.get_doc("Employee Transfer", name)
+                    if transfer.docstatus == 1:
+                        transfer.cancel()
+                        cancelled += 1
+                    elif transfer.docstatus == 0:
+                        transfer.delete(ignore_permissions=True)
+                        cancelled += 1
+                except Exception:
+                    skipped.append(name)
+                    frappe.log_error(
+                        title="Bulk Week Off: Employee Transfer cancel failed",
+                        message=frappe.get_traceback(),
+                    )
 
-            success = success + 1
-
-        if success:
-            msg = _("Holiday List removed from {0} employee(s).").format(success)
-            if has_hla:
-                msg = msg + " " + _("Holiday List Assignment records cancelled.")
-            frappe.msgprint(msg, alert=True, indicator="orange")
+        if cancelled:
+            frappe.msgprint(
+                _("Cancelled/removed {0} Employee Transfer(s).").format(cancelled),
+                alert=True,
+                indicator="orange",
+            )
+        if skipped:
+            frappe.msgprint(
+                _("Could not cancel: {0}").format(", ".join(skipped)),
+                indicator="red",
+            )
 
     @frappe.whitelist()
     def get_employees(self):
@@ -146,14 +188,8 @@ class BulkWeekOff(Document):
             filters.append(["Employee", "name", "=", self.employee])
         if self.department:
             filters.append(["Employee", "department", "=", self.department])
-        if self.branch:
-            filters.append(["Employee", "branch", "=", self.branch])
         if self.designation:
             filters.append(["Employee", "designation", "=", self.designation])
-        if self.employment_type:
-            filters.append(
-                ["Employee", "employment_type", "=", self.employment_type]
-            )
 
         employees = frappe.get_all(
             "Employee",
@@ -162,7 +198,6 @@ class BulkWeekOff(Document):
                 "name as employee",
                 "employee_name",
                 "department",
-                "branch",
                 "designation",
                 "holiday_list as current_holiday_list",
             ],
@@ -170,3 +205,48 @@ class BulkWeekOff(Document):
         )
 
         return employees
+
+
+def submit_due_employee_transfers():
+    """Scheduled daily: submit Bulk Week Off-originated Employee Transfer drafts
+    whose transfer_date has arrived. HRMS blocks submit when transfer_date > today,
+    so future-dated rows are inserted as Draft and picked up here on/after their date.
+    """
+    today = getdate()
+    rows = frappe.db.sql(
+        """
+        SELECT d.employee_transfer, d.parent
+        FROM `tabBulk Week Off Detail` d
+        JOIN `tabBulk Week Off` p ON p.name = d.parent
+        JOIN `tabEmployee Transfer` et ON et.name = d.employee_transfer
+        WHERE p.docstatus = 1
+          AND d.employee_transfer IS NOT NULL
+          AND d.employee_transfer != ''
+          AND et.docstatus = 0
+          AND et.transfer_date <= %s
+        """,
+        (today,),
+        as_dict=True,
+    )
+
+    submitted = 0
+    failed = 0
+    for r in rows:
+        try:
+            transfer = frappe.get_doc("Employee Transfer", r.employee_transfer)
+            transfer.submit()
+            submitted += 1
+        except Exception:
+            failed += 1
+            frappe.log_error(
+                title="Bulk Week Off: scheduled Employee Transfer submit failed",
+                message="Transfer: %s\nParent: %s\n%s"
+                % (r.employee_transfer, r.parent, frappe.get_traceback()),
+            )
+
+    if submitted or failed:
+        frappe.logger().info(
+            "submit_due_employee_transfers: submitted=%d failed=%d"
+            % (submitted, failed)
+        )
+    return {"submitted": submitted, "failed": failed}
