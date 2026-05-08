@@ -7,19 +7,13 @@ frappe.ui.form.on("Bulk Overtime", {
 		frm.set_query("department", () => ({
 			filters: { company: frm.doc.company },
 		}));
-		// Restrict Branch dropdown to the selected company
-		frm.set_query("branch", () => ({
-			filters: { company: frm.doc.company },
-		}));
 		
 		// Restrict Employee in child table to selected department/group
 		frm.set_query("employee", "bulk_overtime_entries", () => ({
 			filters: {
 				company: frm.doc.company,
 				...(frm.doc.department && { department: frm.doc.department }),
-				...(frm.doc.branch && { branch: frm.doc.branch }),
 				...(frm.doc.designation && { designation: frm.doc.designation }),
-				...(frm.doc.grade && { grade: frm.doc.grade }),
 				status: "Active"
 			}
 		}));
@@ -65,10 +59,10 @@ frappe.ui.form.on("Bulk Overtime", {
 			});
 			return;
 		}
-		// Validate that department or branch is selected for filtering
-		if (!frm.doc.department && !frm.doc.branch) {
+		// Validate whether a department is selected for filtering
+		if (!frm.doc.department) {
 			frappe.confirm(
-				__("No department or branch selected. This will fetch ALL active employees in the company. Continue?"),
+				__("No department selected. This will fetch ALL active employees in the company. Continue?"),
 				() => {
 					frm.events.call_fill_employee_details(frm);
 				}
@@ -345,10 +339,8 @@ frappe.ui.form.on("Bulk Overtime", {
 		frm.events.set_overtime_request(frm, summary);
 	},
 
-	branch(frm) { frm.events.clear_entries(frm); },
 	department(frm) { frm.events.clear_entries(frm); },
 	designation(frm) { frm.events.clear_entries(frm); },
-	grade(frm) { frm.events.clear_entries(frm); },
 	from_date(frm) { frm.events.clear_entries(frm); },
 	to_date(frm) { frm.events.clear_entries(frm); },
 
