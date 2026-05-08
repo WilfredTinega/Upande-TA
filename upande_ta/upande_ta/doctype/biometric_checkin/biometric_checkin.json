@@ -14,15 +14,13 @@
   {
    "columns": 3,
    "fieldname": "device",
-   "fieldtype": "Link",
+   "fieldtype": "Select",
    "in_list_view": 1,
-   "label": "Device",
-   "options": "Biometric Device",
+   "label": "Device SN",
    "reqd": 1
   },
   {
    "columns": 3,
-   "fetch_from": "device.device_name",
    "fieldname": "device_name",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -55,7 +53,7 @@
  "modified": "2026-04-28 22:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
- "name": "Checkin Poll Device",
+ "name": "Biometric Checkin",
  "owner": "Administrator",
  "permissions": [],
  "row_format": "Dynamic",
