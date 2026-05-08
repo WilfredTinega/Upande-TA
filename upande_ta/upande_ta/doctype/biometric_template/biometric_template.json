@@ -1,0 +1,362 @@
+{
+ "actions": [],
+ "creation": "2026-04-29 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "identification_section",
+  "employee",
+  "employee_name",
+  "user_id",
+  "column_break_ident",
+  "source_device",
+  "captured_at",
+  "card_password_section",
+  "card",
+  "vice_card",
+  "password",
+  "privilege",
+  "column_break_cred",
+  "user_group",
+  "timezone_group",
+  "verify_mode",
+  "start_datetime",
+  "end_datetime",
+  "fingerprint_section",
+  "fp_bio_no",
+  "fp_bio_index",
+  "fp_valid",
+  "fp_type_code",
+  "column_break_fp",
+  "fp_major_ver",
+  "fp_minor_ver",
+  "fp_size",
+  "fingerprint_template",
+  "fp_raw_log",
+  "face_section",
+  "face_bio_no",
+  "face_bio_index",
+  "face_valid",
+  "face_type_code",
+  "column_break_face",
+  "face_major_ver",
+  "face_minor_ver",
+  "face_size",
+  "face_template",
+  "face_raw_log",
+  "palm_section",
+  "palm_bio_no",
+  "palm_bio_index",
+  "palm_valid",
+  "palm_type_code",
+  "column_break_palm",
+  "palm_major_ver",
+  "palm_minor_ver",
+  "palm_size",
+  "palm_template",
+  "palm_raw_log"
+ ],
+ "fields": [
+  {
+   "fieldname": "identification_section",
+   "fieldtype": "Section Break",
+   "label": "Identification"
+  },
+  {
+   "columns": 2,
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fetch_from": "employee.attendance_device_id",
+   "fieldname": "user_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "PIN",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_ident",
+   "fieldtype": "Column Break"
+  },
+  {
+   "columns": 2,
+   "fieldname": "source_device",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Source Device"
+  },
+  {
+   "fieldname": "captured_at",
+   "fieldtype": "Datetime",
+   "label": "Captured At"
+  },
+  {
+   "fieldname": "card_password_section",
+   "fieldtype": "Section Break",
+   "label": "Card & Password"
+  },
+  {
+   "fieldname": "card",
+   "fieldtype": "Data",
+   "label": "Card"
+  },
+  {
+   "fieldname": "vice_card",
+   "fieldtype": "Data",
+   "label": "Vice Card"
+  },
+  {
+   "fieldname": "password",
+   "fieldtype": "Data",
+   "label": "Password"
+  },
+  {
+   "fieldname": "privilege",
+   "fieldtype": "Data",
+   "label": "Privilege"
+  },
+  {
+   "fieldname": "column_break_cred",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "user_group",
+   "fieldtype": "Data",
+   "label": "Group"
+  },
+  {
+   "fieldname": "timezone_group",
+   "fieldtype": "Data",
+   "label": "Timezone Group"
+  },
+  {
+   "fieldname": "verify_mode",
+   "fieldtype": "Data",
+   "label": "Verify Mode"
+  },
+  {
+   "fieldname": "start_datetime",
+   "fieldtype": "Data",
+   "label": "Start Datetime"
+  },
+  {
+   "fieldname": "end_datetime",
+   "fieldtype": "Data",
+   "label": "End Datetime"
+  },
+  {
+   "fieldname": "fingerprint_section",
+   "fieldtype": "Section Break",
+   "label": "Fingerprint"
+  },
+  {
+   "default": "0",
+   "fieldname": "fp_bio_no",
+   "fieldtype": "Int",
+   "label": "Slot No"
+  },
+  {
+   "default": "0",
+   "fieldname": "fp_bio_index",
+   "fieldtype": "Int",
+   "label": "Index"
+  },
+  {
+   "default": "0",
+   "fieldname": "fp_valid",
+   "fieldtype": "Check",
+   "label": "Valid"
+  },
+  {
+   "default": "1",
+   "fieldname": "fp_type_code",
+   "fieldtype": "Data",
+   "label": "Type Code",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_fp",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "fp_major_ver",
+   "fieldtype": "Int",
+   "label": "Major Ver"
+  },
+  {
+   "default": "0",
+   "fieldname": "fp_minor_ver",
+   "fieldtype": "Int",
+   "label": "Minor Ver"
+  },
+  {
+   "fieldname": "fp_size",
+   "fieldtype": "Int",
+   "label": "Size"
+  },
+  {
+   "fieldname": "fingerprint_template",
+   "fieldtype": "Long Text",
+   "label": "Fingerprint Template (TMP)"
+  },
+  {
+   "fieldname": "fp_raw_log",
+   "fieldtype": "Long Text",
+   "label": "Fingerprint Raw Log"
+  },
+  {
+   "fieldname": "face_section",
+   "fieldtype": "Section Break",
+   "label": "Face"
+  },
+  {
+   "default": "0",
+   "fieldname": "face_bio_no",
+   "fieldtype": "Int",
+   "label": "Slot No"
+  },
+  {
+   "default": "0",
+   "fieldname": "face_bio_index",
+   "fieldtype": "Int",
+   "label": "Index"
+  },
+  {
+   "default": "0",
+   "fieldname": "face_valid",
+   "fieldtype": "Check",
+   "label": "Valid"
+  },
+  {
+   "default": "9",
+   "fieldname": "face_type_code",
+   "fieldtype": "Data",
+   "label": "Type Code",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_face",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "face_major_ver",
+   "fieldtype": "Int",
+   "label": "Major Ver"
+  },
+  {
+   "default": "0",
+   "fieldname": "face_minor_ver",
+   "fieldtype": "Int",
+   "label": "Minor Ver"
+  },
+  {
+   "fieldname": "face_size",
+   "fieldtype": "Int",
+   "label": "Size"
+  },
+  {
+   "fieldname": "face_template",
+   "fieldtype": "Long Text",
+   "label": "Face Template (TMP)"
+  },
+  {
+   "fieldname": "face_raw_log",
+   "fieldtype": "Long Text",
+   "label": "Face Raw Log"
+  },
+  {
+   "fieldname": "palm_section",
+   "fieldtype": "Section Break",
+   "label": "Palm"
+  },
+  {
+   "default": "0",
+   "fieldname": "palm_bio_no",
+   "fieldtype": "Int",
+   "label": "Slot No"
+  },
+  {
+   "default": "0",
+   "fieldname": "palm_bio_index",
+   "fieldtype": "Int",
+   "label": "Index"
+  },
+  {
+   "default": "0",
+   "fieldname": "palm_valid",
+   "fieldtype": "Check",
+   "label": "Valid"
+  },
+  {
+   "default": "8",
+   "fieldname": "palm_type_code",
+   "fieldtype": "Data",
+   "label": "Type Code",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_palm",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "palm_major_ver",
+   "fieldtype": "Int",
+   "label": "Major Ver"
+  },
+  {
+   "default": "0",
+   "fieldname": "palm_minor_ver",
+   "fieldtype": "Int",
+   "label": "Minor Ver"
+  },
+  {
+   "fieldname": "palm_size",
+   "fieldtype": "Int",
+   "label": "Size"
+  },
+  {
+   "fieldname": "palm_template",
+   "fieldtype": "Long Text",
+   "label": "Palm Template (TMP)"
+  },
+  {
+   "fieldname": "palm_raw_log",
+   "fieldtype": "Long Text",
+   "label": "Palm Raw Log"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-05-08 19:17:33.437049",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Biometric Template",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

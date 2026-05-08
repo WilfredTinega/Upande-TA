@@ -85,8 +85,14 @@ app_license = "mit"
 # Installation
 # ------------
 
-# before_install = "upande_ta.install.before_install"
-# after_install = "upande_ta.install.after_install"
+# # before_install = "upande_ta.install.before_install"
+# after_install = "upande_ta.setup.after_install"
+
+# Restore Biometric Setting-driven scheduled jobs after every migrate (Frappe's
+# scheduler sync deletes Scheduled Job Type rows whose method isn't declared in
+# any app's scheduler_events — our jobs are user-configured per Biometric Setting,
+# so we re-upsert them here).
+after_migrate = ["upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.resync_scheduled_jobs"]
 
 # Uninstallation
 # ------------
@@ -132,34 +138,25 @@ app_license = "mit"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	"Employee Checkin": {
+		"validate": "upande_ta.upande_ta.overrides.employee_checkin.prevent_duplicate"
+	}
+}
 
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"upande_ta.tasks.all"
-# 	],
-# 	"daily": [
-# 		"upande_ta.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"upande_ta.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"upande_ta.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"upande_ta.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+	"cron": {
+		"30 1 * * *": [
+			"upande_ta.upande_ta.overrides.employee_checkin.auto_close_open_ins"
+		]
+	},
+	"daily": [
+		"upande_ta.upande_ta.doctype.bulk_week_off.bulk_week_off.submit_due_employee_transfers"
+	]
+}
 
 # Testing
 # -------

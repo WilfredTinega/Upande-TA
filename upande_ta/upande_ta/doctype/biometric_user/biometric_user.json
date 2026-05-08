@@ -1,0 +1,241 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:{device_sn}-{user_id}",
+ "creation": "2026-04-28 13:38:15.093396",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "device_sn",
+  "employee",
+  "user_id",
+  "employee_name",
+  "privilege",
+  "status",
+  "command_status",
+  "column_break_iapu",
+  "enrollment_date",
+  "device_profile_section",
+  "password",
+  "card",
+  "vice_card",
+  "group",
+  "column_break_dprof",
+  "timezone_group",
+  "verify_mode",
+  "start_datetime",
+  "end_datetime",
+  "source",
+  "section_break_oddd",
+  "add_user",
+  "column_break_wela",
+  "update_user",
+  "column_break_qlva",
+  "delete_user",
+  "debug_section",
+  "raw_log"
+ ],
+ "fields": [
+  {
+   "fieldname": "device_sn",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Device Serial Number",
+   "reqd": 1
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee"
+  },
+  {
+   "fetch_from": "employee.attendance_device_id",
+   "fetch_if_empty": 1,
+   "fieldname": "user_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "User ID (PIN)"
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fetch_if_empty": 1,
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name"
+  },
+  {
+   "fieldname": "privilege",
+   "fieldtype": "Select",
+   "label": "Privilege",
+   "options": "0\n14"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "\nActive\nPending Delete\nDeleted"
+  },
+  {
+   "fieldname": "command_status",
+   "fieldtype": "Select",
+   "label": "Command Status",
+   "options": "\nPending\nSent\nSuccess\nFailed"
+  },
+  {
+   "fieldname": "column_break_iapu",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "enrollment_date",
+   "fieldtype": "Datetime",
+   "label": "Enrollment Date"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "device_profile_section",
+   "fieldtype": "Section Break",
+   "label": "Device Profile"
+  },
+  {
+   "fieldname": "password",
+   "fieldtype": "Password",
+   "label": "Password"
+  },
+  {
+   "fieldname": "card",
+   "fieldtype": "Data",
+   "label": "Card"
+  },
+  {
+   "fieldname": "vice_card",
+   "fieldtype": "Data",
+   "label": "Vice Card"
+  },
+  {
+   "fieldname": "group",
+   "fieldtype": "Data",
+   "label": "Group"
+  },
+  {
+   "fieldname": "column_break_dprof",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "timezone_group",
+   "fieldtype": "Data",
+   "label": "Timezone Group"
+  },
+  {
+   "fieldname": "verify_mode",
+   "fieldtype": "Data",
+   "label": "Verify Mode"
+  },
+  {
+   "fieldname": "start_datetime",
+   "fieldtype": "Data",
+   "label": "Start Datetime"
+  },
+  {
+   "fieldname": "end_datetime",
+   "fieldtype": "Data",
+   "label": "End Datetime"
+  },
+  {
+   "fieldname": "source",
+   "fieldtype": "Data",
+   "label": "Source",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_oddd",
+   "fieldtype": "Section Break",
+   "label": "Payload Commands"
+  },
+  {
+   "fieldname": "add_user",
+   "fieldtype": "Text",
+   "label": "Add User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_wela",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "update_user",
+   "fieldtype": "Text",
+   "label": "Update User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_qlva",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "delete_user",
+   "fieldtype": "Text",
+   "label": "Delete User",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "debug_section",
+   "fieldtype": "Section Break",
+   "label": "Debug"
+  },
+  {
+   "fieldname": "raw_log",
+   "fieldtype": "Code",
+   "label": "Raw Log",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-05-09 00:50:44.070538",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Biometric User",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "employee_name",
+ "track_changes": 1
+}
