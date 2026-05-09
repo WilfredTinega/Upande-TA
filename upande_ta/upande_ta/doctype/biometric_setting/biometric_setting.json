@@ -47,7 +47,11 @@
   "events_column_biodata",
   "enable_bio_templates",
   "biodata_event_frequency",
-  "biodata_cron_format"
+  "biodata_cron_format",
+  "events_column_cleanup",
+  "enable_cleanup",
+  "cleanup_event_frequency",
+  "cleanup_cron_format"
  ],
  "fields": [
   {
@@ -274,6 +278,32 @@
    "fieldtype": "Data",
    "label": "Cron Format",
    "mandatory_depends_on": "eval:doc.enable_bio_templates && doc.biodata_event_frequency=='Cron'"
+  },
+  {
+   "fieldname": "events_column_cleanup",
+   "fieldtype": "Column Break",
+   "label": "Deactivation Cleanup"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_cleanup",
+   "fieldtype": "Check",
+   "label": "Enable Deactivation Cleanup?"
+  },
+  {
+   "depends_on": "eval:doc.enable_cleanup",
+   "fieldname": "cleanup_event_frequency",
+   "fieldtype": "Select",
+   "label": "Event Frequency",
+   "mandatory_depends_on": "eval:doc.enable_cleanup",
+   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "depends_on": "eval:doc.enable_cleanup && doc.cleanup_event_frequency=='Cron'",
+   "fieldname": "cleanup_cron_format",
+   "fieldtype": "Data",
+   "label": "Cron Format",
+   "mandatory_depends_on": "eval:doc.enable_cleanup && doc.cleanup_event_frequency=='Cron'"
   },
   {
    "fieldname": "column_break_xkjy",
