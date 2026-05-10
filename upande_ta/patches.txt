@@ -1,1 +1,1 @@
-upande_ta.patches.v1_0.rename_biometric_template_to_bio_templates
+upande_ta.patches.v1_0.recreate_biometric_template_doctypes
