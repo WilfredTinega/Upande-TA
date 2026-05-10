@@ -1,5 +1,4 @@
 // Copyright (c) 2026, Upande LTD and contributors
-// For license information, please see license.txt
 
 frappe.ui.form.on("Biometric Setting", {
 	refresh: function(frm) {
@@ -36,7 +35,6 @@ frappe.ui.form.on("Biometric Setting", {
 	users_cron_format:        autosave_on_change,
 	biodata_cron_format:      autosave_on_change,
 	cleanup_cron_format:      autosave_on_change,
-
 
 	get_checkin: function(frm) {
 		if (!frm.doc.enable_checkin) {

@@ -1,15 +1,12 @@
 # Copyright (c) 2026, Upande LTD and contributors
-# For license information, please see license.txt
 
 import frappe
 from frappe.model.document import Document
-
 
 class BiometricTemplate(Document):
     def validate(self):
         if self.device_sn and not self.device_name:
             self.device_name = _lookup_device_name(self.device_sn)
-
 
 def _lookup_device_name(device_sn):
     if not device_sn:
@@ -21,10 +18,8 @@ def _lookup_device_name(device_sn):
     )
     return row or ""
 
-
 @frappe.whitelist()
 def get_setting_devices():
-    """Return the Biometric Setting device list for the parent form picker."""
     rows = frappe.get_all(
         "Biometric Device",
         filters={"parent": "Biometric Setting"},
@@ -32,19 +27,6 @@ def get_setting_devices():
         order_by="idx asc",
     )
     return rows
-
-
-# ---------------------------------------------------------------------------
-# Biotemplate ingest API
-#
-# Each Bio Template row is stored per device. The parent doc is a Biometric
-# Template named `{device_sn}-{device_location}`, and child rows live under
-# that parent (parenttype="Biometric Template", parentfield="bio_templates").
-# Node-RED POSTs payloads to /api/method/.../store_biotemplate; one POST per
-# (device, employee, bio_type) becomes a single child row with FP / Face /
-# Palm columns populated incrementally as more types come in.
-# ---------------------------------------------------------------------------
-
 
 _USER_FIELDS = {
     "card":           "card",
@@ -70,10 +52,8 @@ _BIO_TEMPLATE_FIELD = {
     "palm": "palm_template",
 }
 
-
 def _str(v):
     return "" if v is None else str(v).strip()
-
 
 def _int(v, default=0):
     try:
@@ -81,10 +61,7 @@ def _int(v, default=0):
     except (TypeError, ValueError):
         return default
 
-
 def _ensure_biometric_template_parent(device_sn):
-    """Return the name of the Biometric Template parent doc for this device,
-    creating it if missing. The parent is named `{device_sn}-{device_name}`."""
     if not device_sn:
         frappe.throw("device_sn is required to resolve a Biometric Template parent")
 
@@ -111,12 +88,8 @@ def _ensure_biometric_template_parent(device_sn):
     frappe.db.commit()
     return doc.name
 
-
 @frappe.whitelist(allow_guest=True)
 def store_biotemplate():
-    """Ingest a biotemplate or USERINFO payload from Node-RED. Each call writes
-    or updates one Bio Template child row under the per-device Biometric
-    Template parent."""
     data      = frappe.request.get_json() or {}
     bio_type  = _str(data.get("bio_type"))
     device_sn = _str(data.get("device_sn") or data.get("source_device"))
@@ -204,8 +177,7 @@ def store_biotemplate():
         changed = {k: v for k, v in new_values.items() if existing.get(k) != v}
         if changed:
             changed["captured_at"] = now
-            # Fresh biodata arriving means the user is enrolled on the device
-            # again — clear any prior soft-delete flag.
+
             changed["deleted"] = 0
             frappe.db.set_value(
                 "Bio Template", existing["name"], changed,

@@ -1,14 +1,12 @@
 # Copyright (c) 2026, Upande LTD and contributors
-# For license information, please see license.txt
+
 import frappe
 import json
 import urllib.request
 from frappe.model.document import Document
 
-
 class BiometricUser(Document):
     pass
-
 
 def _get_user_row(device_sn, user_id):
     rows = frappe.get_all(
@@ -21,14 +19,7 @@ def _get_user_row(device_sn, user_id):
         return None
     return frappe.get_doc("Biometric User", rows[0].name)
 
-
 def _delete_user_row(device_sn, user_id):
-    """Remove the Biometric User row for (device_sn, user_id).
-
-    Invariant: this never touches Bio Template / Biometric Template rows.
-    The user-side and template-side records are decoupled by design — a user
-    can be removed from a device while the captured biometric template stays
-    in the database as a permanent record. See run_deactivation_cleanup."""
     existing = _get_user_row(device_sn, user_id)
     if not existing:
         return False
@@ -38,13 +29,7 @@ def _delete_user_row(device_sn, user_id):
     )
     return True
 
-
 def _set_template_deleted_flag(device_sn, user_id, value):
-    """Flip the `deleted` flag on Bio Template rows for (device_sn, user_id).
-
-    The flag is scoped to a single device: it only updates rows under the
-    Biometric Template parent for that device_sn. Other devices' templates
-    for the same employee are left alone."""
     if not device_sn or not user_id:
         return 0
     if not frappe.db.exists("DocType", "Biometric Template"):
@@ -67,7 +52,6 @@ def _set_template_deleted_flag(device_sn, user_id, value):
         frappe.db.set_value("Bio Template", row_name, "deleted", 1 if value else 0)
     return len(rows)
 
-
 def _upsert_user_row(device_sn, user_id, values):
     existing = _get_user_row(device_sn, user_id)
     if existing:
@@ -84,16 +68,8 @@ def _upsert_user_row(device_sn, user_id, values):
     row.insert(ignore_permissions=True)
     return row
 
-
 @frappe.whitelist()
 def hydrate_users_from_templates(device_sn):
-    """One-way sync: Bio Template -> Biometric User.
-
-    For each Bio Template row under the Biometric Template parent for
-    `device_sn`, ensure a matching Biometric User row exists on that device.
-    Templates flow into the user list, never the reverse — this endpoint
-    does NOT modify any Bio Template / Biometric Template record.
-    """
     if not device_sn:
         frappe.throw("device_sn is required")
     if not frappe.db.exists("DocType", "Biometric Template"):
@@ -144,7 +120,6 @@ def hydrate_users_from_templates(device_sn):
     if created:
         frappe.db.commit()
     return {"created": created, "skipped": skipped}
-
 
 @frappe.whitelist()
 def send_device_command(name, command_type, override=None):
@@ -219,7 +194,6 @@ def send_device_command(name, command_type, override=None):
         "biodata_queued": biodata_queued
     }
 
-
 @frappe.whitelist()
 def get_devices():
     settings = frappe.get_single("Biometric Setting")
@@ -231,7 +205,6 @@ def get_devices():
         }
         for d in (settings.devices or [])
     ]
-
 
 @frappe.whitelist()
 def get_device_users(device_sn):
@@ -251,7 +224,6 @@ def get_device_users(device_sn):
         }
         for r in rows
     ]
-
 
 @frappe.whitelist()
 def get_employees(status="Active", employee=None, designation=None, department=None):
@@ -289,7 +261,6 @@ def get_employees(status="Active", employee=None, designation=None, department=N
         })
     return result
 
-
 @frappe.whitelist()
 def get_active_filter_options(department=None, designation=None):
     all_employees = frappe.get_all(
@@ -317,7 +288,6 @@ def get_active_filter_options(department=None, designation=None):
         "department_count":  len(departments),
         "employee_count":    employee_count
     }
-
 
 @frappe.whitelist()
 def bulk_command(device_sn, users, command_type):
@@ -408,13 +378,11 @@ def bulk_command(device_sn, users, command_type):
         "errors":  failed
     }
 
-
 _BIO_TYPES = (
     ("Fingerprint", 1, "fp_bio_no",   "fp_bio_index",   "fp_valid",   "fp_major_ver",   "fp_minor_ver",   "fingerprint_template"),
     ("Face",        9, "face_bio_no", "face_bio_index", "face_valid", "face_major_ver", "face_minor_ver", "face_template"),
     ("Palm",        8, "palm_bio_no", "palm_bio_index", "palm_valid", "palm_major_ver", "palm_minor_ver", "palm_template"),
 )
-
 
 _TEMPLATE_FIELDS = (
     "name",
@@ -426,7 +394,6 @@ _TEMPLATE_FIELDS = (
     "palm_bio_no", "palm_bio_index", "palm_valid", "palm_major_ver", "palm_minor_ver", "palm_template",
 )
 
-
 def _get_template_row(employee):
     if not employee:
         return None
@@ -437,7 +404,6 @@ def _get_template_row(employee):
         limit=1,
     )
     return rows[0] if rows else None
-
 
 def _build_userinfo_command(cmd_id, user_id, employee_name, fallback_privilege, tpl):
     def field(key, default=""):
@@ -470,7 +436,6 @@ def _build_userinfo_command(cmd_id, user_id, employee_name, fallback_privilege, 
         f"\tStartDatetime={start_datetime}"
         f"\tEndDatetime={end_datetime}"
     )
-
 
 def _queue_biodata_for_user(device_sn, user_id, employee=None, tpl=None):
     if not device_sn or not user_id:
@@ -524,7 +489,6 @@ def _queue_biodata_for_user(device_sn, user_id, employee=None, tpl=None):
         sent += 1
 
     return sent
-
 
 def _post_to_nodered(payload):
     try:

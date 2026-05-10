@@ -66,7 +66,6 @@
    "columns": 2,
    "fieldname": "employee",
    "fieldtype": "Link",
-   "in_list_view": 1,
    "label": "Employee",
    "options": "Employee",
    "reqd": 1
@@ -101,6 +100,7 @@
   {
    "fieldname": "card",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Card"
   },
   {
@@ -111,6 +111,7 @@
   {
    "fieldname": "password",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Password"
   },
   {
@@ -168,7 +169,8 @@
    "default": "0",
    "fieldname": "fp_valid",
    "fieldtype": "Check",
-   "label": "Valid"
+   "in_list_view": 1,
+   "label": "Valid FP"
   },
   {
    "default": "1",
@@ -229,7 +231,8 @@
    "default": "0",
    "fieldname": "face_valid",
    "fieldtype": "Check",
-   "label": "Valid"
+   "in_list_view": 1,
+   "label": "Valid F"
   },
   {
    "default": "9",
@@ -290,7 +293,8 @@
    "default": "0",
    "fieldname": "palm_valid",
    "fieldtype": "Check",
-   "label": "Valid"
+   "in_list_view": 1,
+   "label": "Valid P"
   },
   {
    "default": "8",
@@ -334,6 +338,7 @@
    "default": "0",
    "fieldname": "deleted",
    "fieldtype": "Check",
+   "in_list_view": 1,
    "label": "Deleted?",
    "read_only": 1
   }
@@ -342,7 +347,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-05-10 15:26:01.491229",
+ "modified": "2026-05-10 15:37:28.557336",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bio Template",
