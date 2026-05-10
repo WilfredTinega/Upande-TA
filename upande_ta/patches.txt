@@ -1,1 +1,2 @@
 upande_ta.patches.v1_0.recreate_biometric_template_doctypes
+upande_ta.patches.v1_0.clear_biometric_template_user_settings
