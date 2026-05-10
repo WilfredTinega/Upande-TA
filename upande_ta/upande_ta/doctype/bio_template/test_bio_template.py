@@ -2,5 +2,5 @@
 
 from frappe.tests.utils import FrappeTestCase
 
-class TestBiometricTemplate(FrappeTestCase):
+class TestBioTemplate(FrappeTestCase):
     pass

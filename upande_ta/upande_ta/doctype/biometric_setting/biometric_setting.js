@@ -1,5 +1,4 @@
 // Copyright (c) 2026, Upande LTD and contributors
-// For license information, please see license.txt
 
 frappe.ui.form.on("Biometric Setting", {
 	refresh: function(frm) {
@@ -7,6 +6,9 @@ frappe.ui.form.on("Biometric Setting", {
 		make_primary(frm, "get_bio");
 		refresh_device_options(frm);
 		render_users_tab(frm);
+		render_biodata_tab(frm);
+		render_scheduled_job_links(frm);
+		guard_devices_delete(frm);
 	},
 
 	users_device_picker: function(frm) {
@@ -18,7 +20,21 @@ frappe.ui.form.on("Biometric Setting", {
 	biodata_device_picker: function(frm) {
 		const match = (frm.doc.devices || []).find(d => d.device_sn === frm.doc.biodata_device_picker);
 		frm.set_value("biodata_device_location", match ? (match.device_location || "") : "");
+		render_biodata_tab(frm);
 	},
+
+	enable_checkin:           autosave_on_change,
+	enable_users:             autosave_on_change,
+	enable_bio_templates:     autosave_on_change,
+	enable_cleanup:           autosave_on_change,
+	checkin_event_frequency:  autosave_on_change,
+	users_event_frequency:    autosave_on_change,
+	biodata_event_frequency:  autosave_on_change,
+	cleanup_event_frequency:  autosave_on_change,
+	checkin_cron_format:      autosave_on_change,
+	users_cron_format:        autosave_on_change,
+	biodata_cron_format:      autosave_on_change,
+	cleanup_cron_format:      autosave_on_change,
 
 	get_checkin: function(frm) {
 		if (!frm.doc.enable_checkin) {
@@ -80,86 +96,12 @@ frappe.ui.form.on("Biometric Setting", {
 		}
 
 		const open_dialog = () => {
-			let d = new frappe.ui.Dialog({
-				title: `Poll BioData — ${frm.doc.biodata_device_location || sn}`,
-				fields: [
-					{
-						fieldname: "info",
-						fieldtype: "HTML",
-						options: `<div style="padding:4px 0;color:var(--text-muted);font-size:12px">
-							Leave empty to poll all users.
-						</div>`
-					},
-					{
-						fieldname: "employee",
-						fieldtype: "Link",
-						label:     "Employee",
-						options:   "Employee",
-						get_query() {
-							return {
-								filters: {
-									status: "Active",
-									attendance_device_id: ["is", "set"]
-								}
-							};
-						},
-						onchange() {
-							const emp = d.get_value("employee");
-							if (!emp) {
-								d.set_value("pin", "");
-								d.set_df_property("pin", "description", "");
-								return;
-							}
-							frappe.db.get_value("Employee", emp, "attendance_device_id").then(r => {
-								const pin = (r && r.message && r.message.attendance_device_id) || "";
-								d.set_value("pin", pin);
-								d.set_df_property(
-									"pin",
-									"description",
-									pin ? "" : "This employee has no Attendance Device ID set."
-								);
-							});
-						}
-					},
-					{
-						fieldname: "pin",
-						fieldtype: "Data",
-						label:     "PIN",
-						read_only: 1
-					}
-				],
-				primary_action_label: "Request BioData",
-				primary_action(values) {
-					if (values.employee && !values.pin) {
-						frappe.msgprint("The selected employee has no Attendance Device ID — set one or leave the employee empty to poll all.");
-						return;
-					}
-					run_with_progress(
-						__("Requesting BioData"),
-						__("Sending biodata poll commands..."),
-						{
-							method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.request_biodata",
-							args: {
-								device_sn: sn,
-								pin:       values.pin || null
-							},
-							callback(r) {
-								if (!r.exc) {
-									d.hide();
-									const n = (r.message && r.message.queued && r.message.queued.length) || 0;
-									frappe.show_alert({
-										message: values.pin
-											? `${n} biodata queries queued for PIN ${values.pin} on ${sn} (Fingerprint, Face, BioPhoto, Password, Palm). Templates will arrive within 30 seconds.`
-											: `${n} biodata queries queued for all users on ${sn} (Fingerprint, Face, BioPhoto, Password, Palm). Templates will arrive within 30 seconds.`,
-										indicator: "blue"
-									}, 10);
-								}
-							}
-						}
-					);
-				}
-			});
-			d.show();
+			open_bulk_user_dialog(
+				"Poll BioData",
+				sn,
+				frm.doc.biodata_device_location || sn,
+				() => render_biodata_tab(frm)
+			);
 		};
 
 		if (frm.is_dirty()) {
@@ -211,6 +153,73 @@ function make_primary(frm, fieldname) {
 	$btn.removeClass("btn-default btn-secondary btn-success btn-danger").addClass("btn-primary");
 }
 
+function guard_devices_delete(frm) {
+	const try_install = () => {
+		const grid = frm.fields_dict.devices && frm.fields_dict.devices.grid;
+		if (!grid) return false;
+		if (grid._delete_guard_installed) return true;
+
+		const original_delete_rows = grid.delete_rows.bind(grid);
+		const original_delete_all_rows = grid.delete_all_rows.bind(grid);
+
+		const collect_sns = (docs) => (docs || [])
+			.map(d => d && d.device_sn)
+			.filter(Boolean);
+
+		const check_then_run = (sns, on_ok) => {
+			if (!sns.length) {
+				on_ok();
+				return;
+			}
+			frappe.call({
+				method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.devices_with_templates",
+				args: { device_sns: JSON.stringify(sns) },
+				callback: (r) => {
+					const blocked = (r && r.message) || {};
+					const blocked_sns = Object.keys(blocked);
+					if (blocked_sns.length) {
+						const lines = blocked_sns.map(sn => {
+							const links = blocked[sn].map(name => {
+								const safe = frappe.utils.escape_html(name);
+								const href = `/app/biometric-template/${encodeURIComponent(name)}`;
+								return `<a href="${href}" target="_blank">${safe}</a>`;
+							}).join(", ");
+							return `<li><b>${frappe.utils.escape_html(sn)}</b> → ${blocked[sn].length} template(s): ${links}</li>`;
+						}).join("");
+						frappe.msgprint({
+							title: __("Cannot delete device(s)"),
+							indicator: "red",
+							message: __("The following device(s) have Biometric Template records. Delete the template(s) first:") +
+								`<ul>${lines}</ul>`
+						});
+						return;
+					}
+					on_ok();
+				}
+			});
+		};
+
+		grid.delete_rows = function() {
+			const selected = grid.get_selected_children() || [];
+			check_then_run(collect_sns(selected), () => original_delete_rows());
+		};
+
+		grid.delete_all_rows = function() {
+			const all_docs = (frm.doc.devices || []);
+			check_then_run(collect_sns(all_docs), () => original_delete_all_rows());
+		};
+
+		grid._delete_guard_installed = true;
+		console.log("[upande_ta] devices delete guard installed");
+		return true;
+	};
+
+	if (try_install()) return;
+	setTimeout(try_install, 50);
+	setTimeout(try_install, 250);
+	setTimeout(try_install, 1000);
+}
+
 function refresh_device_options(frm) {
 	const opts = (frm.doc.devices || [])
 		.map(d => d.device_sn)
@@ -246,6 +255,9 @@ function render_users_tab(frm) {
 		<div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap">
 			<button class="btn btn-sm btn-primary" id="btn-bulk-add">Add</button>
 			<button class="btn btn-sm btn-primary" id="btn-bulk-delete">Delete</button>
+			<button class="btn btn-sm btn-primary" id="btn-hydrate-templates">
+				Sync
+			</button>
 		</div>
 		<div id="users-table-container">
 			<p style="color:var(--text-muted)">Loading users on ${frappe.utils.escape_html(loc)}...</p>
@@ -262,6 +274,28 @@ function render_users_tab(frm) {
 
 	wrapper.find("#btn-bulk-add").on("click", () => open_bulk("Add User"));
 	wrapper.find("#btn-bulk-delete").on("click", () => open_bulk("Delete User"));
+	wrapper.find("#btn-hydrate-templates").on("click", () => {
+		frappe.call({
+			method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.hydrate_users_from_templates",
+			args: { device_sn: sn },
+			callback: (r) => {
+				if (r.exc || !r.message) return;
+				const m = r.message;
+				if (m.reason) {
+					frappe.show_alert({
+						message: __("No template for this device, select another to sync."),
+						indicator: "orange"
+					}, 5);
+					return;
+				}
+				frappe.show_alert({
+					message: __("Synced {0} user(s); skipped {1}.", [m.created, m.skipped]),
+					indicator: m.created ? "green" : "blue"
+				}, 5);
+				render_users_tab(frm);
+			}
+		});
+	});
 
 	frappe.call({
 		method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_device_users",
@@ -354,6 +388,142 @@ function send_single_user_command(device_sn, row_name, command_type, users, frm)
 	);
 }
 
+function render_biodata_tab(frm) {
+	const wrapper = frm.fields_dict.biometric_templates && frm.fields_dict.biometric_templates.$wrapper;
+	if (!wrapper) return;
+
+	const sn = frm.doc.biodata_device_picker;
+	if (!sn) {
+		wrapper.html(`<div style="padding:20px;color:var(--text-muted)">
+			Pick a device above to view its biometric templates.
+		</div>`);
+		return;
+	}
+
+	const device_match = (frm.doc.devices || []).find(d => d.device_sn === sn);
+	const loc = (device_match && device_match.device_location) || sn;
+
+	wrapper.html(`
+		<div id="templates-table-container">
+			<p style="color:var(--text-muted)">Loading templates on ${frappe.utils.escape_html(loc)}...</p>
+		</div>
+	`);
+
+	frappe.call({
+		method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.get_device_templates",
+		args: { device_sn: sn },
+		callback: (r) => render_template_list(wrapper, sn, r.message || [], frm)
+	});
+}
+
+function render_template_list(wrapper, device_sn, templates, frm) {
+	const container = wrapper.find("#templates-table-container");
+
+	if (!templates.length) {
+		container.html(`<p style="color:var(--text-muted);padding:8px 0">
+			No biometric templates enrolled on this device yet. Use the Get BioData button to fetch templates.
+		</p>`);
+		return;
+	}
+
+	const tick = `<span style="color:var(--green-500)">✓</span>`;
+	const dash = `<span style="color:var(--text-muted)">—</span>`;
+
+	const rows = templates.map(t => {
+		const parent_link = `/app/biometric-template/${encodeURIComponent(t.parent_name)}`;
+		return `
+			<tr>
+				<td style="font-family:var(--font-mono);font-size:13px">${frappe.utils.escape_html(t.user_id || "")}</td>
+				<td>
+					<a href="${parent_link}" target="_blank">${frappe.utils.escape_html(t.employee_name || "")}</a>
+				</td>
+				<td style="text-align:center">${t.has_fp ? tick : dash}</td>
+				<td style="text-align:center">${t.has_face ? tick : dash}</td>
+				<td style="text-align:center">${t.has_palm ? tick : dash}</td>
+				<td style="text-align:center">${t.has_password ? tick : dash}</td>
+				<td style="text-align:center">${t.has_card ? tick : dash}</td>
+			</tr>
+		`;
+	}).join("");
+
+	container.html(`
+		<div style="border:1px solid var(--border-color);border-radius:8px;overflow:hidden">
+			<table class="table table-sm" style="margin:0">
+				<thead style="background:var(--bg-light-gray)">
+					<tr>
+						<th style="width:130px">PIN</th>
+						<th>Employee</th>
+						<th style="width:60px;text-align:center">FP</th>
+						<th style="width:60px;text-align:center">Face</th>
+						<th style="width:60px;text-align:center">Palm</th>
+						<th style="width:80px;text-align:center">Password</th>
+						<th style="width:60px;text-align:center">Card</th>
+					</tr>
+				</thead>
+				<tbody>${rows}</tbody>
+			</table>
+		</div>
+	`);
+
+}
+
+const SCHEDULED_JOB_PREFIX_TO_FREQUENCY = {
+	checkin: "checkin_event_frequency",
+	users:   "users_event_frequency",
+	biodata: "biodata_event_frequency",
+	cleanup: "cleanup_event_frequency"
+};
+
+function autosave_on_change(frm) {
+	if (frm._autosaving) return;
+	if (frm.is_new()) return;
+	if (!frm.is_dirty()) return;
+	frm._autosaving = true;
+	frm.save()
+		.then(() => {
+			frappe.show_alert({ message: __("Schedule updated"), indicator: "green" }, 3);
+			render_scheduled_job_links(frm);
+		})
+		.finally(() => {
+			frm._autosaving = false;
+		});
+}
+
+function render_scheduled_job_links(frm) {
+	frappe.call({
+		method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.get_scheduled_job_links",
+		callback: (r) => {
+			const data = (r && r.message) || {};
+			for (const [prefix, fieldname] of Object.entries(SCHEDULED_JOB_PREFIX_TO_FREQUENCY)) {
+				inject_job_link(frm, fieldname, data[prefix]);
+			}
+		}
+	});
+}
+
+function inject_job_link(frm, fieldname, info) {
+	const field = frm.fields_dict[fieldname];
+	if (!field || !field.$wrapper) return;
+	const $w = field.$wrapper;
+	$w.find(".biometric-job-link").remove();
+
+	if (!info) {
+		$w.append(`<div class="biometric-job-link" style="margin-top:6px;font-size:12px;color:var(--text-muted)">
+			Save the form to create the scheduled job.
+		</div>`);
+		return;
+	}
+
+	const status_color = info.stopped ? "var(--red-500)" : "var(--green-500)";
+	const status_text  = info.stopped ? "Stopped" : "Active";
+	const href = `/app/scheduled-job-type/${encodeURIComponent(info.name)}`;
+	$w.append(`<div class="biometric-job-link" style="margin-top:6px;font-size:12px">
+		<a href="${href}" target="_blank">View Scheduled Job</a>
+		<span style="color:${status_color};margin-left:8px">● ${status_text}</span>
+		<span style="color:var(--text-muted);margin-left:8px">(${frappe.utils.escape_html(info.frequency || "")})</span>
+	</div>`);
+}
+
 frappe.ui.form.on("Biometric Device", {
 	device_sn: function(frm) { refresh_device_options(frm); },
 	device_location: function(frm) { refresh_device_options(frm); },
@@ -371,13 +541,17 @@ frappe.ui.form.on("Biometric Checkin", {
 function open_bulk_user_dialog(command_type, default_sn, default_location, on_success) {
 	let dialog_title = {
 		"Add User":    "Bulk Add Users to Device",
-		"Delete User": "Bulk Delete Users from Device"
+		"Delete User": "Bulk Delete Users from Device",
+		"Poll BioData": "Poll BioData from Device"
 	}[command_type];
 
 	let indicator = {
 		"Add User":    "green",
-		"Delete User": "red"
+		"Delete User": "red",
+		"Poll BioData": "blue"
 	}[command_type];
+
+	const is_poll = command_type === "Poll BioData";
 
 	let d = new frappe.ui.Dialog({
 		title: dialog_title,
@@ -458,7 +632,7 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 				</div>`
 			}
 		],
-		primary_action_label: `${command_type.split(" ")[0]} Selected`,
+		primary_action_label: is_poll ? "Poll Selected" : `${command_type.split(" ")[0]} Selected`,
 		primary_action() {
 			let checked = get_checked_users();
 			if (!checked.length) {
@@ -469,6 +643,39 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			let raw = d.get_value("device_sn") || "";
 			let sn  = raw.split(" — ")[0].trim();
 			let loc = raw.split(" — ")[1] || sn;
+
+			if (is_poll) {
+				const pins = checked.map(u => u.user_id).filter(Boolean);
+				if (!pins.length) {
+					frappe.msgprint("None of the selected employees have a PIN.");
+					return;
+				}
+				frappe.confirm(`Poll BioData for ${pins.length} user(s) on ${loc}?`, () => {
+					run_with_progress(
+						__("Polling BioData ({0} users)", [pins.length]),
+						__("Queuing biodata poll commands..."),
+						{
+							method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.request_biodata",
+							args: {
+								device_sn: sn,
+								pins:      JSON.stringify(pins)
+							},
+							callback(r) {
+								if (!r.exc) {
+									d.hide();
+									if (on_success) on_success();
+									const n = (r.message && r.message.queued && r.message.queued.length) || 0;
+									frappe.show_alert({
+										message: `${n} biodata queries queued for ${pins.length} PIN(s) on ${loc}. Templates will arrive within 30 seconds.`,
+										indicator: indicator
+									}, 10);
+								}
+							}
+						}
+					);
+				});
+				return;
+			}
 
 			let label = command_type === "Delete User"
 				? `Delete ${checked.length} user(s) from ${loc}?`
@@ -669,7 +876,34 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		container.html(`<p style="color:var(--color-text-secondary)">Loading...</p>`);
 
 		let filters = get_filter_args();
+		d._current_sn = sn;
 
+		const proceed = () => _load_users_inner(sn, filters, container);
+
+		if (d._template_devices) {
+			proceed();
+			return;
+		}
+		frappe.call({
+			method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.get_templated_pins_per_device",
+			callback(tr) {
+				const data = (tr && tr.message) || { devices: [], pins_by_device: {} };
+				d._template_devices = data.devices || [];
+				d._template_pins_by_device = {};
+				for (const sn_key in (data.pins_by_device || {})) {
+					d._template_pins_by_device[sn_key] = new Set(data.pins_by_device[sn_key] || []);
+				}
+				proceed();
+			},
+			error() {
+				d._template_devices = [];
+				d._template_pins_by_device = {};
+				proceed();
+			}
+		});
+	}
+
+	function _load_users_inner(sn, filters, container) {
 		frappe.call({
 			method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_device_users",
 			args: { device_sn: sn },
@@ -677,15 +911,20 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 				let device_users = r.message || [];
 				let has_filters = filters.employee || filters.designation || filters.department;
 
-				if (command_type === "Add User") {
+				if (command_type === "Add User" || command_type === "Poll BioData") {
 					frappe.call({
 						method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_employees",
 						args: Object.assign({ status: "Active" }, filters),
 						callback(er) {
-							let employees   = er.message || [];
-							let device_pins = new Set(device_users.map(u => u.user_id));
-							let new_emps    = employees.filter(e => !device_pins.has(e.user_id));
-							render_table(new_emps.map(e => ({
+							let employees = er.message || [];
+							let rows;
+							if (command_type === "Add User") {
+								let device_pins = new Set(device_users.map(u => u.user_id));
+								rows = employees.filter(e => !device_pins.has(e.user_id));
+							} else {
+								rows = employees;
+							}
+							render_table(rows.map(e => ({
 								user_id:       e.user_id,
 								employee_name: e.full_name,
 								privilege:     "0"
@@ -722,8 +961,19 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			return;
 		}
 
-		let show_privilege = action !== "Delete User";
+		let show_privilege = action === "Add User";
 		let privilege_col  = show_privilege ? `<th style="width:120px">Privilege</th>` : "";
+		let template_devices = d._template_devices || [];
+		let pins_by_device   = d._template_pins_by_device || {};
+		if (d._current_sn) {
+			template_devices = template_devices.filter(dev => dev.device_sn !== d._current_sn);
+		}
+
+		let device_cols = template_devices.map(dev =>
+			`<th style="width:110px;text-align:center" title="${frappe.utils.escape_html(dev.device_sn)}">
+				${frappe.utils.escape_html(dev.device_location || dev.device_sn)}
+			</th>`
+		).join("");
 
 		let rows = users.map((u, i) => {
 			let privilege_cell = show_privilege ? `
@@ -734,6 +984,12 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 						<option value="14" ${u.privilege === "14" ? "selected" : ""}>Admin</option>
 					</select>
 				</td>` : "";
+
+			let device_cells = template_devices.map(dev => {
+				const pins = pins_by_device[dev.device_sn] || new Set();
+				const has = pins.has(u.user_id);
+				return `<td style="text-align:center">${has ? `<span style="color:var(--green-500)">✓</span>` : `<span style="color:var(--text-muted)">—</span>`}</td>`;
+			}).join("");
 
 			let status_badge = u.status ? `
 				<span style="font-size:11px;padding:2px 6px;border-radius:4px;
@@ -755,6 +1011,7 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 						${status_badge}
 					</td>
 					${privilege_cell}
+					${device_cells}
 				</tr>`;
 		}).join("");
 
@@ -775,6 +1032,7 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 							<th style="width:130px">PIN</th>
 							<th>Name</th>
 							${privilege_col}
+							${device_cols}
 						</tr>
 					</thead>
 					<tbody>${rows}</tbody>

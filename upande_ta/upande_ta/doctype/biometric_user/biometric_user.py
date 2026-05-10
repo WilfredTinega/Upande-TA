@@ -1,14 +1,12 @@
 # Copyright (c) 2026, Upande LTD and contributors
-# For license information, please see license.txt
+
 import frappe
 import json
 import urllib.request
 from frappe.model.document import Document
 
-
 class BiometricUser(Document):
     pass
-
 
 def _get_user_row(device_sn, user_id):
     rows = frappe.get_all(
@@ -21,7 +19,6 @@ def _get_user_row(device_sn, user_id):
         return None
     return frappe.get_doc("Biometric User", rows[0].name)
 
-
 def _delete_user_row(device_sn, user_id):
     existing = _get_user_row(device_sn, user_id)
     if not existing:
@@ -32,6 +29,28 @@ def _delete_user_row(device_sn, user_id):
     )
     return True
 
+def _set_template_deleted_flag(device_sn, user_id, value):
+    if not device_sn or not user_id:
+        return 0
+    if not frappe.db.exists("DocType", "Biometric Template"):
+        return 0
+    parent_name = frappe.db.get_value("Biometric Template", {"device_sn": device_sn}, "name")
+    if not parent_name:
+        return 0
+    rows = frappe.get_all(
+        "Bio Template",
+        filters={
+            "parent":      parent_name,
+            "parentfield": "bio_templates",
+            "user_id":     user_id,
+        },
+        pluck="name",
+    )
+    if not rows:
+        return 0
+    for row_name in rows:
+        frappe.db.set_value("Bio Template", row_name, "deleted", 1 if value else 0)
+    return len(rows)
 
 def _upsert_user_row(device_sn, user_id, values):
     existing = _get_user_row(device_sn, user_id)
@@ -49,6 +68,58 @@ def _upsert_user_row(device_sn, user_id, values):
     row.insert(ignore_permissions=True)
     return row
 
+@frappe.whitelist()
+def hydrate_users_from_templates(device_sn):
+    if not device_sn:
+        frappe.throw("device_sn is required")
+    if not frappe.db.exists("DocType", "Biometric Template"):
+        return {"created": 0, "skipped": 0, "reason": "Biometric Template doctype not migrated"}
+
+    parent_name = frappe.db.get_value("Biometric Template", {"device_sn": device_sn}, "name")
+    if not parent_name:
+        return {"created": 0, "skipped": 0, "reason": "No Biometric Template for this device"}
+
+    template_rows = frappe.get_all(
+        "Bio Template",
+        filters={
+            "parent":      parent_name,
+            "parentfield": "bio_templates",
+            "deleted":     0,
+        },
+        fields=["employee", "employee_name", "user_id", "privilege"],
+    )
+    if not template_rows:
+        return {"created": 0, "skipped": 0}
+
+    existing_pins = {
+        r.user_id
+        for r in frappe.get_all(
+            "Biometric User",
+            filters={"device_sn": device_sn, "user_id": ["in", [t.user_id for t in template_rows if t.user_id]]},
+            fields=["user_id"],
+        )
+    }
+
+    created = 0
+    skipped = 0
+    for t in template_rows:
+        if not t.user_id or not t.employee:
+            skipped += 1
+            continue
+        if t.user_id in existing_pins:
+            skipped += 1
+            continue
+        _upsert_user_row(device_sn, t.user_id, {
+            "employee":      t.employee,
+            "employee_name": t.employee_name or "",
+            "privilege":     t.privilege or "0",
+            "status":        "Active",
+        })
+        created += 1
+
+    if created:
+        frappe.db.commit()
+    return {"created": created, "skipped": skipped}
 
 @frappe.whitelist()
 def send_device_command(name, command_type, override=None):
@@ -88,6 +159,7 @@ def send_device_command(name, command_type, override=None):
             "command_status": "Pending",
             "add_user":       command,
         })
+        _set_template_deleted_flag(device_sn, user_id, False)
 
     elif command_type == "Delete User":
         if not user_id:
@@ -95,6 +167,7 @@ def send_device_command(name, command_type, override=None):
 
         command = f"C:{cmd_id}:DATA DELETE USERINFO\tPIN={user_id}"
         _delete_user_row(device_sn, user_id)
+        _set_template_deleted_flag(device_sn, user_id, True)
 
     else:
         frappe.throw(f"Unknown command type: {command_type}")
@@ -121,7 +194,6 @@ def send_device_command(name, command_type, override=None):
         "biodata_queued": biodata_queued
     }
 
-
 @frappe.whitelist()
 def get_devices():
     settings = frappe.get_single("Biometric Setting")
@@ -133,7 +205,6 @@ def get_devices():
         }
         for d in (settings.devices or [])
     ]
-
 
 @frappe.whitelist()
 def get_device_users(device_sn):
@@ -153,7 +224,6 @@ def get_device_users(device_sn):
         }
         for r in rows
     ]
-
 
 @frappe.whitelist()
 def get_employees(status="Active", employee=None, designation=None, department=None):
@@ -191,7 +261,6 @@ def get_employees(status="Active", employee=None, designation=None, department=N
         })
     return result
 
-
 @frappe.whitelist()
 def get_active_filter_options(department=None, designation=None):
     all_employees = frappe.get_all(
@@ -219,16 +288,6 @@ def get_active_filter_options(department=None, designation=None):
         "department_count":  len(departments),
         "employee_count":    employee_count
     }
-
-
-@frappe.whitelist()
-def get_server_settings():
-    settings = frappe.get_single("Biometric Setting")
-    return {
-        "is_delete": getattr(settings, "is_delete", 0) or 0,
-        "is_update": getattr(settings, "is_update", 0) or 0,
-    }
-
 
 @frappe.whitelist()
 def bulk_command(device_sn, users, command_type):
@@ -282,10 +341,12 @@ def bulk_command(device_sn, users, command_type):
                     "enrollment_date": now,
                     "add_user":        command,
                 })
+                _set_template_deleted_flag(device_sn, user_id, False)
 
             elif command_type == "Delete User":
                 command = f"C:{cmd_id}:DATA DELETE USERINFO\tPIN={user_id}"
                 _delete_user_row(device_sn, user_id)
+                _set_template_deleted_flag(device_sn, user_id, True)
 
             else:
                 frappe.throw(f"Unknown command type: {command_type}")
@@ -317,16 +378,14 @@ def bulk_command(device_sn, users, command_type):
         "errors":  failed
     }
 
-
 _BIO_TYPES = (
     ("Fingerprint", 1, "fp_bio_no",   "fp_bio_index",   "fp_valid",   "fp_major_ver",   "fp_minor_ver",   "fingerprint_template"),
     ("Face",        9, "face_bio_no", "face_bio_index", "face_valid", "face_major_ver", "face_minor_ver", "face_template"),
     ("Palm",        8, "palm_bio_no", "palm_bio_index", "palm_valid", "palm_major_ver", "palm_minor_ver", "palm_template"),
 )
 
-
 _TEMPLATE_FIELDS = (
-    "name", "source_device",
+    "name",
     "card", "vice_card", "password", "privilege",
     "user_group", "timezone_group", "verify_mode",
     "start_datetime", "end_datetime",
@@ -335,18 +394,16 @@ _TEMPLATE_FIELDS = (
     "palm_bio_no", "palm_bio_index", "palm_valid", "palm_major_ver", "palm_minor_ver", "palm_template",
 )
 
-
 def _get_template_row(employee):
     if not employee:
         return None
     rows = frappe.get_all(
-        "Biometric Template",
+        "Bio Template",
         filters={"employee": employee},
         fields=list(_TEMPLATE_FIELDS),
         limit=1,
     )
     return rows[0] if rows else None
-
 
 def _build_userinfo_command(cmd_id, user_id, employee_name, fallback_privilege, tpl):
     def field(key, default=""):
@@ -379,7 +436,6 @@ def _build_userinfo_command(cmd_id, user_id, employee_name, fallback_privilege, 
         f"\tStartDatetime={start_datetime}"
         f"\tEndDatetime={end_datetime}"
     )
-
 
 def _queue_biodata_for_user(device_sn, user_id, employee=None, tpl=None):
     if not device_sn or not user_id:
@@ -433,7 +489,6 @@ def _queue_biodata_for_user(device_sn, user_id, employee=None, tpl=None):
         sent += 1
 
     return sent
-
 
 def _post_to_nodered(payload):
     try:

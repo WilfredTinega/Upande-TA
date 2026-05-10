@@ -2,5 +2,5 @@
 
 from frappe.model.document import Document
 
-class BiometricLogs(Document):
-	pass
+class BioTemplate(Document):
+    pass

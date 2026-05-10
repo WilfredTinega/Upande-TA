@@ -26,7 +26,7 @@
   "column_break_gozy",
   "get_bio",
   "section_break_biodata",
-  "bio_templates",
+  "biometric_templates",
   "server_settings_tab",
   "server_ip",
   "server_port",
@@ -134,12 +134,6 @@
   {
    "fieldname": "section_break_biodata",
    "fieldtype": "Section Break"
-  },
-  {
-   "fieldname": "bio_templates",
-   "fieldtype": "Table",
-   "label": "Bio Templates",
-   "options": "Biometric Template"
   },
   {
    "fieldname": "poll_attendance_tab",
@@ -313,13 +307,18 @@
    "fieldname": "checkin_column",
    "fieldtype": "Column Break",
    "label": "Checkin"
+  },
+  {
+   "fieldname": "biometric_templates",
+   "fieldtype": "HTML",
+   "label": "Biometric Templates"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-09 00:42:30.345125",
+ "modified": "2026-05-10 13:54:48.706127",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",
