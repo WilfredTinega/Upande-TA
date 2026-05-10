@@ -141,6 +141,10 @@ after_migrate = ["upande_ta.upande_ta.doctype.biometric_setting.biometric_settin
 doc_events = {
 	"Employee Checkin": {
 		"validate": "upande_ta.upande_ta.overrides.employee_checkin.prevent_duplicate"
+	},
+	"Employee": {
+		"before_save": "upande_ta.upande_ta.overrides.employee.set_attendance_device_id",
+		"after_insert": "upande_ta.upande_ta.overrides.employee.set_attendance_device_id"
 	}
 }
 
