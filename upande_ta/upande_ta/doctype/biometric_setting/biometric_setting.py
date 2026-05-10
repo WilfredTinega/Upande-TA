@@ -221,7 +221,7 @@ def get_device_templates(device_sn):
 	  "deleted":     0,
 	 },
 	 fields=[
-	  "name", "employee", "employee_name", "user_id", "captured_at",
+	  "name", "employee", "employee_name", "user_id",
 	  "fp_valid", "face_valid", "palm_valid",
 	  "fingerprint_template", "face_template", "palm_template",
 	  "password", "card",
@@ -236,7 +236,6 @@ def get_device_templates(device_sn):
 		 "employee":      r.employee,
 		 "employee_name": r.employee_name or "",
 		 "user_id":       r.user_id or "",
-		 "captured_at":   frappe.utils.format_datetime(r.captured_at) if r.captured_at else "",
 		 "has_fp":       bool(r.fp_valid and (r.fingerprint_template or "").strip()),
 		 "has_face":     bool(r.face_valid and (r.face_template or "").strip()),
 		 "has_palm":     bool(r.palm_valid and (r.palm_template or "").strip()),
