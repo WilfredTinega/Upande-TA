@@ -131,17 +131,20 @@ def store_biotemplate():
             }
             return
 
-    employee_name = frappe.db.get_value(
-        "Employee", {"attendance_device_id": user_id}, "name"
+    employee_row = frappe.db.get_value(
+        "Employee",
+        {"attendance_device_id": user_id},
+        ["name", "employee_name"],
+        as_dict=True,
     )
-    if not employee_name:
+    if not employee_row:
         frappe.response["message"] = {
             "status": "skipped",
             "reason": f"No employee found for PIN {user_id}",
         }
         return
-
-    now = frappe.utils.now_datetime()
+    employee_name = employee_row.name
+    employee_full_name = employee_row.employee_name or ""
 
     new_values = {}
 
@@ -169,16 +172,16 @@ def store_biotemplate():
             "parentfield": "bio_templates",
             "employee":    employee_name,
         },
-        ("name",) + tuple(new_values),
+        ("name", "employee_name") + tuple(new_values),
         as_dict=True,
     )
 
     if existing:
         changed = {k: v for k, v in new_values.items() if existing.get(k) != v}
         if changed:
-            changed["captured_at"] = now
-
             changed["deleted"] = 0
+            if employee_full_name and existing.get("employee_name") != employee_full_name:
+                changed["employee_name"] = employee_full_name
             frappe.db.set_value(
                 "Bio Template", existing["name"], changed,
                 update_modified=False,
@@ -206,9 +209,9 @@ def store_biotemplate():
             "parenttype":  "Biometric Template",
             "parentfield": "bio_templates",
             "idx":         idx,
-            "employee":    employee_name,
-            "user_id":     user_id,
-            "captured_at": now,
+            "employee":      employee_name,
+            "employee_name": employee_full_name,
+            "user_id":       user_id,
             **new_values,
         })
         row.db_insert()
