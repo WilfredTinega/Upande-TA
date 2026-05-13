@@ -1,0 +1,314 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-05-08 14:56:33.591294",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "poll_attendance_tab",
+  "start_date",
+  "column_break_papq",
+  "end_date",
+  "column_break_poll_att",
+  "get_checkin",
+  "poll_devices_section",
+  "poll_devices",
+  "users_tab",
+  "users_device_picker",
+  "column_break_zgkt",
+  "device_location",
+  "section_break_iurc",
+  "users_html",
+  "biodata_tab",
+  "biodata_device_picker",
+  "column_break_biodata",
+  "biodata_device_location",
+  "column_break_gozy",
+  "get_bio",
+  "section_break_biodata",
+  "bio_templates",
+  "server_settings_tab",
+  "server_ip",
+  "server_port",
+  "column_break_xkjy",
+  "end_point",
+  "section_break_asec",
+  "devices",
+  "events_tab",
+  "events_section",
+  "checkin_column",
+  "enable_checkin",
+  "checkin_event_frequency",
+  "checkin_cron_format",
+  "events_column_users",
+  "enable_users",
+  "users_event_frequency",
+  "users_cron_format",
+  "events_column_biodata",
+  "enable_bio_templates",
+  "biodata_event_frequency",
+  "biodata_cron_format"
+ ],
+ "fields": [
+  {
+   "fieldname": "server_settings_tab",
+   "fieldtype": "Tab Break",
+   "label": "Server Settings"
+  },
+  {
+   "fieldname": "server_ip",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Server IP",
+   "reqd": 1
+  },
+  {
+   "fieldname": "server_port",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Server Port",
+   "reqd": 1
+  },
+  {
+   "fieldname": "end_point",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "End Point",
+   "reqd": 1
+  },
+  {
+   "fieldname": "devices",
+   "fieldtype": "Table",
+   "label": "Devices",
+   "options": "Biometric Device"
+  },
+  {
+   "fieldname": "users_tab",
+   "fieldtype": "Tab Break",
+   "label": "Users"
+  },
+  {
+   "fieldname": "users_device_picker",
+   "fieldtype": "Select",
+   "label": "Device"
+  },
+  {
+   "fieldname": "device_location",
+   "fieldtype": "Data",
+   "label": "Device Location",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_iurc",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "users_html",
+   "fieldtype": "HTML",
+   "label": "Users"
+  },
+  {
+   "fieldname": "biodata_tab",
+   "fieldtype": "Tab Break",
+   "label": "Bio Templates"
+  },
+  {
+   "fieldname": "biodata_device_picker",
+   "fieldtype": "Select",
+   "label": "Device"
+  },
+  {
+   "fieldname": "column_break_biodata",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "biodata_device_location",
+   "fieldtype": "Data",
+   "label": "Device Location",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_biodata",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "bio_templates",
+   "fieldtype": "Table",
+   "label": "Bio Templates",
+   "options": "Biometric Template"
+  },
+  {
+   "fieldname": "poll_attendance_tab",
+   "fieldtype": "Tab Break",
+   "label": "Checkin"
+  },
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Date",
+   "label": "Start Date"
+  },
+  {
+   "fieldname": "end_date",
+   "fieldtype": "Date",
+   "label": "End Date"
+  },
+  {
+   "fieldname": "column_break_poll_att",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "poll_devices_section",
+   "fieldtype": "Section Break",
+   "label": "Devices"
+  },
+  {
+   "fieldname": "get_bio",
+   "fieldtype": "Button",
+   "label": "Get BioData"
+  },
+  {
+   "fieldname": "get_checkin",
+   "fieldtype": "Button",
+   "label": "Get Checkin"
+  },
+  {
+   "fieldname": "column_break_gozy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_papq",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_asec",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "poll_devices",
+   "fieldtype": "Table",
+   "label": "Devices to Poll",
+   "options": "Biometric Checkin"
+  },
+  {
+   "fieldname": "column_break_zgkt",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_checkin",
+   "fieldtype": "Check",
+   "label": "Enable Checkin?"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_users",
+   "fieldtype": "Check",
+   "label": "Enable Users?"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_bio_templates",
+   "fieldtype": "Check",
+   "label": "Enable Bio Templates?"
+  },
+  {
+   "fieldname": "events_tab",
+   "fieldtype": "Tab Break",
+   "label": "Events"
+  },
+  {
+   "fieldname": "events_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "depends_on": "eval:doc.enable_checkin",
+   "fieldname": "checkin_event_frequency",
+   "fieldtype": "Select",
+   "label": "Event Frequency",
+   "mandatory_depends_on": "eval:doc.enable_checkin",
+   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "depends_on": "eval:doc.enable_checkin && doc.checkin_event_frequency=='Cron'",
+   "fieldname": "checkin_cron_format",
+   "fieldtype": "Data",
+   "label": "Cron Format",
+   "mandatory_depends_on": "eval:doc.enable_checkin && doc.checkin_event_frequency=='Cron'"
+  },
+  {
+   "fieldname": "events_column_users",
+   "fieldtype": "Column Break",
+   "label": "Users"
+  },
+  {
+   "depends_on": "eval:doc.enable_users",
+   "fieldname": "users_event_frequency",
+   "fieldtype": "Select",
+   "label": "Event Frequency",
+   "mandatory_depends_on": "eval:doc.enable_users",
+   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "depends_on": "eval:doc.enable_users && doc.users_event_frequency=='Cron'",
+   "fieldname": "users_cron_format",
+   "fieldtype": "Data",
+   "label": "Cron Format",
+   "mandatory_depends_on": "eval:doc.enable_users && doc.users_event_frequency=='Cron'"
+  },
+  {
+   "fieldname": "events_column_biodata",
+   "fieldtype": "Column Break",
+   "label": "Bio Data"
+  },
+  {
+   "depends_on": "eval:doc.enable_bio_templates",
+   "fieldname": "biodata_event_frequency",
+   "fieldtype": "Select",
+   "label": "Event Frequency",
+   "mandatory_depends_on": "eval:doc.enable_bio_templates",
+   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "depends_on": "eval:doc.enable_bio_templates && doc.biodata_event_frequency=='Cron'",
+   "fieldname": "biodata_cron_format",
+   "fieldtype": "Data",
+   "label": "Cron Format",
+   "mandatory_depends_on": "eval:doc.enable_bio_templates && doc.biodata_event_frequency=='Cron'"
+  },
+  {
+   "fieldname": "column_break_xkjy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "checkin_column",
+   "fieldtype": "Column Break",
+   "label": "Checkin"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-05-09 00:42:30.345125",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Biometric Setting",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

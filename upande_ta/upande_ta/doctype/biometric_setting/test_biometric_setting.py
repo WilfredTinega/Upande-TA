@@ -13,9 +13,9 @@ IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 
 
 
-class IntegrationTestBulkHolidayAssignment(IntegrationTestCase):
+class IntegrationTestBiometricSetting(IntegrationTestCase):
 	"""
-	Integration tests for BulkHolidayAssignment.
+	Integration tests for BiometricSetting.
 	Use this class for testing interactions between multiple components.
 	"""
 
