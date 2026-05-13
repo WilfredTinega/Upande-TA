@@ -7,7 +7,8 @@ frappe.ui.form.on("Bulk Overtime", {
 		frm.set_query("department", () => ({
 			filters: { company: frm.doc.company },
 		}));
-		
+
+
 		// Restrict Employee in child table to selected department/group
 		frm.set_query("employee", "bulk_overtime_entries", () => ({
 			filters: {
@@ -27,8 +28,8 @@ frappe.ui.form.on("Bulk Overtime", {
 				"btn-primary",
 				!(frm.doc.bulk_overtime_entries || []).length,
 			);
-			
-			// Add button for verification dialog at Draft stage
+
+			// Add button for verification/sync dialog at Draft stage
 			frm.add_custom_button(__("Verify Overtime"), () => {
 				frm.events.show_verification_dialog(frm);
 			});
@@ -37,13 +38,6 @@ frappe.ui.form.on("Bulk Overtime", {
 			frm.add_custom_button(__("Apply Requested Hours"), () => {
 				frm.events.apply_default_requested_hours(frm);
 			});
-		}
-		
-		// Show summary in a more visible way
-		if (frm.events.has_overtime_request_field(frm) && frm.doc.overtime_request) {
-			frm.set_df_property("overtime_request", "read_only", 1);
-			frm.set_df_property("overtime_request", "description", 
-				__("System-generated summary of all overtime requests"));
 		}
 	},
 
@@ -71,7 +65,7 @@ frappe.ui.form.on("Bulk Overtime", {
 			frm.events.call_fill_employee_details(frm);
 		}
 	},
-	
+
 	call_fill_employee_details(frm) {
 		return frappe
 			.call({
@@ -83,8 +77,6 @@ frappe.ui.form.on("Bulk Overtime", {
 			.then((r) => {
 				if (r.docs?.[0]?.bulk_overtime_entries) {
 					frm.events.apply_default_requested_hours(frm, false);
-					// Update the overtime request summary after fetching
-					frm.events.update_overtime_summary(frm);
 					frm.dirty();
 					frm.save();
 				}
@@ -92,90 +84,60 @@ frappe.ui.form.on("Bulk Overtime", {
 				frm.scroll_to_field("bulk_overtime_entries");
 			});
 	},
-	
-	// ── Overtime Request Summary Field (Gap 1 fix) ───────────────────────────
-	
-	update_overtime_summary(frm) {
-		const entries = frm.doc.bulk_overtime_entries || [];
-		if (!entries.length) {
-			frm.events.set_overtime_request(frm, "");
-			return;
-		}
-		
-		// Group entries by employee
-		const employee_map = new Map();
-		entries.forEach(entry => {
-			if (!employee_map.has(entry.employee)) {
-				employee_map.set(entry.employee, {
-					employee_name: entry.employee_name,
-					dates: []
-				});
-			}
-			employee_map.get(entry.employee).dates.push({
-				date: entry.overtime_date,
-				hours: entry.hours_requested
-			});
-		});
-		
-		// Build summary text
-		let summary = "OVERTIME REQUEST SUMMARY\n";
-		summary += "=" .repeat(50) + "\n\n";
-		
-		for (let [employee_id, data] of employee_map) {
-			summary += `Employee: ${employee_id} - ${data.employee_name}\n`;
-			summary += `Overtime Dates:\n`;
-			data.dates.forEach(date_info => {
-				summary += `  • ${date_info.date}: ${date_info.hours} hours\n`;
-			});
-			summary += `Total Hours: ${data.dates.reduce((sum, d) => sum + (parseFloat(d.hours) || 0), 0)}\n`;
-			summary += "-".repeat(30) + "\n";
-		}
-		
-		summary += `\nGenerated on: ${frappe.datetime.now_datetime()}`;
-		frm.events.set_overtime_request(frm, summary);
-	},
-	
-	// ── Verification Dialog (Gap 3 fix) ───────────────────────────────────────
-	
+
+	// ── Verification / Attendance Sync Dialog ─────────────────────────────────
+
 	show_verification_dialog(frm) {
 		const entries = frm.doc.bulk_overtime_entries || [];
 		if (!entries.length) {
 			frappe.msgprint(__("No overtime entries to verify. Please fetch employees first."));
 			return;
 		}
-		
-		// Create a dialog for verification
-		let dialog = new frappe.ui.Dialog({
-			title: __('Verify Overtime Hours'),
-			fields: [
-				{
-					fieldname: 'verification_note',
-					fieldtype: 'HTML',
-					options: `
-						<div class="alert alert-info">
-							<strong>Verification Instructions:</strong><br>
-							• Enter the actual hours worked for each employee on each date<br>
-							• Hours done starts at 0 - please fill in the actual overtime performed<br>
-							• Only entries with hours_done > 0 will be processed<br>
-							• Leave as 0 if the employee did not work overtime on that date
-						</div>
-					`
-				},
-				{
-					fieldname: 'entries_html',
-					fieldtype: 'HTML',
-					options: frm.events.generate_verification_table(frm, entries)
-				}
-			],
-			primary_action_label: __('Confirm & Process'),
-			primary_action: function() {
-				frm.events.process_verification(frm, dialog);
-			}
+
+		// Sync attendance data first, then show the dialog
+		frappe.call({
+			doc: frm.doc,
+			method: "sync_attendance_data",
+			freeze: true,
+			freeze_message: __("Syncing Attendance Data…"),
+		}).then(() => {
+			// Reload the form to get updated hours_done values
+			frm.reload_doc().then(() => {
+				const synced_entries = frm.doc.bulk_overtime_entries || [];
+
+				let dialog = new frappe.ui.Dialog({
+					title: __('Verify Overtime Hours'),
+					fields: [
+						{
+							fieldname: 'verification_note',
+							fieldtype: 'HTML',
+							options: `
+								<div class="alert alert-info">
+									<strong>Verification Instructions:</strong><br>
+									• Attendance data has been synced — "Actual Hours Done" shows overtime from T&A records<br>
+									• You may adjust the actual hours if needed<br>
+									• Only entries with hours_done > 0 will be processed on submission<br>
+									• Leave as 0 if the employee did not work overtime on that date
+								</div>
+							`
+						},
+						{
+							fieldname: 'entries_html',
+							fieldtype: 'HTML',
+							options: frm.events.generate_verification_table(frm, synced_entries)
+						}
+					],
+					primary_action_label: __('Confirm & Process'),
+					primary_action: function () {
+						frm.events.process_verification(frm, dialog);
+					}
+				});
+
+				dialog.show();
+			});
 		});
-		
-		dialog.show();
 	},
-	
+
 	generate_verification_table(frm, entries) {
 		let html = `
 			<div style="max-height: 500px; overflow-y: auto;">
@@ -192,7 +154,7 @@ frappe.ui.form.on("Bulk Overtime", {
 					</thead>
 					<tbody>
 		`;
-		
+
 		entries.forEach((entry, idx) => {
 			const hours_done = entry.hours_done || 0;
 			const status = hours_done > 0 ? '✅ To Process' : '⏸️ Zero - Skip';
@@ -214,7 +176,7 @@ frappe.ui.form.on("Bulk Overtime", {
 				</tr>
 			`;
 		});
-		
+
 		html += `
 					</tbody>
 				</table>
@@ -223,11 +185,11 @@ frappe.ui.form.on("Bulk Overtime", {
 				<strong>Note:</strong> Only rows with "Actual Hours Done" > 0 will be processed when confirmed.
 			</div>
 		`;
-		
+
 		// Add JavaScript to handle input changes
 		setTimeout(() => {
 			document.querySelectorAll('.hours-done-input').forEach(input => {
-				input.addEventListener('change', function() {
+				input.addEventListener('change', function () {
 					const idx = this.dataset.idx;
 					const value = parseFloat(this.value) || 0;
 					const statusCell = document.querySelector(`.status-${idx}`);
@@ -238,50 +200,48 @@ frappe.ui.form.on("Bulk Overtime", {
 				});
 			});
 		}, 100);
-		
+
 		return html;
 	},
-	
+
 	process_verification(frm, dialog) {
 		// Get values from dialog inputs
 		const inputs = dialog.$wrapper.find('.hours-done-input');
 		const updates = [];
-		
-		inputs.each(function() {
+
+		inputs.each(function () {
 			const idx = $(this).data('idx');
 			const hours_done = parseFloat($(this).val()) || 0;
 			updates.push({ idx, hours_done });
 		});
-		
+
 		// Update child table with hours_done
 		updates.forEach(update => {
 			if (frm.doc.bulk_overtime_entries[update.idx]) {
 				frm.doc.bulk_overtime_entries[update.idx].hours_done = update.hours_done;
 			}
 		});
-		
+
 		// Filter out entries with hours_done = 0 for processing
 		const entries_to_process = frm.doc.bulk_overtime_entries.filter(entry => (entry.hours_done || 0) > 0);
 		const zero_entries = frm.doc.bulk_overtime_entries.filter(entry => (entry.hours_done || 0) === 0);
-		
+
 		let message = `<b>Verification Summary:</b><br>`;
 		message += `✅ Entries to process: ${entries_to_process.length}<br>`;
 		message += `⏸️ Entries skipped (hours_done = 0): ${zero_entries.length}<br>`;
-		
+
 		if (entries_to_process.length === 0) {
 			message += `<br><b class="text-danger">No entries with hours_done > 0. Nothing will be processed.</b>`;
 			frappe.msgprint(message);
 			dialog.hide();
 			return;
 		}
-		
+
 		message += `<br>Do you want to proceed with processing ${entries_to_process.length} overtime entries?`;
-		
+
 		frappe.confirm(
 			message,
 			() => {
-				// Update summary with actual hours
-				frm.events.update_overtime_summary_with_actual(frm);
 				frm.dirty();
 				frm.save().then(() => {
 					frappe.msgprint({
@@ -297,49 +257,27 @@ frappe.ui.form.on("Bulk Overtime", {
 			}
 		);
 	},
-	
-	update_overtime_summary_with_actual(frm) {
-		const entries = (frm.doc.bulk_overtime_entries || []).filter(e => (e.hours_done || 0) > 0);
-		if (!entries.length) {
-			frm.events.set_overtime_request(frm, "No verified overtime entries with hours > 0.");
-			return;
-		}
-		
-		// Group by employee
-		const employee_map = new Map();
-		entries.forEach(entry => {
-			if (!employee_map.has(entry.employee)) {
-				employee_map.set(entry.employee, {
-					employee_name: entry.employee_name,
-					dates: []
-				});
-			}
-			employee_map.get(entry.employee).dates.push({
-				date: entry.overtime_date,
-				requested: entry.hours_requested || 0,
-				actual: entry.hours_done
-			});
-		});
-		
-		let summary = "VERIFIED OVERTIME SUMMARY (Actual Hours > 0)\n";
-		summary += "=" .repeat(60) + "\n\n";
-		
-		for (let [employee_id, data] of employee_map) {
-			summary += `Employee: ${employee_id} - ${data.employee_name}\n`;
-			summary += `Overtime Details:\n`;
-			data.dates.forEach(date_info => {
-				summary += `  • ${date_info.date}: Requested ${date_info.requested}h | Actual ${date_info.actual}h\n`;
-			});
-			const total_actual = data.dates.reduce((sum, d) => sum + d.actual, 0);
-			summary += `Total Actual Hours: ${total_actual}\n`;
-			summary += "-".repeat(35) + "\n";
-		}
-		
-		summary += `\nVerified on: ${frappe.datetime.now_datetime()}`;
-		frm.events.set_overtime_request(frm, summary);
-	},
 
-	department(frm) { frm.events.clear_entries(frm); },
+	department(frm) {
+		frm.events.clear_entries(frm);
+		frm.set_value("shift_approver", "");
+
+		if (frm.doc.department) {
+			frappe.db.get_list("Department Approver", {
+				filters: {
+					parent: frm.doc.department,
+					parenttype: "Department",
+					parentfield: "shift_request_approver",
+				},
+				fields: ["approver"],
+				limit_page_length: 1,
+			}).then((data) => {
+				if (data && data.length) {
+					frm.set_value("shift_approver", data[0].approver);
+				}
+			});
+		}
+	},
 	designation(frm) { frm.events.clear_entries(frm); },
 	from_date(frm) { frm.events.clear_entries(frm); },
 	to_date(frm) { frm.events.clear_entries(frm); },
@@ -354,17 +292,6 @@ frappe.ui.form.on("Bulk Overtime", {
 		frm.clear_table("bulk_overtime_entries");
 		frm.set_value("number_of_employees", 0);
 		frm.refresh_field("bulk_overtime_entries");
-		frm.events.set_overtime_request(frm, "");
-	},
-
-	has_overtime_request_field(frm) {
-		return Boolean(frm.get_field("overtime_request"));
-	},
-
-	set_overtime_request(frm, value) {
-		if (!frm.events.has_overtime_request_field(frm)) return;
-		frm.set_value("overtime_request", value || "");
-		frm.refresh_field("overtime_request");
 	},
 
 	apply_default_requested_hours(frm, show_message = true) {
@@ -387,7 +314,6 @@ frappe.ui.form.on("Bulk Overtime", {
 		});
 
 		frm.refresh_field("bulk_overtime_entries");
-		frm.events.update_overtime_summary(frm);
 		frm.dirty();
 
 		if (show_message) {

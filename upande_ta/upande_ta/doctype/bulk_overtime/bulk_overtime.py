@@ -3,7 +3,7 @@
 
 import frappe
 from frappe.model.document import Document
-from frappe.utils import add_days, date_diff, flt, getdate
+from frappe.utils import flt, getdate
 
 WORKING_HOURS_PER_MONTH = 199.33
 
@@ -14,44 +14,6 @@ class BulkOvertime(Document):
 		if self.from_date and self.to_date:
 			if frappe.utils.getdate(self.from_date) > frappe.utils.getdate(self.to_date):
 				frappe.throw("From Date cannot be after To Date.")
-
-			existing_docs = frappe.db.get_all("Bulk Overtime", filters={
-				"name": ("!=", self.name or ""),
-				"docstatus": ("!=", 2),
-				"from_date": ("<=", self.to_date),
-				"to_date": (">=", self.from_date),
-			}, fields=["name", "bulk_overtime_title", "from_date", "to_date", "department"])
-
-			for existing in existing_docs:
-				if self.department and existing.department and self.department != existing.department:
-					continue
-
-				new_from = frappe.utils.getdate(self.from_date)
-				ex_from = frappe.utils.getdate(existing.from_date)
-
-				if new_from < ex_from:
-					before_date = frappe.utils.add_days(existing.from_date, -1)
-					frappe.throw(
-						"Dates overlap with <a href='/app/bulk-overtime/%s'>%s</a> "
-						"(%s to %s). To Date must be on or before <b>%s</b>." % (
-							existing.name,
-							existing.bulk_overtime_title or existing.name,
-							existing.from_date,
-							before_date,
-						)
-					)
-				else:
-					after_date = frappe.utils.add_days(existing.to_date, 1)
-					frappe.throw(
-						"Dates overlap with <a href='/app/bulk-overtime/%s'>%s</a> "
-						"(%s to %s). From Date must be on or after <b>%s</b>." % (
-							existing.name,
-							existing.bulk_overtime_title or existing.name,
-							existing.from_date,
-							existing.to_date,
-							after_date,
-						)
-					)
 
 	def before_save(self):
 		if self.to_date:
@@ -96,19 +58,22 @@ class BulkOvertime(Document):
 
 		# Rebuild the child table
 		self.set("bulk_overtime_entries", [])
-		from_date = getdate(self.from_date)
-		total_days = date_diff(self.to_date, self.from_date) + 1
 
 		for emp in employees:
+			overtime_date = self.from_date
+			date_key = str(getdate(overtime_date))
+			hours_done = flt(hours_map.get((emp.name, date_key), 0), 1)
+
 			self.append(
 				"bulk_overtime_entries",
 				{
 					"employee": emp.name,
 					"employee_name": emp.employee_name,
 					"department": emp.department,
-					"overtime_date": self.from_date,
-					"overtime_type": self.get_overtime_type(emp.name, self.from_date),
+					"overtime_date": overtime_date,
+					"overtime_type": self.get_overtime_type(emp.name, overtime_date),
 					"hours_requested": self.default_requested_hours or 0,
+					"hours_done": hours_done,
 					"row_status": "Pending",
 				},
 			)
@@ -116,6 +81,11 @@ class BulkOvertime(Document):
 		self.number_of_employees = len(employees)
 
 	def get_overtime_hours(self, employee_list):
+		"""Return a dict keyed by (employee, date_str) -> overtime hours.
+
+		For holidays the full working_hours count as overtime.
+		For normal days overtime = working_hours - shift_hours (min 0).
+		"""
 		if not employee_list:
 			return {}
 
@@ -155,6 +125,7 @@ class BulkOvertime(Document):
 		result = {}
 		for row in data:
 			emp = row.employee
+			date_key = str(row.attendance_date)
 			wh = row.working_hours or 0
 			shift_hrs = row.shift_hours or 8
 
@@ -163,21 +134,38 @@ class BulkOvertime(Document):
 			else:
 				ot = max(wh - shift_hrs, 0)
 
-			if emp not in result:
-				result[emp] = {"normal": 0, "holiday": 0}
+			result[(emp, date_key)] = round(ot, 2)
 
-			if row.is_holiday:
-				result[emp]["holiday"] = result[emp]["holiday"] + ot
-			else:
-				result[emp]["normal"] = result[emp]["normal"] + ot
+		return result
 
-		return {
-			emp: {
-				"normal": round(vals["normal"], 2),
-				"holiday": round(vals["holiday"], 2),
-			}
-			for emp, vals in result.items()
-		}
+	@frappe.whitelist()
+	def sync_attendance_data(self):
+		"""Refresh hours_done on every child row from Attendance records."""
+		entries = self.bulk_overtime_entries or []
+		if not entries:
+			frappe.msgprint("No overtime entries to sync. Please fetch employees first.")
+			return
+
+		emp_ids = list({row.employee for row in entries if row.employee})
+		hours_map = self.get_overtime_hours(emp_ids)
+
+		synced = 0
+		for row in entries:
+			if not row.employee or not row.overtime_date:
+				continue
+
+			date_key = str(getdate(row.overtime_date))
+			hours = flt(hours_map.get((row.employee, date_key), 0), 1)
+			row.hours_done = hours
+
+			# Auto-correct overtime type based on the date
+			row.overtime_type = self.get_overtime_type(row.employee, row.overtime_date)
+			synced += 1
+
+		frappe.msgprint(
+			"%s entries synced with Attendance data." % synced,
+			indicator="green",
+		)
 
 	
 	@frappe.whitelist()
@@ -287,3 +275,4 @@ class BulkOvertime(Document):
 				"%s Additional Salary record(s) cancelled." % len(existing),
 				indicator="orange",
 			)
+
