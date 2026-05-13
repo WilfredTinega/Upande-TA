@@ -1,1 +1,0 @@
-upande_ta.patches.v1_0.drop_stale_bio_template_columns
