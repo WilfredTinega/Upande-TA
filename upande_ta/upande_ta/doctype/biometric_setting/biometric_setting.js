@@ -27,14 +27,17 @@ frappe.ui.form.on("Biometric Setting", {
 	enable_users:             autosave_on_change,
 	enable_bio_templates:     autosave_on_change,
 	enable_cleanup:           autosave_on_change,
+	enable_flip:              autosave_on_change,
 	checkin_event_frequency:  autosave_on_change,
 	users_event_frequency:    autosave_on_change,
 	biodata_event_frequency:  autosave_on_change,
 	cleanup_event_frequency:  autosave_on_change,
+	flip_event_frequency:     autosave_on_change,
 	checkin_cron_format:      autosave_on_change,
 	users_cron_format:        autosave_on_change,
 	biodata_cron_format:      autosave_on_change,
 	cleanup_cron_format:      autosave_on_change,
+	flip_cron_format:         autosave_on_change,
 
 	get_checkin: function(frm) {
 		if (!frm.doc.enable_checkin) {
@@ -471,7 +474,8 @@ const SCHEDULED_JOB_PREFIX_TO_FREQUENCY = {
 	checkin: "checkin_event_frequency",
 	users:   "users_event_frequency",
 	biodata: "biodata_event_frequency",
-	cleanup: "cleanup_event_frequency"
+	cleanup: "cleanup_event_frequency",
+	flip:    "flip_event_frequency"
 };
 
 function autosave_on_change(frm) {
@@ -520,7 +524,6 @@ function inject_job_link(frm, fieldname, info) {
 	$w.append(`<div class="biometric-job-link" style="margin-top:6px;font-size:12px">
 		<a href="${href}" target="_blank">View Scheduled Job</a>
 		<span style="color:${status_color};margin-left:8px">● ${status_text}</span>
-		<span style="color:var(--text-muted);margin-left:8px">(${frappe.utils.escape_html(info.frequency || "")})</span>
 	</div>`);
 }
 
@@ -962,6 +965,8 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		}
 
 		let show_privilege = action === "Add User";
+		let show_skip_name = action === "Add User";
+		let skip_name_col  = show_skip_name ? `<th style="width:90px;text-align:center">Skip?</th>` : "";
 		let privilege_col  = show_privilege ? `<th style="width:120px">Privilege</th>` : "";
 		let template_devices = d._template_devices || [];
 		let pins_by_device   = d._template_pins_by_device || {};
@@ -976,6 +981,11 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		).join("");
 
 		let rows = users.map((u, i) => {
+			let skip_name_cell = show_skip_name ? `
+				<td style="text-align:center">
+					<input type="checkbox" class="skip-name-check" data-idx="${i}">
+				</td>` : "";
+
 			let privilege_cell = show_privilege ? `
 				<td>
 					<select class="form-control form-control-sm privilege-sel"
@@ -1010,15 +1020,21 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 						${frappe.utils.escape_html(u.employee_name || "")}
 						${status_badge}
 					</td>
+					${skip_name_cell}
 					${privilege_cell}
 					${device_cells}
 				</tr>`;
 		}).join("");
 
+		let skip_names_toggle = show_skip_name ? `
+			<button class="btn btn-xs btn-default" id="skip-names-btn"
+					title="Toggle Skip for all rows">Skip</button>` : "";
+
 		container.html(`
 			<div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
 				<button class="btn btn-xs btn-default" id="select-all-btn">Select All</button>
 				<button class="btn btn-xs btn-default" id="deselect-all-btn">Deselect All</button>
+				${skip_names_toggle}
 				<span style="font-size:12px;color:var(--color-text-secondary)"
 					  id="selected-count">0 / ${users.length}</span>
 			</div>
@@ -1031,6 +1047,7 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 							<th style="width:40px"></th>
 							<th style="width:130px">PIN</th>
 							<th>Name</th>
+							${skip_name_col}
 							${privilege_col}
 							${device_cols}
 						</tr>
@@ -1050,6 +1067,16 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		});
 		container.find(".user-check").on("change", update_count);
 
+		if (show_skip_name) {
+			container.find("#skip-names-btn").on("click", function() {
+				const $btn = $(this);
+				const turn_on = container.find(".skip-name-check:checked").length
+								< container.find(".skip-name-check").length;
+				container.find(".skip-name-check").prop("checked", turn_on);
+				$btn.toggleClass("btn-primary btn-default");
+			});
+		}
+
 		function update_count() {
 			let n = container.find(".user-check:checked").length;
 			container.find("#selected-count").text(`${n} / ${users.length}`);
@@ -1066,11 +1093,13 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			let user = d._bulk_users_data[idx];
 			let priv = container.find(`.privilege-sel[data-idx="${idx}"]`).val()
 					   || user.privilege || "0";
+			let skip_name = container.find(`.skip-name-check[data-idx="${idx}"]`).is(":checked");
 			checked.push({
 				user_id:       user.user_id,
 				employee_name: user.employee_name,
 				privilege:     priv,
-				row_name:      user.row_name || null
+				row_name:      user.row_name || null,
+				skip_name:     skip_name ? 1 : 0
 			});
 		});
 		return checked;

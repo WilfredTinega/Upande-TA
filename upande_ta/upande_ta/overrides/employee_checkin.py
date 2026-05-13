@@ -31,71 +31,100 @@ def prevent_duplicate(doc, method=None):
 		)
 
 
-def auto_close_open_ins(target_date=None):
-	target_date = getdate(target_date) if target_date else getdate(add_days(today(), -1))
+def auto_close_open_ins(target_date=None, days=7):
+	end_date   = getdate(target_date) if target_date else getdate(today())
+	start_date = add_days(end_date, -(days - 1))
 
-	day_start = get_datetime(f"{target_date} 00:00:00")
-	day_end   = get_datetime(f"{target_date} 23:59:59")
+	range_start = get_datetime(f"{start_date} 00:00:00")
+	range_end   = get_datetime(f"{end_date} 23:59:59")
 
 	rows = frappe.db.sql(
 		"""
-		SELECT employee,
-		       SUM(CASE WHEN log_type = 'IN'  THEN 1 ELSE 0 END) AS in_count,
-		       SUM(CASE WHEN log_type = 'OUT' THEN 1 ELSE 0 END) AS out_count
+		SELECT employee, DATE(time) AS log_date,
+		       SUM(CASE WHEN log_type = 'IN' THEN 1 ELSE 0 END) AS in_count
 		FROM `tabEmployee Checkin`
 		WHERE time BETWEEN %(start)s AND %(end)s
 		  AND employee IS NOT NULL
-		GROUP BY employee
-		HAVING (in_count >= 2 AND out_count = 0)
-		    OR (in_count > 2)
+		GROUP BY employee, DATE(time)
+		HAVING in_count > 1
 		""",
-		{"start": day_start, "end": day_end},
+		{"start": range_start, "end": range_end},
 		as_dict=True
 	)
 
 	flipped = 0
+	deleted = 0
 	for r in rows:
-		last_log = frappe.db.get_value(
+		day_start = get_datetime(f"{r.log_date} 00:00:00")
+		day_end   = get_datetime(f"{r.log_date} 23:59:59")
+
+		in_logs = frappe.db.get_all(
 			"Employee Checkin",
-			{
+			filters={
 				"employee":   r.employee,
+				"log_type":   "IN",
 				"time":       ["between", [day_start, day_end]],
 				"attendance": ["in", ["", None]],
 			},
-			["name", "log_type", "time"],
-			order_by="time desc"
+			fields=["name", "time"],
+			order_by="time asc",
 		)
-		if not last_log:
+
+		if len(in_logs) < 2:
 			continue
 
-		name, last_log_type, _last_time = last_log
-		if last_log_type != "IN":
-			continue
+		first_in = in_logs[0]
+		last_in  = in_logs[-1]
+
+		middle_logs = frappe.db.get_all(
+			"Employee Checkin",
+			filters={
+				"employee":   r.employee,
+				"time":       ["between", [first_in.time, last_in.time]],
+				"name":       ["not in", [first_in.name, last_in.name]],
+				"attendance": ["in", ["", None]],
+			},
+			fields=["name"],
+		)
 
 		try:
-			doc = frappe.get_doc("Employee Checkin", name)
+			doc = frappe.get_doc("Employee Checkin", last_in.name)
 			doc.flags.ignore_validate = True
 			doc.log_type = "OUT"
-			if r.out_count == 0:
-				reason = _("last log of {0} with no OUT recorded").format(frappe.utils.format_date(target_date))
-			else:
-				reason = _("last log of {0} is IN with {1} INs and {2} OUTs recorded").format(
-					frappe.utils.format_date(target_date), int(r.in_count), int(r.out_count)
-				)
-			doc.add_comment(
-				"Comment",
-				_("Auto-corrected by scheduler: flipped IN → OUT ({0}).").format(reason)
-			)
 			doc.save(ignore_permissions=True)
 			flipped += 1
 		except Exception as e:
 			frappe.log_error(
-				f"auto_close_open_ins failed for {name}: {e}",
+				f"auto_close_open_ins flip failed for {last_in.name}: {e}",
 				"Employee Checkin Auto-Close"
 			)
+			continue
+
+		for mid in middle_logs:
+			try:
+				frappe.delete_doc(
+					"Employee Checkin",
+					mid.name,
+					ignore_permissions=True,
+					force=True,
+					delete_permanently=True,
+				)
+				deleted += 1
+			except Exception as e:
+				frappe.log_error(
+					f"auto_close_open_ins delete failed for {mid.name}: {e}",
+					"Employee Checkin Auto-Close"
+				)
 
 	frappe.db.commit()
 	frappe.logger().info(
-		f"auto_close_open_ins: scanned {target_date}, flipped {flipped} IN→OUT across {len(rows)} employees"
+		f"auto_close_open_ins: scanned {start_date}..{end_date}, "
+		f"flipped {flipped} IN→OUT, deleted {deleted} middle logs across {len(rows)} (employee, day) groups"
 	)
-	return {"date": str(target_date), "candidates": len(rows), "flipped": flipped}
+	return {
+		"start_date": str(start_date),
+		"end_date":   str(end_date),
+		"candidates": len(rows),
+		"flipped":    flipped,
+		"deleted":    deleted,
+	}

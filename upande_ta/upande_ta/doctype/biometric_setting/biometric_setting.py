@@ -19,6 +19,7 @@ SCHEDULER_TASKS = [
  ("users",   "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_users_sync",           "Biometric: Sync Users"),
  ("biodata", "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_biodata_sync",         "Biometric: Sync BioData"),
  ("cleanup", "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_deactivation_cleanup", "Biometric: Deactivation Cleanup"),
+ ("flip",    "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_flip_last_in",         "Biometric: Flip Last IN → OUT"),
 ]
 
 _TASK_BY_PREFIX = {prefix: (method, label) for prefix, method, label in SCHEDULER_TASKS}
@@ -28,6 +29,7 @@ _PREFIX_ENABLE = {
  "users":   "enable_users",
  "biodata": "enable_bio_templates",
  "cleanup": "enable_cleanup",
+ "flip":    "enable_flip",
 }
 
 _FREQUENCY_WINDOWS = {
@@ -672,3 +674,11 @@ def store_biotemplate():
 	 store_biotemplate as _new_store,
 	)
 	return _new_store()
+
+
+def run_flip_last_in():
+	settings = frappe.get_single("Biometric Setting")
+	if not settings.enable_flip:
+		return {"skipped": True, "reason": "enable_flip is off"}
+	from upande_ta.upande_ta.overrides.employee_checkin import auto_close_open_ins
+	return auto_close_open_ins()

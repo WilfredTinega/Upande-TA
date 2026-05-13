@@ -309,6 +309,7 @@ def bulk_command(device_sn, users, command_type):
             user_id       = str(user.get("user_id") or "").strip()
             employee_name = str(user.get("employee_name") or "").strip()[:24]
             privilege     = str(user.get("privilege") or "0").strip()
+            skip_name     = bool(user.get("skip_name"))
 
             if not user_id:
                 failed.append({"user_id": user_id, "reason": "Missing PIN"})
@@ -319,7 +320,7 @@ def bulk_command(device_sn, users, command_type):
             tpl = None
 
             if command_type == "Add User":
-                if not employee_name:
+                if not employee_name and not skip_name:
                     failed.append({"user_id": user_id, "reason": "Missing name"})
                     continue
 
@@ -330,7 +331,8 @@ def bulk_command(device_sn, users, command_type):
                 )
 
                 tpl = _get_template_row(employee)
-                command = _build_userinfo_command(cmd_id, user_id, employee_name, privilege, tpl)
+                device_name = "" if skip_name else employee_name
+                command = _build_userinfo_command(cmd_id, user_id, device_name, privilege, tpl)
 
                 _upsert_user_row(device_sn, user_id, {
                     "employee":        employee,
@@ -357,6 +359,7 @@ def bulk_command(device_sn, users, command_type):
                 "device_sn":     device_sn,
                 "user_id":       user_id,
                 "employee_name": employee_name,
+                "skip_name":     1 if (command_type == "Add User" and skip_name) else 0,
                 "command":       command
             })
 
