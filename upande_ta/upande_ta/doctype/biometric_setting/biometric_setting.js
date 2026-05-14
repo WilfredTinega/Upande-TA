@@ -103,7 +103,8 @@ frappe.ui.form.on("Biometric Setting", {
 				"Poll BioData",
 				sn,
 				frm.doc.biodata_device_location || sn,
-				() => render_biodata_tab(frm)
+				() => render_biodata_tab(frm),
+				get_enabled_filters(frm)
 			);
 		};
 
@@ -257,6 +258,7 @@ function render_users_tab(frm) {
 	wrapper.html(`
 		<div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap">
 			<button class="btn btn-sm btn-primary" id="btn-bulk-add">Add</button>
+			<button class="btn btn-sm btn-primary" id="btn-bulk-update">Update</button>
 			<button class="btn btn-sm btn-primary" id="btn-bulk-delete">Delete</button>
 			<button class="btn btn-sm btn-primary" id="btn-hydrate-templates">
 				Sync
@@ -272,10 +274,11 @@ function render_users_tab(frm) {
 			frappe.msgprint(__("Enable Users"));
 			return;
 		}
-		open_bulk_user_dialog(cmd, sn, loc, () => render_users_tab(frm));
+		open_bulk_user_dialog(cmd, sn, loc, () => render_users_tab(frm), get_enabled_filters(frm));
 	};
 
 	wrapper.find("#btn-bulk-add").on("click", () => open_bulk("Add User"));
+	wrapper.find("#btn-bulk-update").on("click", () => open_bulk("Update User"));
 	wrapper.find("#btn-bulk-delete").on("click", () => open_bulk("Delete User"));
 	wrapper.find("#btn-hydrate-templates").on("click", () => {
 		frappe.call({
@@ -541,15 +544,32 @@ frappe.ui.form.on("Biometric Checkin", {
 	}
 });
 
-function open_bulk_user_dialog(command_type, default_sn, default_location, on_success) {
+function get_enabled_filters(frm) {
+	return {
+		company:     !!frm.doc.company,
+		farm:        !!frm.doc.farm,
+		department:  !!frm.doc.department,
+		designation: !!frm.doc.designation,
+		employee:    !!frm.doc.employee
+	};
+}
+
+function open_bulk_user_dialog(command_type, default_sn, default_location, on_success, enabled_filters) {
+	enabled_filters = enabled_filters || {
+		company: false, farm: false, department: false, designation: false, employee: false
+	};
+	const any_filter_enabled = enabled_filters.company || enabled_filters.farm
+		|| enabled_filters.department || enabled_filters.designation || enabled_filters.employee;
 	let dialog_title = {
 		"Add User":    "Bulk Add Users to Device",
+		"Update User": "Bulk Update Users on Device",
 		"Delete User": "Bulk Delete Users from Device",
 		"Poll BioData": "Poll BioData from Device"
 	}[command_type];
 
 	let indicator = {
 		"Add User":    "green",
+		"Update User": "blue",
 		"Delete User": "red",
 		"Poll BioData": "blue"
 	}[command_type];
@@ -570,6 +590,32 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 					if (raw) load_users(raw.split(" — ")[0].trim());
 				}
 			},
+			{ fieldname: "col_break_filter_company", fieldtype: "Column Break" },
+			{
+				fieldname: "filter_company",
+				fieldtype: "Autocomplete",
+				label: "Company",
+				options: [],
+				columns: 2,
+				hidden: !enabled_filters.company,
+				change() {
+					close_autocomplete("filter_company");
+					reload_with_filters();
+				}
+			},
+			{ fieldname: "col_break_filter_farm", fieldtype: "Column Break" },
+			{
+				fieldname: "filter_farm",
+				fieldtype: "Autocomplete",
+				label: "Farm",
+				options: [],
+				columns: 2,
+				hidden: !enabled_filters.farm,
+				change() {
+					close_autocomplete("filter_farm");
+					reload_with_filters();
+				}
+			},
 			{ fieldname: "col_break_filter_0", fieldtype: "Column Break" },
 			{
 				fieldname: "filter_department",
@@ -577,6 +623,7 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 				label: "Department",
 				options: [],
 				columns: 2,
+				hidden: !enabled_filters.department,
 				change() {
 					close_autocomplete("filter_department");
 					reload_with_filters();
@@ -589,6 +636,7 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 				label: "Designation",
 				options: [],
 				columns: 2,
+				hidden: !enabled_filters.designation,
 				change() {
 					close_autocomplete("filter_designation");
 					reload_with_filters();
@@ -601,12 +649,17 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 				label: "Employee",
 				options: "Employee",
 				columns: 2,
+				hidden: !enabled_filters.employee,
 				get_query() {
 					let f = { status: "Active" };
 					let dept = d.get_value("filter_department");
 					let desg = d.get_value("filter_designation");
+					let comp = d.get_value("filter_company");
+					let frm_ = d.get_value("filter_farm");
 					if (dept) f.department  = dept;
 					if (desg) f.designation = desg;
+					if (comp) f.company     = comp;
+					if (frm_) f.custom_farm = frm_;
 					return { filters: f };
 				},
 				change() { reload_with_filters(); }
@@ -615,6 +668,7 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			{
 				fieldname: "clear_filters_html",
 				fieldtype: "HTML",
+				hidden: !any_filter_enabled,
 				options: `<div style="display:flex;align-items:flex-end;height:100%;padding-bottom:4px">
 					<button type="button" id="clear-filters-btn"
 						title="Clear filters"
@@ -717,9 +771,42 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		const $row = $col.parent();
 		if (!$row.length) return;
 
+		const $cols = $row.children(".form-column");
+		const filter_field_names = [
+			"filter_company", "filter_farm", "filter_department",
+			"filter_designation", "filter_employee"
+		];
+		let visible_filter_count = 0;
+		$cols.each(function () {
+			const $c = $(this);
+			if ($c.find(`[data-fieldname="device_sn"]`).length) return;
+			if ($c.find(`[data-fieldname="clear_filters_html"]`).length) return;
+			const filter_match = filter_field_names.find(fn =>
+				$c.find(`[data-fieldname="${fn}"]`).length > 0
+			);
+			if (!filter_match) return;
+			const field = d.get_field(filter_match);
+			const is_hidden = !!(field && field.df && field.df.hidden);
+			$c[0].style.setProperty("display", is_hidden ? "none" : "block", "important");
+			if (!is_hidden) visible_filter_count++;
+		});
+
+		const has_visible_filters = visible_filter_count > 0;
+		const $clearCol = $cols.filter(function () {
+			return $(this).find(`[data-fieldname="clear_filters_html"]`).length > 0;
+		});
+		if ($clearCol.length) {
+			$clearCol[0].style.setProperty(
+				"display", has_visible_filters ? "block" : "none", "important"
+			);
+		}
+		const grid_cols = has_visible_filters
+			? `2fr ${"1fr ".repeat(visible_filter_count)}56px`
+			: "1fr";
+
 		$row.css({
 			"display":               "grid",
-			"grid-template-columns": "2fr 1fr 1fr 1fr 56px",
+			"grid-template-columns": grid_cols,
 			"gap":                   "20px",
 			"align-items":           "end",
 			"width":                 "100%",
@@ -727,7 +814,6 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			"margin":                "0"
 		});
 
-		const $cols = $row.children(".form-column");
 		$cols.css({
 			"padding":     "0",
 			"margin":      "0",
@@ -735,7 +821,6 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			"max-width":   "100%",
 			"width":       "100%",
 			"float":       "none",
-			"display":     "block",
 			"overflow":    "hidden",
 			"box-sizing":  "border-box"
 		});
@@ -777,25 +862,41 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		}
 	});
 
-	refresh_filter_options();
+	if (any_filter_enabled) refresh_filter_options();
 
 	function refresh_filter_options() {
 		let department  = d.get_value("filter_department")  || null;
 		let designation = d.get_value("filter_designation") || null;
+		let company     = d.get_value("filter_company")     || null;
+		let farm        = d.get_value("filter_farm")        || null;
 		frappe.call({
 			method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_active_filter_options",
-			args: { department, designation },
+			args: { department, designation, company, farm },
 			callback(r) {
 				let opts = r.message || {};
 				let valid_designations = opts.designations || [];
+				let valid_departments  = opts.departments  || [];
 				set_autocomplete_options("filter_designation", valid_designations);
-				set_autocomplete_options("filter_department",  opts.departments  || []);
+				set_autocomplete_options("filter_department",  valid_departments);
+				set_autocomplete_options("filter_company",     opts.companies     || []);
+				set_autocomplete_options("filter_farm",        opts.farms         || []);
+				set_filter_label("filter_company",     "Company",     opts.company_count);
+				set_filter_label("filter_farm",        "Farm",        opts.farm_count);
 				set_filter_label("filter_department",  "Department",  opts.department_count);
 				set_filter_label("filter_designation", "Designation", opts.designation_count);
 				set_filter_label("filter_employee",    "Employee",    opts.employee_count);
 
+				if (enabled_filters.farm) {
+					const farm_available = (opts.farms || []).length > 0;
+					d.set_df_property("filter_farm", "hidden", !farm_available);
+				}
+				apply_toolbar_layout();
+
 				if (designation && !valid_designations.includes(designation)) {
 					d.set_value("filter_designation", "");
+				}
+				if (department && !valid_departments.includes(department)) {
+					d.set_value("filter_department", "");
 				}
 			}
 		});
@@ -831,12 +932,14 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		d.set_value("filter_employee",    "");
 		d.set_value("filter_designation", "");
 		d.set_value("filter_department",  "");
+		d.set_value("filter_company",     "");
+		d.set_value("filter_farm",        "");
 		reload_with_filters();
 	});
 
 	function reload_with_filters() {
 		toggle_clear_btn();
-		refresh_filter_options();
+		if (any_filter_enabled) refresh_filter_options();
 		validate_employee_against_cascade();
 		let raw = d.get_value("device_sn");
 		if (raw) load_users(raw.split(" — ")[0].trim());
@@ -846,11 +949,15 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		let emp  = d.get_value("filter_employee");
 		let dept = d.get_value("filter_department");
 		let desg = d.get_value("filter_designation");
-		if (!emp || (!dept && !desg)) return;
+		let comp = d.get_value("filter_company");
+		let frm_ = d.get_value("filter_farm");
+		if (!emp || (!dept && !desg && !comp && !frm_)) return;
 
 		let filters = { name: emp };
 		if (dept) filters.department  = dept;
 		if (desg) filters.designation = desg;
+		if (comp) filters.company     = comp;
+		if (frm_) filters.custom_farm = frm_;
 
 		frappe.db.get_list("Employee", { filters, limit: 1 }).then(rows => {
 			if (!rows || !rows.length) {
@@ -862,7 +969,9 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 	function toggle_clear_btn() {
 		let any = d.get_value("filter_employee")
 			   || d.get_value("filter_designation")
-			   || d.get_value("filter_department");
+			   || d.get_value("filter_department")
+			   || d.get_value("filter_company")
+			   || d.get_value("filter_farm");
 		d.$wrapper.find("#clear-filters-btn").css("display", any ? "flex" : "none");
 	}
 
@@ -870,7 +979,9 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		return {
 			employee:    d.get_value("filter_employee")    || null,
 			designation: d.get_value("filter_designation") || null,
-			department:  d.get_value("filter_department")  || null
+			department:  d.get_value("filter_department")  || null,
+			company:     d.get_value("filter_company")     || null,
+			farm:        d.get_value("filter_farm")        || null
 		};
 	}
 
@@ -912,7 +1023,8 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			args: { device_sn: sn },
 			callback(r) {
 				let device_users = r.message || [];
-				let has_filters = filters.employee || filters.designation || filters.department;
+				let has_filters = filters.employee || filters.designation || filters.department
+					|| filters.company || filters.farm;
 
 				if (command_type === "Add User" || command_type === "Poll BioData") {
 					frappe.call({
@@ -935,7 +1047,7 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 						}
 					});
 
-				} else if (command_type === "Delete User") {
+				} else if (command_type === "Delete User" || command_type === "Update User") {
 					if (!has_filters) {
 						render_table(device_users, command_type);
 						return;
@@ -945,8 +1057,8 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 						args: Object.assign({ status: "Active" }, filters),
 						callback(er) {
 							let allowed_pins = new Set((er.message || []).map(e => e.user_id));
-							let deletable    = device_users.filter(u => allowed_pins.has(u.user_id));
-							render_table(deletable, command_type);
+							let matching     = device_users.filter(u => allowed_pins.has(u.user_id));
+							render_table(matching, command_type);
 						}
 					});
 				}
@@ -1066,6 +1178,13 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			update_count();
 		});
 		container.find(".user-check").on("change", update_count);
+
+		let active_filters = get_filter_args();
+		if (active_filters.employee || active_filters.designation || active_filters.department
+			|| active_filters.company || active_filters.farm) {
+			container.find(".user-check").prop("checked", true);
+			update_count();
+		}
 
 		if (show_skip_name) {
 			container.find("#skip-names-btn").on("click", function() {

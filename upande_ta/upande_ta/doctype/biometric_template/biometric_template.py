@@ -1,5 +1,7 @@
 # Copyright (c) 2026, Upande LTD and contributors
 
+import json
+
 import frappe
 from frappe.model.document import Document
 
@@ -60,6 +62,19 @@ def _int(v, default=0):
         return int(v) if v not in (None, "") else default
     except (TypeError, ValueError):
         return default
+
+def _parse_wanted_pins(raw):
+    if raw in (None, ""):
+        return None
+    s = _str(raw)
+    if not s:
+        return None
+    if s.startswith("["):
+        try:
+            return {_str(p) for p in json.loads(s) if _str(p)}
+        except (TypeError, ValueError):
+            return None
+    return {s}
 
 def _ensure_biometric_template_parent(device_sn):
     if not device_sn:
@@ -123,11 +138,12 @@ def store_biotemplate():
         return
 
     if device_sn and not is_user_record:
-        wanted_pin = frappe.cache().get_value(f"poll_biodata_filter:{device_sn}")
-        if wanted_pin and _str(wanted_pin) != user_id:
+        wanted_raw = frappe.cache().get_value(f"poll_biodata_filter:{device_sn}")
+        wanted_pins = _parse_wanted_pins(wanted_raw)
+        if wanted_pins and user_id not in wanted_pins:
             frappe.response["message"] = {
                 "status": "skipped",
-                "reason": f"PIN {user_id} filtered out (requested {wanted_pin})",
+                "reason": f"PIN {user_id} filtered out (requested {sorted(wanted_pins)})",
             }
             return
 
