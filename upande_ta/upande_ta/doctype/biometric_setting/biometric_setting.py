@@ -1,5 +1,6 @@
 # Copyright (c) 2026, Upande LTD and contributors
 
+import json
 from datetime import timedelta
 
 import frappe
@@ -598,13 +599,14 @@ def run_biodata_sync():
 			results.append({"device_sn": device_sn, "error": str(e)})
 	return {"status": "done", "devices": len(devices), "results": results}
 
-def request_biodata_internal(device_sn, pin=None):
+def request_biodata_internal(device_sn, pin=None, manage_cache=True):
 	pin = (str(pin).strip() if pin else "")
-	cache_key = f"poll_biodata_filter:{device_sn}"
-	if pin:
-		frappe.cache().set_value(cache_key, pin, expires_in_sec=300)
-	else:
-		frappe.cache().delete_value(cache_key)
+	if manage_cache:
+		cache_key = f"poll_biodata_filter:{device_sn}"
+		if pin:
+			frappe.cache().set_value(cache_key, json.dumps([pin]), expires_in_sec=300)
+		else:
+			frappe.cache().delete_value(cache_key)
 
 	queued = []
 	for table, label in _BIODATA_QUERIES:
@@ -642,7 +644,6 @@ def request_biodata(device_sn, pin=None, pins=None):
 	if not device_sn:
 		frappe.throw("Please select a device first")
 
-	import json
 	pin_list = []
 	if pins:
 		if isinstance(pins, str):
@@ -651,15 +652,21 @@ def request_biodata(device_sn, pin=None, pins=None):
 	elif pin:
 		pin_list = [str(pin).strip()]
 
+	cache_key = f"poll_biodata_filter:{device_sn}"
+	if pin_list:
+		frappe.cache().set_value(cache_key, json.dumps(pin_list), expires_in_sec=300)
+	else:
+		frappe.cache().delete_value(cache_key)
+
 	if not pin_list:
-		out = request_biodata_internal(device_sn, None)
+		out = request_biodata_internal(device_sn, None, manage_cache=False)
 		out["status"] = "queued"
 		out["pins"]   = []
 		return out
 
 	all_queued = []
 	for p in pin_list:
-		result = request_biodata_internal(device_sn, p)
+		result = request_biodata_internal(device_sn, p, manage_cache=False)
 		all_queued.extend(result.get("queued") or [])
 	return {
 	 "status":    "queued",

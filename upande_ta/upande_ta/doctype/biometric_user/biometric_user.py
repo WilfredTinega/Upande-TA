@@ -8,6 +8,9 @@ from frappe.model.document import Document
 class BiometricUser(Document):
     pass
 
+def _employee_has_custom_farm():
+    return "custom_farm" in frappe.db.get_table_columns("Employee")
+
 def _get_user_row(device_sn, user_id):
     rows = frappe.get_all(
         "Biometric User",
@@ -226,7 +229,8 @@ def get_device_users(device_sn):
     ]
 
 @frappe.whitelist()
-def get_employees(status="Active", employee=None, designation=None, department=None):
+def get_employees(status="Active", employee=None, designation=None, department=None,
+                  company=None, farm=None):
     filters = {"attendance_device_id": ["!=", ""]}
     if status == "Active":
         filters["status"] = "Active"
@@ -239,14 +243,24 @@ def get_employees(status="Active", employee=None, designation=None, department=N
         filters["designation"] = designation
     if department:
         filters["department"] = department
+    if company:
+        filters["company"] = company
+
+    has_farm = _employee_has_custom_farm()
+    if farm and has_farm:
+        filters["custom_farm"] = farm
+
+    fields = [
+        "name", "first_name", "last_name", "attendance_device_id",
+        "designation", "department", "company"
+    ]
+    if has_farm:
+        fields.append("custom_farm")
 
     employees = frappe.get_all(
         "Employee",
         filters=filters,
-        fields=[
-            "name", "first_name", "last_name", "attendance_device_id",
-            "designation", "department"
-        ],
+        fields=fields,
         order_by="first_name asc"
     )
     result = []
@@ -257,19 +271,32 @@ def get_employees(status="Active", employee=None, designation=None, department=N
             "user_id":     e.attendance_device_id,
             "full_name":   full_name,
             "designation": e.designation,
-            "department":  e.department
+            "department":  e.department,
+            "company":     e.company,
+            "farm":        e.get("custom_farm") if has_farm else None
         })
     return result
 
 @frappe.whitelist()
-def get_active_filter_options(department=None, designation=None):
-    all_employees = frappe.get_all(
-        "Employee",
-        fields=["designation", "department"]
-    )
-    departments = sorted({e.department for e in all_employees if e.department})
+def get_active_filter_options(department=None, designation=None, company=None, farm=None):
+    has_farm = _employee_has_custom_farm()
+    fields = ["designation", "department", "company"]
+    if has_farm:
+        fields.append("custom_farm")
+    all_employees = frappe.get_all("Employee", fields=fields)
 
-    designation_pool = all_employees
+    companies = sorted({e.company for e in all_employees if e.company})
+    farms     = sorted({e.custom_farm for e in all_employees if e.get("custom_farm")}) if has_farm else []
+
+    scope = all_employees
+    if company:
+        scope = [e for e in scope if e.company == company]
+    if farm and has_farm:
+        scope = [e for e in scope if e.get("custom_farm") == farm]
+
+    departments = sorted({e.department for e in scope if e.department})
+
+    designation_pool = scope
     if department:
         designation_pool = [e for e in designation_pool if e.department == department]
     designations = sorted({e.designation for e in designation_pool if e.designation})
@@ -279,13 +306,21 @@ def get_active_filter_options(department=None, designation=None):
         employee_filters["department"] = department
     if designation:
         employee_filters["designation"] = designation
+    if company:
+        employee_filters["company"] = company
+    if farm and has_farm:
+        employee_filters["custom_farm"] = farm
     employee_count = frappe.db.count("Employee", employee_filters)
 
     return {
         "designations":      designations,
         "departments":       departments,
+        "companies":         companies,
+        "farms":             farms,
         "designation_count": len(designations),
         "department_count":  len(departments),
+        "company_count":     len(companies),
+        "farm_count":        len(farms),
         "employee_count":    employee_count
     }
 
@@ -345,6 +380,30 @@ def bulk_command(device_sn, users, command_type):
                 })
                 _set_template_deleted_flag(device_sn, user_id, False)
 
+            elif command_type == "Update User":
+                existing = _get_user_row(device_sn, user_id)
+                if not existing:
+                    failed.append({"user_id": user_id, "reason": "User not on device"})
+                    continue
+
+                employee = frappe.db.get_value(
+                    "Employee",
+                    {"attendance_device_id": user_id},
+                    "name"
+                )
+
+                tpl = _get_template_row(employee)
+                device_name = "" if skip_name else employee_name
+                command = _build_userinfo_command(cmd_id, user_id, device_name, privilege, tpl)
+
+                _upsert_user_row(device_sn, user_id, {
+                    "employee":       employee,
+                    "employee_name":  employee_name,
+                    "privilege":      privilege,
+                    "command_status": "Pending",
+                    "add_user":       command,
+                })
+
             elif command_type == "Delete User":
                 command = f"C:{cmd_id}:DATA DELETE USERINFO\tPIN={user_id}"
                 _delete_user_row(device_sn, user_id)
@@ -363,7 +422,7 @@ def bulk_command(device_sn, users, command_type):
                 "command":       command
             })
 
-            if command_type == "Add User":
+            if command_type in ("Add User", "Update User"):
                 _queue_biodata_for_user(device_sn, user_id, employee=employee, tpl=tpl)
 
             queued.append({"user_id": user_id, "command_id": cmd_id})
@@ -379,6 +438,68 @@ def bulk_command(device_sn, users, command_type):
         "failed":  len(failed),
         "details": queued,
         "errors":  failed
+    }
+
+@frappe.whitelist()
+def add_employees_to_devices(employees, device_sns):
+    if not frappe.db.get_single_value("Biometric Setting", "enable_users"):
+        frappe.throw("Enable Users")
+
+    if isinstance(employees, str):
+        employees = json.loads(employees)
+    if isinstance(device_sns, str):
+        device_sns = json.loads(device_sns)
+
+    device_sns = [str(sn).strip() for sn in (device_sns or []) if str(sn).strip()]
+    if not device_sns:
+        frappe.throw("At least one device is required")
+    if not employees:
+        frappe.throw("At least one employee is required")
+
+    valid_devices = {
+        row.device_sn
+        for row in (frappe.get_single("Biometric Setting").devices or [])
+        if row.device_sn
+    }
+    unknown = [sn for sn in device_sns if sn not in valid_devices]
+    if unknown:
+        frappe.throw(f"Unknown device(s): {', '.join(unknown)}")
+
+    users = []
+    skipped = []
+    for emp_name in employees:
+        emp = frappe.db.get_value(
+            "Employee",
+            emp_name,
+            ["name", "first_name", "last_name", "attendance_device_id"],
+            as_dict=True,
+        )
+        if not emp:
+            skipped.append({"employee": emp_name, "reason": "Employee not found"})
+            continue
+        pin = (emp.attendance_device_id or "").strip()
+        if not pin:
+            skipped.append({"employee": emp_name, "reason": "No attendance_device_id"})
+            continue
+        full_name = f"{emp.first_name or ''} {emp.last_name or ''}".strip() or emp.name
+        users.append({
+            "user_id":       pin,
+            "employee_name": full_name,
+            "privilege":     "0",
+            "skip_name":     0,
+        })
+
+    results = []
+    for sn in device_sns:
+        if not users:
+            break
+        result = bulk_command(sn, users, "Add User")
+        results.append({"device_sn": sn, **result})
+
+    return {
+        "status":  "done",
+        "results": results,
+        "skipped": skipped,
     }
 
 _BIO_TYPES = (

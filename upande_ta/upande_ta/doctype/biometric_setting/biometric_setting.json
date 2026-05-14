@@ -55,7 +55,14 @@
   "events_column_flip",
   "enable_flip",
   "flip_event_frequency",
-  "flip_cron_format"
+  "flip_cron_format",
+  "filters_section",
+  "company",
+  "farm",
+  "department",
+  "column_break_lfxx",
+  "designation",
+  "employee"
  ],
  "fields": [
   {
@@ -341,13 +348,53 @@
    "fieldname": "biometric_templates",
    "fieldtype": "HTML",
    "label": "Biometric Templates"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "filters_section",
+   "fieldtype": "Section Break",
+   "label": "Filters"
+  },
+  {
+   "default": "0",
+   "fieldname": "company",
+   "fieldtype": "Check",
+   "label": "Company"
+  },
+  {
+   "default": "0",
+   "fieldname": "farm",
+   "fieldtype": "Check",
+   "label": "Farm"
+  },
+  {
+   "default": "0",
+   "fieldname": "department",
+   "fieldtype": "Check",
+   "label": "Department"
+  },
+  {
+   "default": "0",
+   "fieldname": "designation",
+   "fieldtype": "Check",
+   "label": "Designation"
+  },
+  {
+   "default": "0",
+   "fieldname": "employee",
+   "fieldtype": "Check",
+   "label": "Employee"
+  },
+  {
+   "fieldname": "column_break_lfxx",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-13 22:28:39.197559",
+ "modified": "2026-05-14 16:29:19.681645",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

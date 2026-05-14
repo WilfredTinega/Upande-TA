@@ -43,7 +43,7 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {"Employee": "public/js/employee.js"}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -144,7 +144,10 @@ doc_events = {
 	},
 	"Employee": {
 		"before_save": "upande_ta.upande_ta.overrides.employee.set_attendance_device_id",
-		"after_insert": "upande_ta.upande_ta.overrides.employee.set_attendance_device_id"
+		"after_insert": [
+			"upande_ta.upande_ta.overrides.employee.set_attendance_device_id",
+			"upande_ta.upande_ta.overrides.employee.auto_add_to_devices_on_import",
+		]
 	}
 }
 
