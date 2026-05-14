@@ -10,7 +10,6 @@
   "naming_series",
   "company",
   "column_break_ufzn",
-  "shift_approver",
   "section_period",
   "from_date",
   "column_break_period_1",
@@ -19,6 +18,7 @@
   "department",
   "designation",
   "column_break_filters_1",
+  "shift_approver",
   "number_of_employees",
   "section_request_details",
   "reason_for_overtime",
@@ -40,7 +40,6 @@
    "reqd": 1,
    "set_only_once": 1
   },
-
   {
    "fieldname": "company",
    "fieldtype": "Link",
@@ -54,7 +53,7 @@
    "fieldname": "shift_approver",
    "fieldtype": "Link",
    "label": "Shift Approver",
-   "options": "Department Approver"
+   "options": "User"
   },
   {
    "fieldname": "section_filters",
@@ -167,7 +166,7 @@
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2026-05-05 18:24:47.995314",
+ "modified": "2026-05-13 14:08:16.189250",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime",
@@ -222,7 +221,7 @@
   }
  ],
  "row_format": "Dynamic",
- "search_fields": "company,department,from_date,to_date,purpose",
+ "search_fields": "company,department,from_date,to_date",
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
