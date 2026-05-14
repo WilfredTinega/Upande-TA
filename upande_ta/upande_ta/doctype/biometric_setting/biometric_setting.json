@@ -26,7 +26,7 @@
   "column_break_gozy",
   "get_bio",
   "section_break_biodata",
-  "bio_templates",
+  "biometric_templates",
   "server_settings_tab",
   "server_ip",
   "server_port",
@@ -47,7 +47,15 @@
   "events_column_biodata",
   "enable_bio_templates",
   "biodata_event_frequency",
-  "biodata_cron_format"
+  "biodata_cron_format",
+  "events_column_cleanup",
+  "enable_cleanup",
+  "cleanup_event_frequency",
+  "cleanup_cron_format",
+  "events_column_flip",
+  "enable_flip",
+  "flip_event_frequency",
+  "flip_cron_format"
  ],
  "fields": [
   {
@@ -130,12 +138,6 @@
   {
    "fieldname": "section_break_biodata",
    "fieldtype": "Section Break"
-  },
-  {
-   "fieldname": "bio_templates",
-   "fieldtype": "Table",
-   "label": "Bio Templates",
-   "options": "Biometric Template"
   },
   {
    "fieldname": "poll_attendance_tab",
@@ -276,6 +278,57 @@
    "mandatory_depends_on": "eval:doc.enable_bio_templates && doc.biodata_event_frequency=='Cron'"
   },
   {
+   "fieldname": "events_column_cleanup",
+   "fieldtype": "Column Break",
+   "label": "Deactivation Cleanup"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_cleanup",
+   "fieldtype": "Check",
+   "label": "Enable Deactivation Cleanup?"
+  },
+  {
+   "depends_on": "eval:doc.enable_cleanup",
+   "fieldname": "cleanup_event_frequency",
+   "fieldtype": "Select",
+   "label": "Event Frequency",
+   "mandatory_depends_on": "eval:doc.enable_cleanup",
+   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "depends_on": "eval:doc.enable_cleanup && doc.cleanup_event_frequency=='Cron'",
+   "fieldname": "cleanup_cron_format",
+   "fieldtype": "Data",
+   "label": "Cron Format",
+   "mandatory_depends_on": "eval:doc.enable_cleanup && doc.cleanup_event_frequency=='Cron'"
+  },
+  {
+   "fieldname": "events_column_flip",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_flip",
+   "fieldtype": "Check",
+   "label": "Update"
+  },
+  {
+   "depends_on": "eval:doc.enable_flip",
+   "fieldname": "flip_event_frequency",
+   "fieldtype": "Select",
+   "label": "Event Frequency",
+   "mandatory_depends_on": "eval:doc.enable_flip",
+   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "depends_on": "eval:doc.enable_flip && doc.flip_event_frequency=='Cron'",
+   "fieldname": "flip_cron_format",
+   "fieldtype": "Data",
+   "label": "Cron Format",
+   "mandatory_depends_on": "eval:doc.enable_flip && doc.flip_event_frequency=='Cron'"
+  },
+  {
    "fieldname": "column_break_xkjy",
    "fieldtype": "Column Break"
   },
@@ -283,13 +336,18 @@
    "fieldname": "checkin_column",
    "fieldtype": "Column Break",
    "label": "Checkin"
+  },
+  {
+   "fieldname": "biometric_templates",
+   "fieldtype": "HTML",
+   "label": "Biometric Templates"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-09 00:42:30.345125",
+ "modified": "2026-05-13 22:28:39.197559",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",
