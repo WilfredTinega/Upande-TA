@@ -548,7 +548,7 @@ def store_device_status():
 	return {"status": "ok", "device_sn": device_sn, "last_seen": last_seen}
 
 
-OFFLINE_THRESHOLD_MINUTES = 5
+OFFLINE_THRESHOLD_MINUTES = 1
 
 
 def mark_stale_devices_offline():
