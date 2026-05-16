@@ -1,5 +1,26 @@
 // Copyright (c) 2026, Upande LTD and contributors
 
+(function inject_sticky_head_styles() {
+	if (document.getElementById("upande-ta-sticky-head-styles")) return;
+	const style = document.createElement("style");
+	style.id = "upande-ta-sticky-head-styles";
+	style.textContent = `
+		.sticky-head-table thead th {
+			position: sticky;
+			top: 0;
+			z-index: 2;
+			background: var(--bg-color, #f3f3f3);
+			background-clip: padding-box;
+			border-bottom: 1px solid var(--border-color, #d1d8dd);
+			box-shadow: inset 0 -1px 0 var(--border-color, #d1d8dd);
+		}
+		[data-theme="dark"] .sticky-head-table thead th {
+			background: var(--gray-800, #333);
+		}
+	`;
+	document.head.appendChild(style);
+})();
+
 frappe.ui.form.on("Biometric Setting", {
 	refresh: function(frm) {
 		make_primary(frm, "get_checkin");
@@ -9,6 +30,11 @@ frappe.ui.form.on("Biometric Setting", {
 		render_biodata_tab(frm);
 		render_scheduled_job_links(frm);
 		guard_devices_delete(frm);
+		paint_device_status(frm);
+	},
+
+	devices_on_form_rendered: function(frm) {
+		paint_device_status(frm);
 	},
 
 	users_device_picker: function(frm) {
@@ -222,6 +248,37 @@ function guard_devices_delete(frm) {
 	setTimeout(try_install, 50);
 	setTimeout(try_install, 250);
 	setTimeout(try_install, 1000);
+}
+
+function paint_device_status(frm) {
+	const grid = frm.fields_dict.devices && frm.fields_dict.devices.grid;
+	if (!grid || !grid.wrapper) return;
+
+	const $rows = $(grid.wrapper).find(".grid-row");
+	$rows.each(function () {
+		const $row = $(this);
+		const row_name = $row.attr("data-name");
+		if (!row_name) return;
+		const child = locals["Biometric Device"] && locals["Biometric Device"][row_name];
+		if (!child) return;
+
+		const $status_cell = $row.find('[data-fieldname="status"]');
+		if (!$status_cell.length) return;
+
+		const $static = $status_cell.find(".static-area");
+		const is_online = child.status === "Online";
+		const color = is_online ? "var(--green-500, #28a745)" : "var(--red-500, #dc3545)";
+		const bg    = is_online ? "rgba(40,167,69,0.12)"      : "rgba(220,53,69,0.12)";
+		const dot   = is_online ? "●" : "●";
+
+		$static.html(`
+			<span style="display:inline-flex;align-items:center;gap:6px;
+				padding:2px 8px;border-radius:10px;font-weight:600;font-size:11px;
+				color:${color};background:${bg}">
+				<span>${dot}</span>${frappe.utils.escape_html(child.status || "Offline")}
+			</span>
+		`);
+	});
 }
 
 function refresh_device_options(frm) {
@@ -1152,9 +1209,8 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			</div>
 			<div style="max-height:400px;overflow-y:auto;
 				border:1px solid var(--color-border-tertiary);border-radius:8px">
-				<table class="table table-sm" style="margin:0">
-					<thead style="position:sticky;top:0;
-						background:var(--color-background-secondary)">
+				<table class="table table-sm sticky-head-table" style="margin:0">
+					<thead>
 						<tr>
 							<th style="width:40px"></th>
 							<th style="width:130px">PIN</th>

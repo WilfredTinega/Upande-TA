@@ -683,6 +683,58 @@ def store_biotemplate():
 	return _new_store()
 
 
+@frappe.whitelist(allow_guest=True)
+def store_device_status():
+	data      = frappe.request.get_json() or {}
+	device_sn = (data.get("device_sn") or "").strip()
+	last_seen = (data.get("last_seen") or "").strip()
+
+	if not device_sn:
+		frappe.response["http_status_code"] = 400
+		frappe.response["message"] = {"status": "error", "error": "Missing device_sn"}
+		return
+
+	if not last_seen:
+		last_seen = frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
+
+	parent_name = frappe.db.get_value(
+		"Biometric Device",
+		{"parenttype": "Biometric Setting", "parentfield": "devices", "device_sn": device_sn},
+		"name",
+	)
+
+	if not parent_name:
+		frappe.response["http_status_code"] = 404
+		frappe.response["message"] = {
+			"status": "error",
+			"error":  f"Device {device_sn} not configured in Biometric Setting",
+		}
+		return
+
+	frappe.db.set_value(
+		"Biometric Device",
+		parent_name,
+		{"status": "Online", "last_seen": last_seen},
+		update_modified=False,
+	)
+
+	cutoff = frappe.utils.add_to_date(frappe.utils.now_datetime(), minutes=-5)
+	frappe.db.sql(
+		"""
+			UPDATE `tabBiometric Device`
+			SET status = 'Offline'
+			WHERE parenttype = 'Biometric Setting'
+			  AND parentfield = 'devices'
+			  AND status = 'Online'
+			  AND (last_seen IS NULL OR last_seen < %s)
+		""",
+		(cutoff,),
+	)
+	frappe.db.commit()
+
+	return {"status": "ok", "device_sn": device_sn, "last_seen": last_seen}
+
+
 def run_flip_last_in():
 	settings = frappe.get_single("Biometric Setting")
 	if not settings.enable_flip:

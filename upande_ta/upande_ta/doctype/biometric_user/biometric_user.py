@@ -441,66 +441,32 @@ def bulk_command(device_sn, users, command_type):
     }
 
 @frappe.whitelist()
-def add_employees_to_devices(employees, device_sns):
-    if not frappe.db.get_single_value("Biometric Setting", "enable_users"):
-        frappe.throw("Enable Users")
+def get_employee_devices(employee):
+    if not employee:
+        frappe.throw("employee is required")
 
-    if isinstance(employees, str):
-        employees = json.loads(employees)
-    if isinstance(device_sns, str):
-        device_sns = json.loads(device_sns)
+    pin = (frappe.db.get_value("Employee", employee, "attendance_device_id") or "").strip()
+    if not pin:
+        return {"pin": "", "devices": []}
 
-    device_sns = [str(sn).strip() for sn in (device_sns or []) if str(sn).strip()]
-    if not device_sns:
-        frappe.throw("At least one device is required")
-    if not employees:
-        frappe.throw("At least one employee is required")
+    rows = frappe.get_all(
+        "Biometric User",
+        filters={"user_id": pin},
+        fields=["device_sn"],
+    )
+    sns_on = {r.device_sn for r in rows if r.device_sn}
+    if not sns_on:
+        return {"pin": pin, "devices": []}
 
-    valid_devices = {
-        row.device_sn
-        for row in (frappe.get_single("Biometric Setting").devices or [])
-        if row.device_sn
-    }
-    unknown = [sn for sn in device_sns if sn not in valid_devices]
-    if unknown:
-        frappe.throw(f"Unknown device(s): {', '.join(unknown)}")
-
-    users = []
-    skipped = []
-    for emp_name in employees:
-        emp = frappe.db.get_value(
-            "Employee",
-            emp_name,
-            ["name", "first_name", "last_name", "attendance_device_id"],
-            as_dict=True,
-        )
-        if not emp:
-            skipped.append({"employee": emp_name, "reason": "Employee not found"})
-            continue
-        pin = (emp.attendance_device_id or "").strip()
-        if not pin:
-            skipped.append({"employee": emp_name, "reason": "No attendance_device_id"})
-            continue
-        full_name = f"{emp.first_name or ''} {emp.last_name or ''}".strip() or emp.name
-        users.append({
-            "user_id":       pin,
-            "employee_name": full_name,
-            "privilege":     "0",
-            "skip_name":     0,
-        })
-
-    results = []
-    for sn in device_sns:
-        if not users:
-            break
-        result = bulk_command(sn, users, "Add User")
-        results.append({"device_sn": sn, **result})
-
-    return {
-        "status":  "done",
-        "results": results,
-        "skipped": skipped,
-    }
+    devices = [
+        {
+            "device_sn":       d.device_sn,
+            "device_location": d.device_location or d.device_sn,
+        }
+        for d in (frappe.get_single("Biometric Setting").devices or [])
+        if d.device_sn and d.device_sn in sns_on
+    ]
+    return {"pin": pin, "devices": devices}
 
 _BIO_TYPES = (
     ("Fingerprint", 1, "fp_bio_no",   "fp_bio_index",   "fp_valid",   "fp_major_ver",   "fp_minor_ver",   "fingerprint_template"),
