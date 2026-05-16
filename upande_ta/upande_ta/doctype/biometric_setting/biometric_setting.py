@@ -718,7 +718,41 @@ def store_device_status():
 		update_modified=False,
 	)
 
-	cutoff = frappe.utils.add_to_date(frappe.utils.now_datetime(), minutes=-5)
+	stale = mark_stale_devices_offline()
+	frappe.db.commit()
+
+	_publish_device_status_update({
+		"updated": [{
+			"row_name":  parent_name,
+			"device_sn": device_sn,
+			"status":    "Online",
+			"last_seen": last_seen,
+		}],
+		"offline": stale,
+	})
+
+	return {"status": "ok", "device_sn": device_sn, "last_seen": last_seen}
+
+
+OFFLINE_THRESHOLD_MINUTES = 5
+
+
+def mark_stale_devices_offline():
+	cutoff = frappe.utils.add_to_date(frappe.utils.now_datetime(), minutes=-OFFLINE_THRESHOLD_MINUTES)
+	stale = frappe.db.sql(
+		"""
+			SELECT name, device_sn, last_seen
+			FROM `tabBiometric Device`
+			WHERE parenttype = 'Biometric Setting'
+			  AND parentfield = 'devices'
+			  AND status = 'Online'
+			  AND (last_seen IS NULL OR last_seen < %s)
+		""",
+		(cutoff,),
+		as_dict=True,
+	)
+	if not stale:
+		return []
 	frappe.db.sql(
 		"""
 			UPDATE `tabBiometric Device`
@@ -730,9 +764,39 @@ def store_device_status():
 		""",
 		(cutoff,),
 	)
-	frappe.db.commit()
+	return [
+		{
+			"row_name":  r.name,
+			"device_sn": r.device_sn,
+			"status":    "Offline",
+			"last_seen": str(r.last_seen) if r.last_seen else None,
+		}
+		for r in stale
+	]
 
-	return {"status": "ok", "device_sn": device_sn, "last_seen": last_seen}
+
+def mark_stale_devices_offline_scheduled():
+	stale = mark_stale_devices_offline()
+	if stale:
+		frappe.db.commit()
+		_publish_device_status_update({"updated": [], "offline": stale})
+	return {"flipped": len(stale)}
+
+
+def _publish_device_status_update(payload):
+	try:
+		frappe.publish_realtime(
+			event="biometric_device_status",
+			message=payload,
+			doctype="Biometric Setting",
+			docname="Biometric Setting",
+			after_commit=True,
+		)
+	except Exception:
+		frappe.log_error(
+			title="Biometric: publish_realtime failed",
+			message=frappe.get_traceback(),
+		)
 
 
 def run_flip_last_in():
