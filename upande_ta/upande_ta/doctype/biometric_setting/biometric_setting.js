@@ -17,6 +17,30 @@
 		[data-theme="dark"] .sticky-head-table thead th {
 			background: var(--gray-800, #333);
 		}
+
+		.grid-static-col[data-bio-status] .static-area > .bio-status-pill,
+		.grid-row [data-fieldname="status"][data-bio-status] select.form-control {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			font-weight: 600;
+			background-color: transparent !important;
+			background-image: none !important;
+			border-color: transparent !important;
+			box-shadow: none !important;
+		}
+
+		.grid-row [data-fieldname="status"][data-bio-status="online"] select.form-control,
+		.grid-static-col[data-bio-status="online"] .static-area > .bio-status-pill {
+			color: var(--green-600, #198754) !important;
+		}
+		.grid-row [data-fieldname="status"][data-bio-status="offline"] select.form-control,
+		.grid-static-col[data-bio-status="offline"] .static-area > .bio-status-pill {
+			color: var(--red-600, #dc3545) !important;
+		}
+		.grid-row [data-fieldname="status"][data-bio-status] select.form-control:focus {
+			outline: none !important;
+		}
 	`;
 	document.head.appendChild(style);
 })();
@@ -286,30 +310,52 @@ function paint_device_status(frm) {
 	const grid = frm.fields_dict.devices && frm.fields_dict.devices.grid;
 	if (!grid || !grid.wrapper) return;
 
-	const $rows = $(grid.wrapper).find(".grid-row");
-	$rows.each(function () {
+	if (!grid._status_focus_handler) {
+		$(grid.wrapper).on(
+			"focusin click",
+			'[data-fieldname="status"]',
+			() => setTimeout(() => paint_device_status(frm), 0)
+		);
+		grid._status_focus_handler = true;
+	}
+
+	const tag = (el, child) => {
+		const status = (child && child.status) || "Offline";
+		const flag = status === "Online" ? "online" : "offline";
+		el.setAttribute("data-bio-status", flag);
+	};
+
+	$(grid.wrapper).find(".grid-row").each(function () {
 		const $row = $(this);
 		const row_name = $row.attr("data-name");
 		if (!row_name) return;
 		const child = locals["Biometric Device"] && locals["Biometric Device"][row_name];
 		if (!child) return;
 
-		const $status_cell = $row.find('[data-fieldname="status"]');
-		if (!$status_cell.length) return;
+		$row.find('[data-fieldname="status"]').each(function () {
+			tag(this, child);
+		});
 
-		const $static = $status_cell.find(".static-area");
-		const is_online = child.status === "Online";
-		const color = is_online ? "var(--green-500, #28a745)" : "var(--red-500, #dc3545)";
-		const bg    = is_online ? "rgba(40,167,69,0.12)"      : "rgba(220,53,69,0.12)";
-		const dot   = is_online ? "●" : "●";
+		const label = frappe.utils.escape_html(child.status || "Offline");
+		const $static = $row.find('[data-fieldname="status"] .static-area');
+		if ($static.length) {
+			$static.html(`<span class="bio-status-pill"><span>●</span>${label}</span>`);
+		}
+	});
 
-		$static.html(`
-			<span style="display:inline-flex;align-items:center;gap:6px;
-				padding:2px 8px;border-radius:10px;font-weight:600;font-size:11px;
-				color:${color};background:${bg}">
-				<span>${dot}</span>${frappe.utils.escape_html(child.status || "Offline")}
-			</span>
-		`);
+	$(grid.wrapper).find(".grid-static-col[data-fieldname='status']").each(function () {
+		const $col = $(this);
+		const $row = $col.closest(".grid-row");
+		const row_name = $row.attr("data-name");
+		if (!row_name) return;
+		const child = locals["Biometric Device"] && locals["Biometric Device"][row_name];
+		if (!child) return;
+		tag(this, child);
+		const label = frappe.utils.escape_html(child.status || "Offline");
+		const $static = $col.find(".static-area");
+		if ($static.length && !$static.find(".bio-status-pill").length) {
+			$static.html(`<span class="bio-status-pill"><span>●</span>${label}</span>`);
+		}
 	});
 }
 
