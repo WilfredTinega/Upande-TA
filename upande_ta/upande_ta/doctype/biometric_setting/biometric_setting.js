@@ -31,6 +31,7 @@ frappe.ui.form.on("Biometric Setting", {
 		render_scheduled_job_links(frm);
 		guard_devices_delete(frm);
 		paint_device_status(frm);
+		subscribe_device_status(frm);
 	},
 
 	devices_on_form_rendered: function(frm) {
@@ -248,6 +249,37 @@ function guard_devices_delete(frm) {
 	setTimeout(try_install, 50);
 	setTimeout(try_install, 250);
 	setTimeout(try_install, 1000);
+}
+
+function subscribe_device_status(frm) {
+	if (frm._device_status_subscribed) return;
+	frm._device_status_subscribed = true;
+
+	frappe.realtime.on("biometric_device_status", (payload) => {
+		const changes = []
+			.concat(payload && payload.updated ? payload.updated : [])
+			.concat(payload && payload.offline ? payload.offline : []);
+		if (!changes.length) return;
+
+		const grid_rows_by_sn = {};
+		(frm.doc.devices || []).forEach(d => {
+			if (d.device_sn) grid_rows_by_sn[d.device_sn] = d;
+		});
+
+		let touched = false;
+		changes.forEach(c => {
+			const row = grid_rows_by_sn[c.device_sn];
+			if (!row) return;
+			if (c.status)    row.status    = c.status;
+			if (c.last_seen) row.last_seen = c.last_seen;
+			touched = true;
+		});
+
+		if (!touched) return;
+		const grid = frm.fields_dict.devices && frm.fields_dict.devices.grid;
+		if (grid) grid.refresh();
+		paint_device_status(frm);
+	});
 }
 
 function paint_device_status(frm) {
