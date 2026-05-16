@@ -144,10 +144,7 @@ doc_events = {
 	},
 	"Employee": {
 		"before_save": "upande_ta.upande_ta.overrides.employee.set_attendance_device_id",
-		"after_insert": [
-			"upande_ta.upande_ta.overrides.employee.set_attendance_device_id",
-			"upande_ta.upande_ta.overrides.employee.auto_add_to_devices_on_import",
-		]
+		"after_insert": "upande_ta.upande_ta.overrides.employee.set_attendance_device_id",
 	}
 }
 
