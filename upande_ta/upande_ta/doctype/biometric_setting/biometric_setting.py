@@ -619,3 +619,4 @@ def run_flip_last_in():
 		return {"skipped": True, "reason": "enable_flip is off"}
 	from upande_ta.upande_ta.overrides.employee_checkin import auto_close_open_ins
 	return auto_close_open_ins()
+	
