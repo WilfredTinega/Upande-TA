@@ -77,17 +77,12 @@ frappe.ui.form.on("Biometric Setting", {
 	enable_checkin:           autosave_on_change,
 	enable_users:             autosave_on_change,
 	enable_bio_templates:     autosave_on_change,
-	enable_cleanup:           autosave_on_change,
 	enable_flip:              autosave_on_change,
 	checkin_event_frequency:  autosave_on_change,
-	users_event_frequency:    autosave_on_change,
 	biodata_event_frequency:  autosave_on_change,
-	cleanup_event_frequency:  autosave_on_change,
 	flip_event_frequency:     autosave_on_change,
 	checkin_cron_format:      autosave_on_change,
-	users_cron_format:        autosave_on_change,
 	biodata_cron_format:      autosave_on_change,
-	cleanup_cron_format:      autosave_on_change,
 	flip_cron_format:         autosave_on_change,
 
 	get_checkin: function(frm) {
@@ -610,9 +605,7 @@ function render_template_list(wrapper, device_sn, templates, frm) {
 
 const SCHEDULED_JOB_PREFIX_TO_FREQUENCY = {
 	checkin: "checkin_event_frequency",
-	users:   "users_event_frequency",
 	biodata: "biodata_event_frequency",
-	cleanup: "cleanup_event_frequency",
 	flip:    "flip_event_frequency"
 };
 

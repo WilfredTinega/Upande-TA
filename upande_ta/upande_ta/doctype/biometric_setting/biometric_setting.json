@@ -13,6 +13,15 @@
   "get_checkin",
   "poll_devices_section",
   "poll_devices",
+  "checkin_events_section",
+  "checkin_column",
+  "enable_checkin",
+  "checkin_event_frequency",
+  "checkin_cron_format",
+  "checkin_events_column_flip",
+  "enable_flip",
+  "flip_event_frequency",
+  "flip_cron_format",
   "users_tab",
   "users_device_picker",
   "column_break_zgkt",
@@ -21,48 +30,27 @@
   "users_html",
   "biodata_tab",
   "biodata_device_picker",
-  "column_break_biodata",
   "biodata_device_location",
-  "column_break_gozy",
   "get_bio",
+  "column_break_biodata",
+  "enable_bio_templates",
+  "biodata_cron_format",
+  "biodata_event_frequency",
   "section_break_biodata",
   "biometric_templates",
   "server_settings_tab",
   "server_ip",
-  "server_port",
-  "column_break_xkjy",
   "end_point",
-  "section_break_asec",
-  "devices",
-  "events_tab",
-  "events_section",
-  "checkin_column",
-  "enable_checkin",
-  "checkin_event_frequency",
-  "checkin_cron_format",
-  "events_column_users",
+  "server_port",
   "enable_users",
-  "users_event_frequency",
-  "users_cron_format",
-  "events_column_biodata",
-  "enable_bio_templates",
-  "biodata_event_frequency",
-  "biodata_cron_format",
-  "events_column_cleanup",
-  "enable_cleanup",
-  "cleanup_event_frequency",
-  "cleanup_cron_format",
-  "events_column_flip",
-  "enable_flip",
-  "flip_event_frequency",
-  "flip_cron_format",
-  "filters_section",
+  "column_break_xkjy",
   "company",
   "farm",
-  "department",
-  "column_break_lfxx",
   "designation",
-  "employee"
+  "employee",
+  "department",
+  "section_break_asec",
+  "devices"
  ],
  "fields": [
   {
@@ -181,10 +169,6 @@
    "label": "Get Checkin"
   },
   {
-   "fieldname": "column_break_gozy",
-   "fieldtype": "Column Break"
-  },
-  {
    "fieldname": "column_break_papq",
    "fieldtype": "Column Break"
   },
@@ -221,98 +205,29 @@
    "label": "Enable Bio Templates?"
   },
   {
-   "fieldname": "events_tab",
-   "fieldtype": "Tab Break",
-   "label": "Events"
-  },
-  {
-   "fieldname": "events_section",
-   "fieldtype": "Section Break"
+   "fieldname": "checkin_events_section",
+   "fieldtype": "Section Break",
+   "label": "Schedule"
   },
   {
    "depends_on": "eval:doc.enable_checkin",
    "fieldname": "checkin_event_frequency",
    "fieldtype": "Select",
-   "label": "Event Frequency",
+   "label": "Checkin Event Frequency",
    "mandatory_depends_on": "eval:doc.enable_checkin",
-   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+   "options": "\nDaily\nDaily Long\nCron"
   },
   {
    "depends_on": "eval:doc.enable_checkin && doc.checkin_event_frequency=='Cron'",
    "fieldname": "checkin_cron_format",
    "fieldtype": "Data",
-   "label": "Cron Format",
+   "label": "Checkin Cron Format",
    "mandatory_depends_on": "eval:doc.enable_checkin && doc.checkin_event_frequency=='Cron'"
   },
   {
-   "fieldname": "events_column_users",
+   "fieldname": "checkin_events_column_flip",
    "fieldtype": "Column Break",
-   "label": "Users"
-  },
-  {
-   "depends_on": "eval:doc.enable_users",
-   "fieldname": "users_event_frequency",
-   "fieldtype": "Select",
-   "label": "Event Frequency",
-   "mandatory_depends_on": "eval:doc.enable_users",
-   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
-  },
-  {
-   "depends_on": "eval:doc.enable_users && doc.users_event_frequency=='Cron'",
-   "fieldname": "users_cron_format",
-   "fieldtype": "Data",
-   "label": "Cron Format",
-   "mandatory_depends_on": "eval:doc.enable_users && doc.users_event_frequency=='Cron'"
-  },
-  {
-   "fieldname": "events_column_biodata",
-   "fieldtype": "Column Break",
-   "label": "Bio Data"
-  },
-  {
-   "depends_on": "eval:doc.enable_bio_templates",
-   "fieldname": "biodata_event_frequency",
-   "fieldtype": "Select",
-   "label": "Event Frequency",
-   "mandatory_depends_on": "eval:doc.enable_bio_templates",
-   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
-  },
-  {
-   "depends_on": "eval:doc.enable_bio_templates && doc.biodata_event_frequency=='Cron'",
-   "fieldname": "biodata_cron_format",
-   "fieldtype": "Data",
-   "label": "Cron Format",
-   "mandatory_depends_on": "eval:doc.enable_bio_templates && doc.biodata_event_frequency=='Cron'"
-  },
-  {
-   "fieldname": "events_column_cleanup",
-   "fieldtype": "Column Break",
-   "label": "Deactivation Cleanup"
-  },
-  {
-   "default": "0",
-   "fieldname": "enable_cleanup",
-   "fieldtype": "Check",
-   "label": "Enable Deactivation Cleanup?"
-  },
-  {
-   "depends_on": "eval:doc.enable_cleanup",
-   "fieldname": "cleanup_event_frequency",
-   "fieldtype": "Select",
-   "label": "Event Frequency",
-   "mandatory_depends_on": "eval:doc.enable_cleanup",
-   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
-  },
-  {
-   "depends_on": "eval:doc.enable_cleanup && doc.cleanup_event_frequency=='Cron'",
-   "fieldname": "cleanup_cron_format",
-   "fieldtype": "Data",
-   "label": "Cron Format",
-   "mandatory_depends_on": "eval:doc.enable_cleanup && doc.cleanup_event_frequency=='Cron'"
-  },
-  {
-   "fieldname": "events_column_flip",
-   "fieldtype": "Column Break"
+   "label": "Update"
   },
   {
    "default": "0",
@@ -324,36 +239,41 @@
    "depends_on": "eval:doc.enable_flip",
    "fieldname": "flip_event_frequency",
    "fieldtype": "Select",
-   "label": "Event Frequency",
+   "label": "Update Event Frequency",
    "mandatory_depends_on": "eval:doc.enable_flip",
-   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+   "options": "\nDaily\nDaily Long\nCron"
   },
   {
    "depends_on": "eval:doc.enable_flip && doc.flip_event_frequency=='Cron'",
    "fieldname": "flip_cron_format",
    "fieldtype": "Data",
-   "label": "Cron Format",
+   "label": "Update Cron Format",
    "mandatory_depends_on": "eval:doc.enable_flip && doc.flip_event_frequency=='Cron'"
   },
   {
-   "fieldname": "column_break_xkjy",
-   "fieldtype": "Column Break"
+   "depends_on": "eval:doc.enable_bio_templates",
+   "fieldname": "biodata_event_frequency",
+   "fieldtype": "Select",
+   "label": "Bio Data Event Frequency",
+   "mandatory_depends_on": "eval:doc.enable_bio_templates",
+   "options": "\nDaily\nDaily Long\nCron"
   },
   {
-   "fieldname": "checkin_column",
+   "depends_on": "eval:doc.enable_bio_templates && doc.biodata_event_frequency=='Cron'",
+   "fieldname": "biodata_cron_format",
+   "fieldtype": "Data",
+   "label": "Bio Data Cron Format",
+   "mandatory_depends_on": "eval:doc.enable_bio_templates && doc.biodata_event_frequency=='Cron'"
+  },
+  {
+   "fieldname": "column_break_xkjy",
    "fieldtype": "Column Break",
-   "label": "Checkin"
+   "label": "Filters"
   },
   {
    "fieldname": "biometric_templates",
    "fieldtype": "HTML",
    "label": "Biometric Templates"
-  },
-  {
-   "collapsible": 1,
-   "fieldname": "filters_section",
-   "fieldtype": "Section Break",
-   "label": "Filters"
   },
   {
    "default": "0",
@@ -386,15 +306,16 @@
    "label": "Employee"
   },
   {
-   "fieldname": "column_break_lfxx",
-   "fieldtype": "Column Break"
+   "fieldname": "checkin_column",
+   "fieldtype": "Column Break",
+   "label": "Checkin"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-14 16:29:19.681645",
+ "modified": "2026-05-16 17:52:53.607244",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

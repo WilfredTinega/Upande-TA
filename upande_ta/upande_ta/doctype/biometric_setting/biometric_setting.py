@@ -6,30 +6,19 @@ from datetime import timedelta
 import frappe
 from frappe.model.document import Document
 from frappe.utils import now_datetime
-from upande_ta.upande_ta.doctype.biometric_user.biometric_user import (
- _build_userinfo_command,
- _delete_user_row,
- _get_template_row,
- _post_to_nodered,
- _queue_biodata_for_user,
- _upsert_user_row,
-)
+from upande_ta.upande_ta.doctype.biometric_user.biometric_user import _post_to_nodered
 
 SCHEDULER_TASKS = [
- ("checkin", "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_checkin",              "Biometric: Poll Attendance"),
- ("users",   "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_users_sync",           "Biometric: Sync Users"),
- ("biodata", "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_biodata_sync",         "Biometric: Sync BioData"),
- ("cleanup", "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_deactivation_cleanup", "Biometric: Deactivation Cleanup"),
- ("flip",    "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_flip_last_in",         "Biometric: Flip Last IN → OUT"),
+ ("checkin", "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_checkin",      "Biometric: Poll Attendance"),
+ ("biodata", "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_biodata_sync", "Biometric: Sync BioData"),
+ ("flip",    "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_flip_last_in", "Biometric: Flip Last IN → OUT"),
 ]
 
 _TASK_BY_PREFIX = {prefix: (method, label) for prefix, method, label in SCHEDULER_TASKS}
 
 _PREFIX_ENABLE = {
  "checkin": "enable_checkin",
- "users":   "enable_users",
  "biodata": "enable_bio_templates",
- "cleanup": "enable_cleanup",
  "flip":    "enable_flip",
 }
 
@@ -406,181 +395,6 @@ def run_checkin():
 	 "window": {"start": str(start), "end": str(end)},
 	 "queued": len(queued),
 	 "failed": len(failed),
-	}
-
-def run_users_sync():
-	settings = frappe.get_single("Biometric Setting")
-	if not settings.enable_users:
-		return {"skipped": True, "reason": "enable_users is off"}
-	devices = [row.device_sn for row in (settings.devices or []) if row.device_sn]
-	if not devices:
-		return {"skipped": True, "reason": "No devices in devices table"}
-
-	queued = []
-	failed = []
-	for device_sn in devices:
-		try:
-			cmd_id = frappe.generate_hash(length=10)
-			command = f"C:{cmd_id}:DATA QUERY USERINFO"
-			_post_to_nodered({
-			 "command_id":    cmd_id,
-			 "command_type":  "Poll Users",
-			 "device_sn":     device_sn,
-			 "user_id":       "",
-			 "employee_name": "",
-			 "command":       command,
-			})
-			queued.append({"device": device_sn, "command_id": cmd_id})
-		except Exception as e:
-			failed.append({"device": device_sn, "reason": str(e)})
-	return {"status": "done", "queued": len(queued), "failed": len(failed)}
-
-def run_deactivation_cleanup():
-	settings = frappe.get_single("Biometric Setting")
-	if not settings.enable_cleanup:
-		return {"skipped": True, "reason": "enable_cleanup is off"}
-
-	deleted_queued = []
-	deleted_failed = []
-	added_queued = []
-	added_failed = []
-
-	stale_rows = []
-	if frappe.db.exists("DocType", "Biometric Template"):
-		stale_rows = frappe.db.sql(
-		 """
-			SELECT DISTINCT bp.device_sn, bt.user_id, bt.employee, bt.employee_name
-			FROM `tabBio Template` bt
-			INNER JOIN `tabBiometric Template` bp
-			        ON bp.name = bt.parent
-			       AND bt.parenttype = 'Biometric Template'
-			       AND bt.parentfield = 'bio_templates'
-			INNER JOIN `tabEmployee` e ON e.name = bt.employee
-			WHERE bp.device_sn IS NOT NULL AND bp.device_sn != ''
-			  AND bt.user_id   IS NOT NULL AND bt.user_id   != ''
-			  AND e.status != 'Active'
-			""",
-		 as_dict=True,
-		)
-	for r in stale_rows:
-		try:
-			cmd_id = frappe.generate_hash(length=10)
-			command = f"C:{cmd_id}:DATA DELETE USERINFO\tPIN={r.user_id}"
-			_post_to_nodered({
-			 "command_id":    cmd_id,
-			 "command_type":  "Delete User",
-			 "device_sn":     r.device_sn,
-			 "user_id":       r.user_id,
-			 "employee_name": r.employee_name or "",
-			 "command":       command,
-			})
-			_delete_user_row(r.device_sn, r.user_id)
-			deleted_queued.append({
-			 "device": r.device_sn, "user_id": r.user_id,
-			 "employee": r.employee, "command_id": cmd_id,
-			})
-		except Exception as e:
-			deleted_failed.append({
-			 "device": r.device_sn, "user_id": r.user_id, "reason": str(e),
-			})
-
-	device_sns = [d.device_sn for d in (settings.devices or []) if d.device_sn]
-	if device_sns:
-		active_employees = frappe.get_all(
-		 "Employee",
-		 filters={
-		  "status": "Active",
-		  "attendance_device_id": ["!=", ""],
-		 },
-		 fields=["name", "employee_name", "attendance_device_id"],
-		)
-		user_ids = {
-		 (emp.attendance_device_id or "").strip()
-		 for emp in active_employees
-		 if (emp.attendance_device_id or "").strip()
-		}
-
-		existing_pairs = set()
-		if user_ids:
-			existing_pairs = {
-			 (r.device_sn, r.user_id)
-			 for r in frappe.get_all(
-			  "Biometric User",
-			  filters={
-			   "device_sn": ["in", device_sns],
-			   "user_id":   ["in", list(user_ids)],
-			  },
-			  fields=["device_sn", "user_id"],
-			 )
-			}
-
-		template_pairs = set()
-		if user_ids and frappe.db.exists("DocType", "Biometric Template"):
-			template_pairs = {
-			 (row.device_sn, row.user_id)
-			 for row in frappe.db.sql(
-			  """
-					SELECT bp.device_sn, bt.user_id
-					FROM `tabBio Template` bt
-					INNER JOIN `tabBiometric Template` bp
-					        ON bp.name = bt.parent
-					       AND bt.parenttype = 'Biometric Template'
-					       AND bt.parentfield = 'bio_templates'
-					WHERE bp.device_sn IN %(devices)s
-					  AND bt.user_id   IN %(pins)s
-					""",
-			  {"devices": tuple(device_sns), "pins": tuple(user_ids)},
-			  as_dict=True,
-			 )
-			}
-
-		for emp in active_employees:
-			user_id = (emp.attendance_device_id or "").strip()
-			if not user_id:
-				continue
-			emp_name = (emp.employee_name or "")[:24]
-			tpl = None
-			for device_sn in device_sns:
-				if (device_sn, user_id) in existing_pairs:
-					continue
-				if (device_sn, user_id) in template_pairs:
-					continue
-				try:
-					if tpl is None:
-						tpl = _get_template_row(emp.name)
-					cmd_id = frappe.generate_hash(length=10)
-					command = _build_userinfo_command(cmd_id, user_id, emp_name, "0", tpl)
-					_upsert_user_row(device_sn, user_id, {
-					 "employee":       emp.name,
-					 "employee_name":  emp_name,
-					 "privilege":      "0",
-					 "status":         "Active",
-					 "command_status": "Pending",
-					 "add_user":       command,
-					})
-					_post_to_nodered({
-					 "command_id":    cmd_id,
-					 "command_type":  "Add User",
-					 "device_sn":     device_sn,
-					 "user_id":       user_id,
-					 "employee_name": emp_name,
-					 "command":       command,
-					})
-					_queue_biodata_for_user(device_sn, user_id, emp.name, tpl)
-					added_queued.append({
-					 "device": device_sn, "user_id": user_id,
-					 "employee": emp.name, "command_id": cmd_id,
-					})
-				except Exception as e:
-					added_failed.append({
-					 "device": device_sn, "user_id": user_id, "reason": str(e),
-					})
-
-	frappe.db.commit()
-	return {
-	 "status":  "done",
-	 "deleted": {"queued": len(deleted_queued), "failed": len(deleted_failed)},
-	 "added":   {"queued": len(added_queued),   "failed": len(added_failed)},
 	}
 
 def run_biodata_sync():
