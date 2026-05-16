@@ -1204,8 +1204,8 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			return;
 		}
 
-		let show_privilege = action === "Add User";
-		let show_skip_name = action === "Add User";
+		let show_privilege = action === "Add User" || action === "Update User";
+		let show_skip_name = action === "Add User" || action === "Update User";
 		let skip_name_col  = show_skip_name ? `<th style="width:90px;text-align:center">Skip?</th>` : "";
 		let privilege_col  = show_privilege ? `<th style="width:120px">Privilege</th>` : "";
 		let template_devices = d._template_devices || [];
