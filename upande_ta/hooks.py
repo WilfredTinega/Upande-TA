@@ -156,7 +156,7 @@ scheduler_events = {
 		"upande_ta.upande_ta.doctype.bulk_week_off.bulk_week_off.submit_due_employee_transfers"
 	],
 	"cron": {
-		"*/5 * * * *": [
+		"* * * * *": [
 			"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.mark_stale_devices_offline_scheduled"
 		]
 	}
