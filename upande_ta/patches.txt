@@ -1,0 +1,5 @@
+upande_ta.patches.v1.migrate_biometric_user_to_child
+upande_ta.patches.v1.restore_biometric_setting
+upande_ta.patches.v1.dedupe_and_lock_bio_template
+upande_ta.patches.v1.rename_biometric_setting_device_fields
+upande_ta.patches.v1.backfill_device_location_fields

@@ -18,28 +18,20 @@
 			background: var(--gray-800, #333);
 		}
 
-		.grid-static-col[data-bio-status] .static-area > .bio-status-pill,
-		.grid-row [data-fieldname="status"][data-bio-status] select.form-control {
+		.grid-row [data-fieldname="status"] .field-area { display: none !important; }
+		.grid-row [data-fieldname="status"] .static-area { display: block !important; }
+
+		.grid-static-col[data-fieldname="status"] .bio-status-pill {
 			display: inline-flex;
 			align-items: center;
 			gap: 6px;
 			font-weight: 600;
-			background-color: transparent !important;
-			background-image: none !important;
-			border-color: transparent !important;
-			box-shadow: none !important;
 		}
-
-		.grid-row [data-fieldname="status"][data-bio-status="online"] select.form-control,
-		.grid-static-col[data-bio-status="online"] .static-area > .bio-status-pill {
+		.grid-static-col[data-bio-status="online"] .bio-status-pill {
 			color: var(--green-600, #198754) !important;
 		}
-		.grid-row [data-fieldname="status"][data-bio-status="offline"] select.form-control,
-		.grid-static-col[data-bio-status="offline"] .static-area > .bio-status-pill {
+		.grid-static-col[data-bio-status="offline"] .bio-status-pill {
 			color: var(--red-600, #dc3545) !important;
-		}
-		.grid-row [data-fieldname="status"][data-bio-status] select.form-control:focus {
-			outline: none !important;
 		}
 	`;
 	document.head.appendChild(style);
@@ -56,21 +48,31 @@ frappe.ui.form.on("Biometric Setting", {
 		guard_devices_delete(frm);
 		paint_device_status(frm);
 		subscribe_device_status(frm);
+		add_device_refresh_button(frm);
 	},
 
 	devices_on_form_rendered: function(frm) {
 		paint_device_status(frm);
+		add_device_refresh_button(frm);
+	},
+
+	devices_add: function(frm, cdt, cdn) {
+		const row = locals[cdt] && locals[cdt][cdn];
+		if (row && !row.status) row.status = "Offline";
+		add_device_refresh_button(frm);
+		setTimeout(() => paint_device_status(frm), 0);
+		setTimeout(() => paint_device_status(frm), 150);
 	},
 
 	users_device_picker: function(frm) {
-		const match = (frm.doc.devices || []).find(d => d.device_sn === frm.doc.users_device_picker);
-		frm.set_value("device_location", match ? (match.device_location || "") : "");
+		const match = _find_device_by_location(frm, frm.doc.users_device_picker);
+		frm.set_value("users_device_sn", match ? (match.device_sn || "") : "");
 		render_users_tab(frm);
 	},
 
 	biodata_device_picker: function(frm) {
-		const match = (frm.doc.devices || []).find(d => d.device_sn === frm.doc.biodata_device_picker);
-		frm.set_value("biodata_device_location", match ? (match.device_location || "") : "");
+		const match = _find_device_by_location(frm, frm.doc.biodata_device_picker);
+		frm.set_value("biodata_device_sn", match ? (match.device_sn || "") : "");
 		render_biodata_tab(frm);
 	},
 
@@ -138,17 +140,18 @@ frappe.ui.form.on("Biometric Setting", {
 			frappe.msgprint(__("Enable Bio Templates"));
 			return;
 		}
-		const sn = frm.doc.biodata_device_picker;
-		if (!sn) {
+		const match = _find_device_by_location(frm, frm.doc.biodata_device_picker);
+		if (!match) {
 			frappe.msgprint("Pick a device above first.");
 			return;
 		}
+		const sn = match.device_sn;
 
 		const open_dialog = () => {
 			open_bulk_user_dialog(
 				"Poll BioData",
 				sn,
-				frm.doc.biodata_device_location || sn,
+				match.device_location || sn,
 				() => render_biodata_tab(frm),
 				get_enabled_filters(frm)
 			);
@@ -228,18 +231,28 @@ function guard_devices_delete(frm) {
 					const blocked = (r && r.message) || {};
 					const blocked_sns = Object.keys(blocked);
 					if (blocked_sns.length) {
+						const link_list = (names, base) => names.map(name => {
+							const safe = frappe.utils.escape_html(name);
+							const href = `${base}/${encodeURIComponent(name)}`;
+							return `<a href="${href}" target="_blank">${safe}</a>`;
+						}).join(", ");
 						const lines = blocked_sns.map(sn => {
-							const links = blocked[sn].map(name => {
-								const safe = frappe.utils.escape_html(name);
-								const href = `/app/biometric-template/${encodeURIComponent(name)}`;
-								return `<a href="${href}" target="_blank">${safe}</a>`;
-							}).join(", ");
-							return `<li><b>${frappe.utils.escape_html(sn)}</b> → ${blocked[sn].length} template(s): ${links}</li>`;
+							const info = blocked[sn] || {};
+							const templates = info.templates || [];
+							const users = info.users || [];
+							const parts = [];
+							if (templates.length) {
+								parts.push(`${templates.length} template(s): ${link_list(templates, "/app/biometric-template")}`);
+							}
+							if (users.length) {
+								parts.push(`${users.length} user record(s): ${link_list(users, "/app/biometric-user")}`);
+							}
+							return `<li><b>${frappe.utils.escape_html(sn)}</b> → ${parts.join("; ")}</li>`;
 						}).join("");
 						frappe.msgprint({
 							title: __("Cannot delete device(s)"),
 							indicator: "red",
-							message: __("The following device(s) have Biometric Template records. Delete the template(s) first:") +
+							message: __("The following device(s) have Biometric User or Biometric Template records. Delete the linked rows first:") +
 								`<ul>${lines}</ul>`
 						});
 						return;
@@ -314,76 +327,166 @@ function paint_device_status(frm) {
 		grid._status_focus_handler = true;
 	}
 
+	if (!grid._status_refresh_hook) {
+		const original_refresh = grid.refresh.bind(grid);
+		grid.refresh = function() {
+			const result = original_refresh.apply(this, arguments);
+			setTimeout(() => paint_device_status(frm), 0);
+			return result;
+		};
+		grid._status_refresh_hook = true;
+	}
+
 	const tag = (el, child) => {
 		const status = (child && child.status) || "Offline";
 		const flag = status === "Online" ? "online" : "offline";
 		el.setAttribute("data-bio-status", flag);
 	};
 
-	$(grid.wrapper).find(".grid-row").each(function () {
-		const $row = $(this);
-		const row_name = $row.attr("data-name");
-		if (!row_name) return;
-		const child = locals["Biometric Device"] && locals["Biometric Device"][row_name];
+	const paint_row = (row_name, child) => {
 		if (!child) return;
+		if (!child.status) child.status = "Offline";
+		const status = child.status || "Offline";
+		const flag = status === "Online" ? "online" : "offline";
+		const color = status === "Online" ? "#198754" : "#dc3545";
+		const label = frappe.utils.escape_html(status);
+		const pill_html = `<span class="bio-status-pill" style="color:${color};font-weight:600;display:inline-flex;align-items:center;gap:6px"><span>●</span>${label}</span>`;
 
-		$row.find('[data-fieldname="status"]').each(function () {
-			tag(this, child);
-		});
+		const $row = $(grid.wrapper).find(`.grid-row[data-name="${row_name}"]`);
+		$row.find('[data-fieldname="status"]').attr("data-bio-status", flag);
+		$row.find('[data-fieldname="status"] select.form-control').attr("data-bio-status", flag);
 
-		const label = frappe.utils.escape_html(child.status || "Offline");
 		const $static = $row.find('[data-fieldname="status"] .static-area');
 		if ($static.length) {
-			$static.html(`<span class="bio-status-pill"><span>●</span>${label}</span>`);
+			$static.html(pill_html);
+			$static.css("display", "block");
 		}
+		const $field = $row.find('[data-fieldname="status"] .field-area');
+		if ($field.length) $field.css("display", "none");
+	};
+
+	const by_name = {};
+	(frm.doc.devices || []).forEach(d => {
+		if (d && d.name) by_name[d.name] = d;
 	});
 
-	$(grid.wrapper).find(".grid-static-col[data-fieldname='status']").each(function () {
-		const $col = $(this);
-		const $row = $col.closest(".grid-row");
-		const row_name = $row.attr("data-name");
+	$(grid.wrapper).find(".grid-row").each(function () {
+		const $r = $(this);
+		const row_name = $r.attr("data-name");
 		if (!row_name) return;
-		const child = locals["Biometric Device"] && locals["Biometric Device"][row_name];
-		if (!child) return;
-		tag(this, child);
-		const label = frappe.utils.escape_html(child.status || "Offline");
-		const $static = $col.find(".static-area");
-		if ($static.length && !$static.find(".bio-status-pill").length) {
-			$static.html(`<span class="bio-status-pill"><span>●</span>${label}</span>`);
+		const child = by_name[row_name]
+			|| (locals["Biometric Device"] && locals["Biometric Device"][row_name]);
+		paint_row(row_name, child || { status: "Offline" });
+	});
+}
+
+function add_device_refresh_button(frm) {
+	const grid = frm.fields_dict.devices && frm.fields_dict.devices.grid;
+	if (!grid || !grid.wrapper) return;
+	const $wrapper = $(grid.wrapper);
+	if ($wrapper.find(".bio-device-refresh-btn").length) return;
+
+	const $anchor = $wrapper.find(".grid-custom-buttons").first().length
+		? $wrapper.find(".grid-custom-buttons").first().parent()
+		: $wrapper;
+	if (getComputedStyle($anchor[0]).position === "static") {
+		$anchor.css("position", "relative");
+	}
+
+	const $btn = $(`
+		<button type="button"
+			class="btn btn-xs btn-primary bio-device-refresh-btn"
+			title="${frappe.utils.escape_html(__("Refresh device status and last seen"))}"
+			style="position:absolute;top:6px;right:8px;z-index:5;display:inline-flex;align-items:center;gap:4px">
+			<span>↻</span>${frappe.utils.escape_html(__("Refresh"))}
+		</button>
+	`);
+	$anchor.append($btn);
+
+	$btn.on("click", () => refresh_device_statuses(frm, $btn));
+}
+
+function refresh_device_statuses(frm, $btn) {
+	if ($btn) $btn.prop("disabled", true);
+	frappe.call({
+		method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.get_device_statuses",
+		callback: (r) => {
+			const rows = (r && r.message) || [];
+			const by_sn = {};
+			rows.forEach(d => { if (d.device_sn) by_sn[d.device_sn] = d; });
+
+			let touched = false;
+			(frm.doc.devices || []).forEach(child => {
+				if (!child.device_sn) return;
+				const fresh = by_sn[child.device_sn];
+				if (!fresh) return;
+				if (child.status !== fresh.status) {
+					child.status = fresh.status;
+					touched = true;
+				}
+				if ((child.last_seen || null) !== (fresh.last_seen || null)) {
+					child.last_seen = fresh.last_seen;
+					touched = true;
+				}
+			});
+
+			const grid = frm.fields_dict.devices && frm.fields_dict.devices.grid;
+			if (touched && grid) grid.refresh();
+			paint_device_status(frm);
+
+			frappe.show_alert({
+				message: __("Device status refreshed"),
+				indicator: "blue"
+			}, 3);
+		},
+		always: () => {
+			if ($btn) $btn.prop("disabled", false);
 		}
 	});
 }
 
 function refresh_device_options(frm) {
-	const opts = (frm.doc.devices || [])
+	const locations = (frm.doc.devices || [])
+		.map(d => d.device_location || d.device_sn)
+		.filter(loc => loc);
+	const locations_opts = "\n" + locations.join("\n");
+
+	frm.set_df_property("users_device_picker", "options", locations_opts);
+	frm.set_df_property("biodata_device_picker", "options", locations_opts);
+
+	const sns = (frm.doc.devices || [])
 		.map(d => d.device_sn)
 		.filter(sn => sn);
-	const opts_str = "\n" + opts.join("\n");
-
-	frm.set_df_property("users_device_picker", "options", opts_str);
-	frm.set_df_property("biodata_device_picker", "options", opts_str);
+	const sns_opts = "\n" + sns.join("\n");
 
 	const grid = frm.fields_dict.poll_devices && frm.fields_dict.poll_devices.grid;
 	if (grid) {
-		grid.update_docfield_property("device", "options", opts_str);
+		grid.update_docfield_property("device", "options", sns_opts);
 		grid.refresh();
 	}
+}
+
+function _find_device_by_location(frm, value) {
+	if (!value) return null;
+	const devices = frm.doc.devices || [];
+	return devices.find(d => (d.device_location || d.device_sn) === value)
+		|| devices.find(d => d.device_sn === value)
+		|| null;
 }
 
 function render_users_tab(frm) {
 	const wrapper = frm.fields_dict.users_html && frm.fields_dict.users_html.$wrapper;
 	if (!wrapper) return;
 
-	const sn = frm.doc.users_device_picker;
-	if (!sn) {
+	const device_match = _find_device_by_location(frm, frm.doc.users_device_picker);
+	if (!device_match) {
 		wrapper.html(`<div style="padding:20px;color:var(--text-muted)">
 			Pick a device above to view and manage its users.
 		</div>`);
 		return;
 	}
-
-	const device_match = (frm.doc.devices || []).find(d => d.device_sn === sn);
-	const loc = (device_match && device_match.device_location) || sn;
+	const sn = device_match.device_sn;
+	const loc = device_match.device_location || sn;
 
 	wrapper.html(`
 		<div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap">
@@ -528,16 +631,15 @@ function render_biodata_tab(frm) {
 	const wrapper = frm.fields_dict.biometric_templates && frm.fields_dict.biometric_templates.$wrapper;
 	if (!wrapper) return;
 
-	const sn = frm.doc.biodata_device_picker;
-	if (!sn) {
+	const device_match = _find_device_by_location(frm, frm.doc.biodata_device_picker);
+	if (!device_match) {
 		wrapper.html(`<div style="padding:20px;color:var(--text-muted)">
 			Pick a device above to view its biometric templates.
 		</div>`);
 		return;
 	}
-
-	const device_match = (frm.doc.devices || []).find(d => d.device_sn === sn);
-	const loc = (device_match && device_match.device_location) || sn;
+	const sn = device_match.device_sn;
+	const loc = device_match.device_location || sn;
 
 	wrapper.html(`
 		<div id="templates-table-container">
@@ -667,8 +769,11 @@ frappe.ui.form.on("Biometric Device", {
 frappe.ui.form.on("Biometric Checkin", {
 	device: function(frm, cdt, cdn) {
 		const row = locals[cdt][cdn];
-		const match = (frm.doc.devices || []).find(d => d.device_sn === row.device);
-		frappe.model.set_value(cdt, cdn, "device_name", match ? (match.device_location || "") : "");
+		const devices = frm.doc.devices || [];
+		const match = devices.find(d => (d.device_location || "") === row.device)
+			|| devices.find(d => d.device_sn === row.device)
+			|| null;
+		frappe.model.set_value(cdt, cdn, "device_sn", match ? (match.device_sn || "") : "");
 	}
 });
 
@@ -680,6 +785,14 @@ function get_enabled_filters(frm) {
 		designation: !!frm.doc.designation,
 		employee:    !!frm.doc.employee
 	};
+}
+
+function _dialog_resolve_sn(d) {
+	const raw = (d.get_value("device_sn") || "").trim();
+	if (!raw) return null;
+	const map = d._device_by_label || {};
+	const match = map[raw];
+	return match ? match.device_sn : raw;
 }
 
 function open_bulk_user_dialog(command_type, default_sn, default_location, on_success, enabled_filters) {
@@ -714,8 +827,8 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 				label: "Target Device",
 				reqd: 1,
 				change() {
-					let raw = d.get_value("device_sn");
-					if (raw) load_users(raw.split(" — ")[0].trim());
+					const sn = _dialog_resolve_sn(d);
+					if (sn) load_users(sn);
 				}
 			},
 			{ fieldname: "col_break_filter_company", fieldtype: "Column Break" },
@@ -826,8 +939,8 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			}
 
 			let raw = d.get_value("device_sn") || "";
-			let sn  = raw.split(" — ")[0].trim();
-			let loc = raw.split(" — ")[1] || sn;
+			let sn  = _dialog_resolve_sn(d) || raw;
+			let loc = raw || sn;
 
 			if (is_poll) {
 				const pins = checked.map(u => u.user_id).filter(Boolean);
@@ -976,12 +1089,15 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_devices",
 		callback(r) {
 			if (r.message) {
-				let options = r.message.map(dev =>
-					`${dev.device_sn} — ${dev.device_location || "No location"}`
-				);
+				d._device_by_label = {};
+				let options = r.message.map(dev => {
+					const label = dev.device_location || dev.device_sn;
+					d._device_by_label[label] = dev;
+					return label;
+				});
 				d.set_df_property("device_sn", "options", options);
 				if (default_sn && default_location) {
-					d.set_value("device_sn", `${default_sn} — ${default_location}`);
+					d.set_value("device_sn", default_location || default_sn);
 					load_users(default_sn);
 				}
 				d.refresh_field("device_sn");
@@ -1069,8 +1185,8 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		toggle_clear_btn();
 		if (any_filter_enabled) refresh_filter_options();
 		validate_employee_against_cascade();
-		let raw = d.get_value("device_sn");
-		if (raw) load_users(raw.split(" — ")[0].trim());
+		const sn = _dialog_resolve_sn(d);
+		if (sn) load_users(sn);
 	}
 
 	function validate_employee_against_cascade() {

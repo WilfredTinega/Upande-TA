@@ -1,26 +1,26 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "format:{device_sn}-{device_name}",
+ "autoname": "format:{device_sn}-{device_location}",
  "creation": "2026-05-10 00:00:00",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "identification_section",
-  "device_sn",
+  "device_location",
   "column_break_device",
-  "device_name",
+  "device_sn",
   "templates_section",
   "column_break_ident",
   "bio_templates"
  ],
  "fields": [
   {
-   "fieldname": "device_sn",
+   "fieldname": "device_location",
    "fieldtype": "Select",
    "in_list_view": 1,
-   "label": "Device SN",
+   "label": "Device Location",
    "reqd": 1
   },
   {
@@ -28,10 +28,10 @@
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "device_name",
+   "fieldname": "device_sn",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "Device Name",
+   "label": "Device SN",
    "read_only": 1
   },
   {
@@ -57,7 +57,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-05-10 13:19:09.739627",
+ "modified": "2026-05-19 22:00:00",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Template",
@@ -102,5 +102,6 @@
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
+ "title_field": "device_location",
  "track_changes": 1
 }
