@@ -779,7 +779,7 @@ frappe.ui.form.on("Biometric Checkin", {
 
 function get_enabled_filters(frm) {
 	return {
-		company:     !!frm.doc.company,
+		company:     !!frm.doc.scope_company,
 		farm:        !!frm.doc.farm,
 		department:  !!frm.doc.department,
 		designation: !!frm.doc.designation,

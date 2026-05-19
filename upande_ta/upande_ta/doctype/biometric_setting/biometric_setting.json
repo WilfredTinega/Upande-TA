@@ -44,7 +44,7 @@
   "server_port",
   "end_point",
   "column_break_xkjy",
-  "company",
+  "scope_company",
   "farm",
   "designation",
   "employee",
@@ -277,7 +277,7 @@
   },
   {
    "default": "0",
-   "fieldname": "company",
+   "fieldname": "scope_company",
    "fieldtype": "Check",
    "label": "Company"
   },
