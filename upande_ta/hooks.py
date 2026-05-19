@@ -92,7 +92,10 @@ doctype_js = {"Employee": "public/js/employee.js"}
 # scheduler sync deletes Scheduled Job Type rows whose method isn't declared in
 # any app's scheduler_events — our jobs are user-configured per Biometric Setting,
 # so we re-upsert them here).
-after_migrate = ["upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.resync_scheduled_jobs"]
+after_migrate = [
+	"upande_ta.patches.v1.sanitize_link_filters.after_migrate_drop_check",
+	"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.resync_scheduled_jobs",
+]
 
 # Uninstallation
 # ------------
