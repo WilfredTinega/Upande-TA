@@ -50,11 +50,12 @@
    "reqd": 1
   },
   {
-   "fieldname": "shift_approver",
-   "fieldtype": "Link",
-   "label": "Shift Approver",
-   "options": "User"
-  },
+  "fieldname": "shift_approver",
+  "fieldtype": "Link",
+  "label": "Shift Approver",
+  "options": "User",
+  "link_filters": "[['Has Role', 'role', 'in', ['HR Manager', 'Leave Approver', 'Expense Approver', 'General Manager', 'HOD', 'Wiki Approver', 'System Manager']]]"
+},
   {
    "fieldname": "section_filters",
    "fieldtype": "Section Break",
