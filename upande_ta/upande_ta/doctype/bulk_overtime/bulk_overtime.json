@@ -56,6 +56,13 @@
    "options": "User"
   },
   {
+   "fieldname": "shift_approver_roles",
+   "fieldtype": "Data",
+   "label": "Shift Approver Roles",
+   "description": "Comma-separated list of Role names used to filter available Shift Approver users.",
+   "placeholder": "Expense Approver, Leave Approver, HR Manager"
+  },
+  {
    "fieldname": "section_filters",
    "fieldtype": "Section Break",
    "label": "Filter Employees"

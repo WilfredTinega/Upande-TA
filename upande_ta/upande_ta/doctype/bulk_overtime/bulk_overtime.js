@@ -8,6 +8,8 @@ frappe.ui.form.on("Bulk Overtime", {
 			filters: { company: frm.doc.company },
 		}));
 
+		// Restrict Shift Approver to users with approver-related roles
+		frm.events.setup_shift_approver_query(frm);
 
 		// Restrict Employee in child table to selected department/group
 		frm.set_query("employee", "bulk_overtime_entries", () => ({
@@ -18,6 +20,57 @@ frappe.ui.form.on("Bulk Overtime", {
 				status: "Active"
 			}
 		}));
+	},
+
+	setup_shift_approver_query(frm) {
+		const default_approver_roles = [
+			"Expense Approver",
+			"Leave Approver",
+			"Wiki Approver",
+			"General Manager",
+			"HOD",
+			"HR Manager",
+			"System Manager",
+		];
+
+		const approver_roles = (frm.doc.shift_approver_roles || "")
+			.split(",")
+			.map((role) => role.trim())
+			.filter(Boolean);
+
+		const roles_to_use = approver_roles.length ? approver_roles : default_approver_roles;
+
+		frappe.db.get_list("Has Role", {
+			filters: { role: ["in", roles_to_use] },
+			fields: ["parent"],
+			limit_page_length: 0,
+		}).then((users) => {
+			const approver_users = [...new Set(users.map((user) => user.parent))];
+
+			const name_filter = approver_users.length
+				? approver_users
+				: ["__no_match__"];
+
+			frm.set_query("shift_approver", () => ({
+				filters: {
+					enabled: 1,
+					user_type: "System User",
+					name: ["in", name_filter],
+				},
+			}));
+		}).catch(() => {
+			frm.set_query("shift_approver", () => ({
+				filters: {
+					enabled: 1,
+					user_type: "System User",
+					name: ["in", ["__no_match__"]],
+				},
+			}));
+			frappe.show_alert({
+				message: __("Could not load approver list. Shift Approver field has been restricted."),
+				indicator: "orange",
+			}, 5);
+		});
 	},
 
 	refresh(frm) {
@@ -42,17 +95,6 @@ frappe.ui.form.on("Bulk Overtime", {
 	},
 
 	get_employees(frm) {
-		const mandatory = ["from_date", "to_date"];
-		const missing = mandatory.filter(f => !frm.doc[f]);
-
-		if (missing.length) {
-			frappe.msgprint({
-				title: __("Missing Fields"),
-				indicator: "red",
-				message: __("Please fill in: ") + missing.map(f => __(frappe.unscrub(f))).join(", "),
-			});
-			return;
-		}
 		// Validate whether a department is selected for filtering
 		if (!frm.doc.department) {
 			frappe.confirm(
@@ -78,7 +120,6 @@ frappe.ui.form.on("Bulk Overtime", {
 				if (r.docs?.[0]?.bulk_overtime_entries) {
 					frm.events.apply_default_requested_hours(frm, false);
 					frm.dirty();
-					frm.save();
 				}
 				frm.refresh();
 				frm.scroll_to_field("bulk_overtime_entries");
@@ -100,12 +141,20 @@ frappe.ui.form.on("Bulk Overtime", {
 			method: "sync_attendance_data",
 			freeze: true,
 			freeze_message: __("Syncing Attendance Data…"),
-		}).then(() => {
-			// Reload the form to get updated hours_done values
-			frm.reload_doc().then(() => {
-				const synced_entries = frm.doc.bulk_overtime_entries || [];
+		}).then((r) => {
+			const updated_rows = r.message?.updated_rows || [];
+			updated_rows.forEach(({ idx, hours_done, overtime_type }) => {
+				const row = frm.doc.bulk_overtime_entries[idx];
+				if (row) {
+					row.hours_done = hours_done;
+					row.overtime_type = overtime_type;
+				}
+			});
+			frm.refresh_field("bulk_overtime_entries");
 
-				let dialog = new frappe.ui.Dialog({
+			const synced_entries = frm.doc.bulk_overtime_entries || [];
+
+			let dialog = new frappe.ui.Dialog({
 					title: __('Verify Overtime Hours'),
 					fields: [
 						{
@@ -135,7 +184,6 @@ frappe.ui.form.on("Bulk Overtime", {
 
 				dialog.show();
 			});
-		});
 	},
 
 	generate_verification_table(frm, entries) {
@@ -157,7 +205,7 @@ frappe.ui.form.on("Bulk Overtime", {
 
 		entries.forEach((entry, idx) => {
 			const hours_done = entry.hours_done || 0;
-			const status = hours_done > 0 ? '✅ To Process' : '⏸️ Zero - Skip';
+			const status = hours_done > 0 ? 'To Process' : 'Zero - Skip';
 			html += `
 				<tr>
 					<td>${entry.employee}</td>
@@ -194,7 +242,7 @@ frappe.ui.form.on("Bulk Overtime", {
 					const value = parseFloat(this.value) || 0;
 					const statusCell = document.querySelector(`.status-${idx}`);
 					if (statusCell) {
-						statusCell.textContent = value > 0 ? '✅ To Process' : '⏸️ Zero - Skip';
+						statusCell.textContent = value > 0 ? 'To Process' : 'Zero - Skip';
 						statusCell.style.color = value > 0 ? 'green' : 'gray';
 					}
 				});
@@ -227,8 +275,8 @@ frappe.ui.form.on("Bulk Overtime", {
 		const zero_entries = frm.doc.bulk_overtime_entries.filter(entry => (entry.hours_done || 0) === 0);
 
 		let message = `<b>Verification Summary:</b><br>`;
-		message += `✅ Entries to process: ${entries_to_process.length}<br>`;
-		message += `⏸️ Entries skipped (hours_done = 0): ${zero_entries.length}<br>`;
+		message += `Entries to process: ${entries_to_process.length}<br>`;
+		message += `Entries skipped (hours_done = 0): ${zero_entries.length}<br>`;
 
 		if (entries_to_process.length === 0) {
 			message += `<br><b class="text-danger">No entries with hours_done > 0. Nothing will be processed.</b>`;
@@ -261,22 +309,6 @@ frappe.ui.form.on("Bulk Overtime", {
 	department(frm) {
 		frm.events.clear_entries(frm);
 		frm.set_value("shift_approver", "");
-
-		if (frm.doc.department) {
-			frappe.db.get_list("Department Approver", {
-				filters: {
-					parent: frm.doc.department,
-					parenttype: "Department",
-					parentfield: "shift_request_approver",
-				},
-				fields: ["approver"],
-				limit_page_length: 1,
-			}).then((data) => {
-				if (data && data.length) {
-					frm.set_value("shift_approver", data[0].approver);
-				}
-			});
-		}
 	},
 	designation(frm) { frm.events.clear_entries(frm); },
 	from_date(frm) { frm.events.clear_entries(frm); },
