@@ -3,37 +3,15 @@ import json
 import frappe
 
 
-# Tables whose `link_filters` JSON column carries a MariaDB auto-CHECK constraint
-# that breaks `bench migrate` when legacy rows hold empty strings or other
-# non-JSON values.
 TARGET_TABLES = ("tabDocField", "tabCustom Field", "tabCustomize Form Field")
 
 
 def execute():
-	"""Make `bench migrate` survive legacy invalid `link_filters` values.
+	"""Null out invalid `link_filters` values and drop the auto json_valid CHECK.
 
-	MariaDB auto-adds a CHECK(json_valid(link_filters)) constraint on JSON
-	columns. Two things can violate it during migrate:
-
-	1. Legacy rows where `link_filters` was stored as '' (empty string) from
-	   older Form Builder code. The CHECK then fails the moment any UPDATE
-	   touches the row, including the delete+reinsert Frappe does on every
-	   DocType reload.
-
-	2. Frappe's INSERT into `tabDocField` during DocType sync omits NULL
-	   columns, so the DB default kicks in. On some MariaDB versions / SQL
-	   modes the default for an unspecified JSON column lands as '' before
-	   the CHECK runs, even when no app code ever writes `link_filters`.
-
-	Fix path:
-	  a) Null out any existing invalid `link_filters` values across DocField,
-	     Custom Field, and Customize Form Field (handles case 1).
-	  b) Drop the auto-generated CHECK constraint on those columns so the
-	     subsequent DocType sync can re-insert rows without tripping it
-	     (handles case 2). Frappe never relies on the CHECK — it validates JSON
-	     in Python on read — so removing it is safe.
-
-	Idempotent; safe to re-run.
+	Legacy `''` values trip MariaDB's CHECK(json_valid(link_filters)) the moment
+	any UPDATE touches the row (including DocType sync's delete+reinsert).
+	Idempotent.
 	"""
 	for table in TARGET_TABLES:
 		_sanitize_link_filters(table)
@@ -70,7 +48,6 @@ def _sanitize_link_filters(table):
 		except (TypeError, ValueError):
 			bad.append(row["name"])
 
-	# Empty strings also fail json_valid; treat them as NULL up front
 	empties = frappe.db.sql(
 		f"SELECT name FROM `{table}` WHERE link_filters = ''",
 		as_dict=True,
@@ -91,34 +68,43 @@ def _sanitize_link_filters(table):
 	print(f"[sanitize_link_filters] {table}: nulled {len(bad)} invalid link_filters row(s)")
 
 
-def _drop_link_filters_check(table):
-	"""Drop the auto-generated CHECK constraint on link_filters.
+def after_migrate_drop_check():
+	"""Re-drop the CHECK after `sync_all()` re-creates it via JSON-column ALTERs."""
+	for table in TARGET_TABLES:
+		_drop_link_filters_check(table)
+	frappe.db.commit()
 
-	MariaDB names it `<table>.<column>` for JSON columns. The constraint is
-	auto-recreated only when the column is explicitly declared as JSON in a
-	CREATE/ALTER — Frappe's schema sync uses `longtext` for MariaDB (see
-	frappe/database/schema.py: "MariaDB JSON is same as longtext"), so once
-	dropped it stays dropped through migrate.
+
+def _drop_link_filters_check(table):
+	"""Strip the inline CHECK(json_valid(link_filters)) by redefining the column.
+
+	The CHECK is part of the column definition, not a standalone table
+	constraint, so DROP CONSTRAINT reports it missing. MODIFY COLUMN drops it.
 	"""
 	if not _has_link_filters_column(table):
 		return
 
-	constraint_name = f"{table}.link_filters"
-	exists = frappe.db.sql(
+	constraints = frappe.db.sql(
 		"""
-			SELECT 1 FROM information_schema.check_constraints
+			SELECT CONSTRAINT_NAME
+			FROM information_schema.check_constraints
 			WHERE constraint_schema = DATABASE()
 			  AND table_name = %s
-			  AND constraint_name = %s
+			  AND CHECK_CLAUSE LIKE %s
 		""",
-		(table, constraint_name),
+		(table, "%link_filters%"),
 	)
-	if not exists:
+	if not constraints:
 		print(f"[sanitize_link_filters] {table}: link_filters CHECK already absent")
 		return
 
+	# Mirrors Frappe's JSON column definition (longtext utf8mb4_bin) so MODIFY
+	# doesn't silently rewrite charset/collation.
 	try:
-		frappe.db.sql_ddl(f"ALTER TABLE `{table}` DROP CONSTRAINT `{constraint_name}`")
-		print(f"[sanitize_link_filters] {table}: dropped CHECK `{constraint_name}`")
+		frappe.db.sql_ddl(
+			f"ALTER TABLE `{table}` MODIFY COLUMN `link_filters` "
+			"longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL"
+		)
+		print(f"[sanitize_link_filters] {table}: stripped inline CHECK on link_filters")
 	except Exception as e:
-		print(f"[sanitize_link_filters] {table}: could not drop CHECK `{constraint_name}`: {e}")
+		print(f"[sanitize_link_filters] {table}: could not strip CHECK on link_filters: {e}")
