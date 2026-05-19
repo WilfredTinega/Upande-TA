@@ -33,12 +33,8 @@ frappe.ui.form.on("Bulk Overtime", {
 			"System Manager",
 		];
 
-		const approver_roles = (frm.doc.shift_approver_roles || "")
-			.split(",")
-			.map((role) => role.trim())
-			.filter(Boolean);
-
-		const roles_to_use = approver_roles.length ? approver_roles : default_approver_roles;
+		// Use the default approver roles (field removed)
+		const roles_to_use = default_approver_roles;
 
 		frappe.db.get_list("Has Role", {
 			filters: { role: ["in", roles_to_use] },
