@@ -53,27 +53,20 @@ class BulkOvertime(Document):
 			frappe.msgprint("No active employees found for the selected filters.")
 			return
 
-		emp_ids = [e.name for e in employees]
-		hours_map = self.get_overtime_hours(emp_ids)
-
-		# Rebuild the child table
+		# Rebuild the child table without auto-filling overtime dates
 		self.set("bulk_overtime_entries", [])
 
 		for emp in employees:
-			overtime_date = self.from_date
-			date_key = str(getdate(overtime_date))
-			hours_done = flt(hours_map.get((emp.name, date_key), 0), 1)
-
 			self.append(
 				"bulk_overtime_entries",
 				{
 					"employee": emp.name,
 					"employee_name": emp.employee_name,
 					"department": emp.department,
-					"overtime_date": overtime_date,
-					"overtime_type": self.get_overtime_type(emp.name, overtime_date),
+					"overtime_date": None,
+					"overtime_type": None,
 					"hours_requested": self.default_requested_hours or 0,
-					"hours_done": hours_done,
+					"hours_done": 0,
 					"row_status": "Pending",
 				},
 			)
@@ -144,13 +137,16 @@ class BulkOvertime(Document):
 		entries = self.bulk_overtime_entries or []
 		if not entries:
 			frappe.msgprint("No overtime entries to sync. Please fetch employees first.")
-			return
+			return {
+				"updated_rows": []
+			}
 
 		emp_ids = list({row.employee for row in entries if row.employee})
 		hours_map = self.get_overtime_hours(emp_ids)
 
 		synced = 0
-		for row in entries:
+		updated_rows = []
+		for idx, row in enumerate(entries):
 			if not row.employee or not row.overtime_date:
 				continue
 
@@ -161,11 +157,20 @@ class BulkOvertime(Document):
 			# Auto-correct overtime type based on the date
 			row.overtime_type = self.get_overtime_type(row.employee, row.overtime_date)
 			synced += 1
+			updated_rows.append({
+				"idx": idx,
+				"hours_done": row.hours_done,
+				"overtime_type": row.overtime_type,
+			})
 
 		frappe.msgprint(
 			"%s entries synced with Attendance data." % synced,
 			indicator="green",
 		)
+
+		return {
+			"updated_rows": updated_rows
+		}
 
 	
 	@frappe.whitelist()
