@@ -39,22 +39,60 @@ upande_ta.blocks.ta_dashboard.mount = function (root_element) {
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
-  function renderTable(rows) {
+  const pager = { rows: [], page: 1, size: 50 };
+
+  function renderPage() {
     const tbody = root_element.querySelector("[data-ta-table-body]");
     if (!tbody) return;
-    if (!rows || !rows.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="ta-empty">No check-in data for this date.</td></tr>';
+    const pagerEl = root_element.querySelector("[data-ta-pager]");
+    const rows = pager.rows;
+
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="ta-empty">No check-in data for this date.</td></tr>';
+      if (pagerEl) pagerEl.hidden = true;
       return;
     }
-    tbody.innerHTML = rows.map(r => `
+
+    const total = rows.length;
+    const totalPages = Math.max(1, Math.ceil(total / pager.size));
+    if (pager.page > totalPages) pager.page = totalPages;
+    if (pager.page < 1) pager.page = 1;
+
+    const start = (pager.page - 1) * pager.size;
+    const end   = Math.min(start + pager.size, total);
+    const slice = rows.slice(start, end);
+
+    tbody.innerHTML = slice.map(r => `
       <tr>
         <td class="ta-col-empno">${escapeHtml(r.employee_number)}</td>
         <td>${escapeHtml(r.employee_name)}</td>
+        <td>${escapeHtml(r.shift) || '<span class="ta-muted">—</span>'}</td>
+        <td>${escapeHtml(r.designation) || '<span class="ta-muted">—</span>'}</td>
         <td>${escapeHtml(r.check_in) || '<span class="ta-muted">—</span>'}</td>
         <td>${escapeHtml(r.check_out) || '<span class="ta-muted">—</span>'}</td>
         <td>${escapeHtml(r.worked_hours) || '<span class="ta-muted">—</span>'}</td>
       </tr>
     `).join("");
+
+    if (pagerEl) {
+      pagerEl.hidden = false;
+      const info = pagerEl.querySelector("[data-ta-page-info]");
+      if (info) info.textContent = `${fmt(start + 1)}–${fmt(end)} of ${fmt(total)} (page ${pager.page} / ${totalPages})`;
+      const setDisabled = (sel, disabled) => {
+        const b = pagerEl.querySelector(sel);
+        if (b) b.disabled = disabled;
+      };
+      setDisabled("[data-ta-page-first]", pager.page <= 1);
+      setDisabled("[data-ta-page-prev]",  pager.page <= 1);
+      setDisabled("[data-ta-page-next]",  pager.page >= totalPages);
+      setDisabled("[data-ta-page-last]",  pager.page >= totalPages);
+    }
+  }
+
+  function renderTable(rows) {
+    pager.rows = Array.isArray(rows) ? rows : [];
+    pager.page = 1;
+    renderPage();
   }
 
   function fmt(n) { return (n ?? 0).toLocaleString(); }
@@ -166,7 +204,7 @@ upande_ta.blocks.ta_dashboard.mount = function (root_element) {
     });
     frappe.call({
       method: checkins_api,
-      args: { date: state.date || null, limit: 50, ...scopedArgs },
+      args: { date: state.date || null, limit: 5000, ...scopedArgs },
       callback: (r) => renderTable((r && r.message && r.message.rows) || []),
     });
   }
@@ -199,6 +237,27 @@ upande_ta.blocks.ta_dashboard.mount = function (root_element) {
       date_ctrl && date_ctrl.set_value(state.date);
       loadFilterOptions().then(load);
     });
+  }
+
+  const pagerEl = root_element.querySelector("[data-ta-pager]");
+  if (pagerEl) {
+    const sizeSel = pagerEl.querySelector("[data-ta-page-size]");
+    if (sizeSel) {
+      pager.size = parseInt(sizeSel.value, 10) || 50;
+      sizeSel.addEventListener("change", () => {
+        pager.size = parseInt(sizeSel.value, 10) || 50;
+        pager.page = 1;
+        renderPage();
+      });
+    }
+    const bind = (sel, fn) => {
+      const b = pagerEl.querySelector(sel);
+      if (b) b.addEventListener("click", () => { fn(); renderPage(); });
+    };
+    bind("[data-ta-page-first]", () => { pager.page = 1; });
+    bind("[data-ta-page-prev]",  () => { pager.page = Math.max(1, pager.page - 1); });
+    bind("[data-ta-page-next]",  () => { pager.page = pager.page + 1; });
+    bind("[data-ta-page-last]",  () => { pager.page = Math.ceil((pager.rows.length || 1) / pager.size); });
   }
 
   loadFilterOptions().then(load);

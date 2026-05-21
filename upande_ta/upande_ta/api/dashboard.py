@@ -36,7 +36,7 @@ def get_ta_dashboard_stats(from_date=None, to_date=None,
 		from_date, to_date = to_date, from_date
 
 	scoped = _scoped_employees(company, farm, department, designation, employee)
-	total_employees = _total_employees(company, farm, department, designation, employee, scoped)
+	total_employees = _total_employees(scoped)
 	if scoped is not None and not scoped:
 		payload = _empty_payload(from_date, to_date)
 		payload["total_employees"] = total_employees
@@ -140,7 +140,7 @@ def get_ta_dashboard_stats(from_date=None, to_date=None,
 	}
 
 
-def _total_employees(company, farm, department, designation, employee, scoped):
+def _total_employees(scoped):
 	if scoped is not None:
 		return len(scoped)
 	return frappe.db.count("Employee", {"status": "Active"})
@@ -161,9 +161,9 @@ def _empty_payload(from_date, to_date):
 @frappe.whitelist()
 def get_ta_dashboard_checkins(date=None, company=None, farm=None,
                               department=None, designation=None, employee=None,
-                              limit: int = 50):
+                              limit: int = 5000):
 	day = getdate(date) if date else getdate(nowdate())
-	limit = max(1, min(int(limit or 50), 500))
+	limit = max(1, min(int(limit or 5000), 10000))
 
 	scoped = _scoped_employees(company, farm, department, designation, employee)
 	if scoped is not None and not scoped:
@@ -181,14 +181,34 @@ def get_ta_dashboard_checkins(date=None, company=None, farm=None,
 			ec.employee,
 			COALESCE(ec.employee_name, e.employee_name) AS employee_name,
 			e.attendance_device_id,
+			e.designation,
+			MAX(ec.shift) AS shift,
 			MIN(CASE WHEN ec.log_type = 'IN'  THEN ec.time END) AS check_in,
-			MAX(CASE WHEN ec.log_type = 'OUT' THEN ec.time END) AS check_out
+			MAX(CASE WHEN ec.log_type = 'OUT' THEN ec.time END) AS check_out,
+			TIMESTAMPDIFF(
+				SECOND,
+				MIN(CASE WHEN ec.log_type = 'IN'  THEN ec.time END),
+				MAX(CASE WHEN ec.log_type = 'OUT' THEN ec.time END)
+			) AS worked_seconds
 		FROM `tabEmployee Checkin` ec
 		LEFT JOIN `tabEmployee` e ON e.name = ec.employee
 		WHERE DATE(ec.time) = %(day)s
 		{emp_clause}
-		GROUP BY ec.employee, employee_name, e.attendance_device_id
-		ORDER BY MIN(CASE WHEN ec.log_type = 'IN' THEN ec.time END) IS NULL,
+		GROUP BY ec.employee, employee_name, e.attendance_device_id, e.designation
+		ORDER BY (TIMESTAMPDIFF(
+		             SECOND,
+		             MIN(CASE WHEN ec.log_type = 'IN'  THEN ec.time END),
+		             MAX(CASE WHEN ec.log_type = 'OUT' THEN ec.time END)
+		         ) IS NULL OR TIMESTAMPDIFF(
+		             SECOND,
+		             MIN(CASE WHEN ec.log_type = 'IN'  THEN ec.time END),
+		             MAX(CASE WHEN ec.log_type = 'OUT' THEN ec.time END)
+		         ) <= 0),
+		         TIMESTAMPDIFF(
+		             SECOND,
+		             MIN(CASE WHEN ec.log_type = 'IN'  THEN ec.time END),
+		             MAX(CASE WHEN ec.log_type = 'OUT' THEN ec.time END)
+		         ) DESC,
 		         MIN(CASE WHEN ec.log_type = 'IN' THEN ec.time END) ASC
 		LIMIT %(limit)s
 		""",
@@ -211,6 +231,8 @@ def get_ta_dashboard_checkins(date=None, company=None, farm=None,
 			{
 				"employee_number": r.get("attendance_device_id") or "",
 				"employee_name": r.get("employee_name") or r.get("employee") or "",
+				"shift": r.get("shift") or "",
+				"designation": r.get("designation") or "",
 				"check_in": _fmt(r.get("check_in")),
 				"check_out": _fmt(r.get("check_out")),
 				"worked_hours": _worked(r.get("check_in"), r.get("check_out")),

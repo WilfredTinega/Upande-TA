@@ -38,22 +38,18 @@
     <div class="ta-kpi ta-kpi--in">
       <div class="ta-kpi__label">Check-Ins</div>
       <div class="ta-kpi__value" data-ta="in_count">—</div>
-      <div class="ta-kpi__sub">Employees: <span data-ta="unique_in">—</span></div>
     </div>
     <div class="ta-kpi ta-kpi--out">
       <div class="ta-kpi__label">Check-Outs</div>
       <div class="ta-kpi__value" data-ta="out_count">—</div>
-      <div class="ta-kpi__sub">Employees: <span data-ta="unique_out">—</span></div>
     </div>
     <div class="ta-kpi ta-kpi--employees">
       <div class="ta-kpi__label">Total Employees</div>
       <div class="ta-kpi__value" data-ta="total_employees">—</div>
-      <div class="ta-kpi__sub">In scope</div>
     </div>
     <div class="ta-kpi ta-kpi--devices">
       <div class="ta-kpi__label">Devices Online</div>
       <div class="ta-kpi__value"><span data-ta="devices_online">—</span> / <span data-ta="devices_total">—</span></div>
-      <div class="ta-kpi__sub">Biometric devices</div>
     </div>
   </div>
 
@@ -65,20 +61,39 @@
           <tr>
             <th class="ta-col-empno">Employee #</th>
             <th>Name</th>
+            <th>Shift</th>
+            <th>Designation</th>
             <th>Check-In</th>
             <th>Check-Out</th>
             <th>Worked Hours</th>
           </tr>
         </thead>
         <tbody data-ta-table-body>
-          <tr><td colspan="5" class="ta-empty">Loading…</td></tr>
+          <tr><td colspan="7" class="ta-empty">Loading…</td></tr>
         </tbody>
       </table>
+    </div>
+    <div class="ta-pager" data-ta-pager hidden>
+      <div class="ta-pager__size">
+        <label>Rows per page</label>
+        <select class="form-control form-control-sm" data-ta-page-size>
+          <option value="25">25</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+        </select>
+      </div>
+      <div class="ta-pager__info" data-ta-page-info></div>
+      <div class="ta-pager__nav">
+        <button type="button" class="btn btn-sm btn-default" data-ta-page-first title="First">«</button>
+        <button type="button" class="btn btn-sm btn-default" data-ta-page-prev title="Previous">‹</button>
+        <button type="button" class="btn btn-sm btn-default" data-ta-page-next title="Next">›</button>
+        <button type="button" class="btn btn-sm btn-default" data-ta-page-last title="Last">»</button>
+      </div>
     </div>
   </div>
 
   <div class="ta-footer">
-    <a href="/app/query-report/Daily%20Checkin%20Summary" class="ta-link">Open Daily Checkin Summary →</a>
     <span class="ta-updated">Updated <span data-ta="updated_at">—</span></span>
   </div>
 </div>
