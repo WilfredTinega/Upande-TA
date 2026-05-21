@@ -192,8 +192,6 @@ upande_ta.blocks.ta_dashboard.mount = function (root_element) {
       callback: (r) => {
         const d = r && r.message;
         if (!d) return;
-        setText("in_count", fmt(d.window.in_count));
-        setText("out_count", fmt(d.window.out_count));
         setText("unique_in", fmt(d.window.unique_in));
         setText("unique_out", fmt(d.window.unique_out));
         setText("total_employees", fmt(d.total_employees));

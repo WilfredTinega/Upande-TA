@@ -16,7 +16,10 @@ add_to_apps_screen = [
 
 doctype_js = {"Employee": "public/js/employee.js"}
 
-after_install = "upande_ta.patches.v1.ensure_daily_checkin_summary_report.execute"
+after_install = [
+	"upande_ta.patches.v1.ensure_daily_checkin_summary_report.execute",
+	"upande_ta.install.ensure_desktop_icon",
+]
 
 # Frappe's scheduler sync deletes Scheduled Job Type rows whose method isn't declared in any
 # app's scheduler_events. Biometric Setting-driven jobs are user-configured per device, so
@@ -24,6 +27,7 @@ after_install = "upande_ta.patches.v1.ensure_daily_checkin_summary_report.execut
 after_migrate = [
 	"upande_ta.patches.v1.sanitize_link_filters.after_migrate_drop_check",
 	"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.resync_scheduled_jobs",
+	"upande_ta.install.ensure_desktop_icon",
 ]
 
 doc_events = {
