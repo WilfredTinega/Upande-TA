@@ -522,6 +522,130 @@ def bulk_command(device_sn, users, command_type):
 
 
 @frappe.whitelist()
+def bulk_command_per_device(assignments, command_type):
+    if isinstance(assignments, str):
+        assignments = json.loads(assignments)
+    if not assignments:
+        frappe.throw("No device assignments provided")
+
+    overall_queued = 0
+    overall_failed = 0
+    by_device = []
+    errors = []
+
+    for entry in assignments:
+        sn    = (entry.get("device_sn") or "").strip()
+        users = entry.get("users") or []
+        if not sn or not users:
+            continue
+        try:
+            result = bulk_command(sn, users, command_type)
+            overall_queued += int(result.get("queued") or 0)
+            overall_failed += int(result.get("failed") or 0)
+            by_device.append({
+                "device_sn": sn,
+                "queued":    result.get("queued") or 0,
+                "failed":    result.get("failed") or 0,
+                "errors":    result.get("errors") or [],
+            })
+        except Exception as e:
+            overall_failed += 1
+            errors.append({"device_sn": sn, "reason": str(e)})
+
+    return {
+        "status":    "done",
+        "queued":    overall_queued,
+        "failed":    overall_failed,
+        "by_device": by_device,
+        "errors":    errors,
+    }
+
+
+@frappe.whitelist()
+def bulk_command_multi(device_sns, users, command_type):
+    if isinstance(device_sns, str):
+        device_sns = json.loads(device_sns)
+    device_sns = [str(sn).strip() for sn in (device_sns or []) if str(sn).strip()]
+    if not device_sns:
+        frappe.throw("Select at least one device")
+
+    overall_queued = 0
+    overall_failed = 0
+    by_device = []
+    errors = []
+
+    for sn in device_sns:
+        try:
+            result = bulk_command(sn, users, command_type)
+            overall_queued += int(result.get("queued") or 0)
+            overall_failed += int(result.get("failed") or 0)
+            by_device.append({
+                "device_sn": sn,
+                "queued":    result.get("queued") or 0,
+                "failed":    result.get("failed") or 0,
+                "errors":    result.get("errors") or [],
+            })
+        except Exception as e:
+            overall_failed += 1
+            errors.append({"device_sn": sn, "reason": str(e)})
+
+    return {
+        "status":    "done",
+        "queued":    overall_queued,
+        "failed":    overall_failed,
+        "by_device": by_device,
+        "errors":    errors,
+    }
+
+
+@frappe.whitelist()
+def get_device_users_multi(device_sns):
+    if isinstance(device_sns, str):
+        device_sns = json.loads(device_sns)
+    device_sns = [str(sn).strip() for sn in (device_sns or []) if str(sn).strip()]
+    if not device_sns:
+        return {"users": [], "pins_by_device": {}}
+
+    parents = frappe.get_all(
+        "Biometric User",
+        filters={"device_sn": ("in", device_sns)},
+        fields=["name", "device_sn"],
+    )
+    parent_to_sn = {p.name: p.device_sn for p in parents}
+    pins_by_device = {sn: set() for sn in device_sns}
+    users_by_pin = {}
+
+    if not parent_to_sn:
+        return {"users": [], "pins_by_device": {sn: [] for sn in device_sns}}
+
+    rows = frappe.get_all(
+        "Bio User",
+        filters={"parent": ("in", list(parent_to_sn)), "parentfield": "users"},
+        fields=["name", "user_id", "employee_name", "privilege", "status", "parent"],
+        order_by="employee_name asc",
+    )
+    for r in rows:
+        sn = parent_to_sn.get(r.parent)
+        if not sn or not r.user_id:
+            continue
+        pins_by_device[sn].add(r.user_id)
+        existing = users_by_pin.get(r.user_id)
+        if not existing:
+            users_by_pin[r.user_id] = {
+                "row_name":      r.name,
+                "user_id":       r.user_id,
+                "employee_name": r.employee_name,
+                "privilege":     r.privilege or "0",
+                "status":        r.status or "Active",
+            }
+
+    return {
+        "users": sorted(users_by_pin.values(), key=lambda u: (u.get("employee_name") or "")),
+        "pins_by_device": {sn: sorted(pins) for sn, pins in pins_by_device.items()},
+    }
+
+
+@frappe.whitelist()
 def get_employee_devices(employee):
     if not employee:
         frappe.throw("employee is required")
