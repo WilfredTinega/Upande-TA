@@ -1,0 +1,10 @@
+{
+ "docstatus": 0,
+ "doctype": "Custom HTML Block",
+ "name": "T&A Dashboard",
+ "private": 0,
+ "html": "<div data-ta-dashboard-root></div>",
+ "script": "(async function () {\n  const host = root_element.querySelector('[data-ta-dashboard-root]');\n  if (!host) return;\n  const r = await frappe.call({ method: 'upande_ta.upande_ta.api.blocks.render_ta_dashboard' });\n  const payload = (r && r.message) || {};\n  if (payload.css) {\n    const styleEl = document.createElement('style');\n    styleEl.textContent = payload.css;\n    root_element.appendChild(styleEl);\n  }\n  host.innerHTML = payload.html || '';\n  const js_url = (window.frappe && frappe.assets && frappe.assets.bundled_asset)\n    ? frappe.assets.bundled_asset('ta_dashboard.bundle.js')\n    : '/assets/upande_ta/js/ta_dashboard.bundle.js';\n  await frappe.require(js_url);\n  upande_ta.blocks.ta_dashboard.mount(host);\n})();",
+ "style": "",
+ "roles": []
+}

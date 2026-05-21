@@ -1,5 +1,5 @@
 app_name = "upande_ta"
-app_title = "Upande TA"
+app_title = "T&A"
 app_publisher = "Upande LTD"
 app_description = "Upande Time and Attendance"
 app_email = "info@upande.com"
@@ -11,15 +11,14 @@ app_license = "mit"
 # required_apps = []
 
 # Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "upande_ta",
-# 		"logo": "/assets/upande_ta/logo.png",
-# 		"title": "Upande TA",
-# 		"route": "/upande_ta",
-# 		"has_permission": "upande_ta.api.permission.has_app_permission"
-# 	}
-# ]
+add_to_apps_screen = [
+	{
+		"name": "upande_ta",
+		"logo": "/assets/upande_ta/images/upande_logo.ico",
+		"title": "T&A",
+		"route": "/app/t%26a",
+	}
+]
 
 # Includes in <head>
 # ------------------
@@ -86,7 +85,7 @@ doctype_js = {"Employee": "public/js/employee.js"}
 # ------------
 
 # # before_install = "upande_ta.install.before_install"
-# after_install = "upande_ta.setup.after_install"
+after_install = "upande_ta.patches.v1.ensure_daily_checkin_summary_report.execute"
 
 # Restore Biometric Setting-driven scheduled jobs after every migrate (Frappe's
 # scheduler sync deletes Scheduled Job Type rows whose method isn't declared in
@@ -148,7 +147,11 @@ doc_events = {
 	"Employee": {
 		"before_save": "upande_ta.upande_ta.overrides.employee.set_attendance_device_id",
 		"after_insert": "upande_ta.upande_ta.overrides.employee.set_attendance_device_id",
-	}
+	},
+	"Workspace": {
+		"validate": "upande_ta.upande_ta.overrides.workspace.validate",
+		"on_trash": "upande_ta.upande_ta.overrides.workspace.on_trash",
+	},
 }
 
 # Scheduled Tasks

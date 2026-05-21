@@ -56,7 +56,14 @@
   "designation",
   "employee",
   "section_break_asec",
-  "devices"
+  "devices",
+  "checkin_review_filters_section",
+  "r_company",
+  "r_farm",
+  "r_department",
+  "column_break_zqrl",
+  "r_designation",
+  "r_employee"
  ],
  "fields": [
   {
@@ -343,13 +350,53 @@
   {
    "fieldname": "section_break_axpd",
    "fieldtype": "Section Break"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "checkin_review_filters_section",
+   "fieldtype": "Section Break",
+   "label": "Checkin Review Filters"
+  },
+  {
+   "default": "0",
+   "fieldname": "r_company",
+   "fieldtype": "Check",
+   "label": "Company"
+  },
+  {
+   "default": "0",
+   "fieldname": "r_farm",
+   "fieldtype": "Check",
+   "label": "Farm"
+  },
+  {
+   "default": "0",
+   "fieldname": "r_department",
+   "fieldtype": "Check",
+   "label": "Department"
+  },
+  {
+   "fieldname": "column_break_zqrl",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "r_designation",
+   "fieldtype": "Check",
+   "label": "Designation"
+  },
+  {
+   "default": "0",
+   "fieldname": "r_employee",
+   "fieldtype": "Check",
+   "label": "Employee"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-21 14:44:52.952004",
+ "modified": "2026-05-21 16:23:52.589176",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

@@ -296,7 +296,9 @@ def store_biotemplate():
                 f"New Bio Template row created for employee {employee_name} on "
                 f"device {device_sn}."
             )
-        except frappe.db.IntegrityError:
+        except Exception as e:
+            if not frappe.db.is_duplicate_entry(e):
+                raise
             frappe.db.rollback()
             existing_name = frappe.db.get_value(
                 "Bio Template",
