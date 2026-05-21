@@ -684,6 +684,60 @@ def request_biodata(device_sn, pin=None, pins=None):
 	 "queued":    all_queued,
 	}
 
+@frappe.whitelist()
+def request_biodata_per_device(assignments):
+	if isinstance(assignments, str):
+		assignments = json.loads(assignments)
+	if not assignments:
+		frappe.throw("No device assignments provided")
+
+	total_queued = 0
+	results = []
+	for entry in assignments:
+		sn = (entry.get("device_sn") or "").strip()
+		pins = entry.get("pins") or []
+		if not sn or not pins:
+			continue
+		try:
+			r = request_biodata(sn, pins=json.dumps(pins))
+			n = len(r.get("queued") or [])
+			total_queued += n
+			results.append({"device_sn": sn, "queued": n, "pins": r.get("pins") or []})
+		except Exception as e:
+			results.append({"device_sn": sn, "error": str(e)})
+	return {
+		"status":    "queued",
+		"queued":    total_queued,
+		"by_device": results,
+	}
+
+
+@frappe.whitelist()
+def request_biodata_multi(device_sns, pins=None):
+	if isinstance(device_sns, str):
+		device_sns = json.loads(device_sns)
+	device_sns = [str(sn).strip() for sn in (device_sns or []) if str(sn).strip()]
+	if not device_sns:
+		frappe.throw("Select at least one device")
+
+	results = []
+	total_queued = 0
+	for sn in device_sns:
+		try:
+			r = request_biodata(sn, pins=pins)
+			n = len(r.get("queued") or [])
+			total_queued += n
+			results.append({"device_sn": sn, "queued": n, "pins": r.get("pins") or []})
+		except Exception as e:
+			results.append({"device_sn": sn, "error": str(e)})
+	return {
+		"status":    "queued",
+		"device_sns": device_sns,
+		"queued":    total_queued,
+		"by_device": results,
+	}
+
+
 @frappe.whitelist(allow_guest=True)
 def store_biotemplate():
 	from upande_ta.upande_ta.doctype.biometric_template.biometric_template import (

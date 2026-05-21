@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
- "creation": "2026-05-08 14:56:33.591294",
+ "creation": "2026-05-21 14:10:58.374511",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -24,19 +24,25 @@
   "flip_cron_format",
   "users_tab",
   "enable_users",
-  "users_device_picker",
   "column_break_zgkt",
-  "users_device_sn",
+  "users_actions_html",
   "section_break_iurc",
+  "users_device_picker",
+  "column_break_users_device",
+  "users_device_sn",
+  "section_break_ztmk",
   "users_html",
   "biodata_tab",
-  "biodata_device_picker",
-  "biodata_device_sn",
-  "get_bio",
-  "column_break_biodata",
+  "section_break_axpd",
   "enable_bio_templates",
-  "biodata_cron_format",
   "biodata_event_frequency",
+  "biodata_cron_format",
+  "column_break_biodata",
+  "get_bio",
+  "section_break_znbu",
+  "biodata_device_picker",
+  "column_break_fwjy",
+  "biodata_device_sn",
   "section_break_biodata",
   "biometric_templates",
   "server_settings_tab",
@@ -46,9 +52,9 @@
   "column_break_xkjy",
   "scope_company",
   "farm",
+  "department",
   "designation",
   "employee",
-  "department",
   "section_break_asec",
   "devices"
  ],
@@ -96,6 +102,10 @@
    "label": "Device"
   },
   {
+   "fieldname": "column_break_users_device",
+   "fieldtype": "Column Break"
+  },
+  {
    "fieldname": "users_device_sn",
    "fieldtype": "Data",
    "label": "Device SN",
@@ -131,6 +141,8 @@
    "read_only": 1
   },
   {
+   "collapsible": 1,
+   "collapsible_depends_on": "eval: doc.enable_bio_templates === 0",
    "fieldname": "section_break_biodata",
    "fieldtype": "Section Break"
   },
@@ -205,6 +217,7 @@
    "label": "Enable Bio Templates?"
   },
   {
+   "collapsible": 1,
    "fieldname": "checkin_events_section",
    "fieldtype": "Section Break",
    "label": "Schedule"
@@ -309,13 +322,34 @@
    "fieldname": "checkin_column",
    "fieldtype": "Column Break",
    "label": "Checkin"
+  },
+  {
+   "fieldname": "section_break_ztmk",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "users_actions_html",
+   "fieldtype": "HTML",
+   "label": "User Buttons"
+  },
+  {
+   "fieldname": "section_break_znbu",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_fwjy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_axpd",
+   "fieldtype": "Section Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-19 21:28:42.411717",
+ "modified": "2026-05-21 14:44:52.952004",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

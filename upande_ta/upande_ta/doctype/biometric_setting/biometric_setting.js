@@ -33,6 +33,91 @@
 		.grid-static-col[data-bio-status="offline"] .bio-status-pill {
 			color: var(--red-600, #dc3545) !important;
 		}
+
+		.bulk-user-table-fixed {
+			border-collapse: separate;
+			border-spacing: 0;
+			width: auto !important;
+			min-width: 100%;
+			table-layout: auto;
+		}
+		.bulk-user-table-fixed td.bulk-col-pin,
+		.bulk-user-table-fixed th.bulk-col-pin {
+			position: sticky;
+			left: 0;
+			width: 90px;
+			min-width: 90px;
+			max-width: 90px;
+			background: var(--bg-color, #fff);
+			z-index: 5;
+		}
+		.bulk-user-table-fixed td.bulk-col-name,
+		.bulk-user-table-fixed th.bulk-col-name {
+			position: sticky;
+			left: 90px;
+			width: 220px;
+			min-width: 220px;
+			max-width: 220px;
+			background: var(--bg-color, #fff);
+			z-index: 5;
+			box-shadow: 2px 0 0 var(--border-color, #d1d8dd);
+		}
+		.bulk-user-table-fixed:has(.bulk-col-skip) td.bulk-col-name,
+		.bulk-user-table-fixed:has(.bulk-col-skip) th.bulk-col-name,
+		.bulk-user-table-fixed:has(.bulk-col-priv) td.bulk-col-name,
+		.bulk-user-table-fixed:has(.bulk-col-priv) th.bulk-col-name {
+			box-shadow: none;
+		}
+		.bulk-user-table-fixed:has(.bulk-col-priv) td.bulk-col-skip,
+		.bulk-user-table-fixed:has(.bulk-col-priv) th.bulk-col-skip {
+			box-shadow: none;
+		}
+		.bulk-user-table-fixed thead th.bulk-col-pin,
+		.bulk-user-table-fixed thead th.bulk-col-name {
+			z-index: 6;
+		}
+		[data-theme="dark"] .bulk-user-table-fixed td.bulk-col-pin,
+		[data-theme="dark"] .bulk-user-table-fixed th.bulk-col-pin,
+		[data-theme="dark"] .bulk-user-table-fixed td.bulk-col-name,
+		[data-theme="dark"] .bulk-user-table-fixed th.bulk-col-name {
+			background: var(--gray-900, #1f1f1f);
+		}
+		.bulk-user-table-fixed td.bulk-col-skip,
+		.bulk-user-table-fixed th.bulk-col-skip {
+			position: sticky;
+			left: 310px;
+			width: 90px;
+			min-width: 90px;
+			max-width: 90px;
+			background: var(--bg-color, #fff);
+			z-index: 5;
+			box-shadow: 2px 0 0 var(--border-color, #d1d8dd);
+		}
+		.bulk-user-table-fixed thead th.bulk-col-skip {
+			z-index: 6;
+		}
+		[data-theme="dark"] .bulk-user-table-fixed td.bulk-col-skip,
+		[data-theme="dark"] .bulk-user-table-fixed th.bulk-col-skip {
+			background: var(--gray-900, #1f1f1f);
+		}
+		.bulk-user-table-fixed td.bulk-col-priv,
+		.bulk-user-table-fixed th.bulk-col-priv {
+			position: sticky;
+			left: 400px;
+			width: 120px;
+			min-width: 120px;
+			max-width: 120px;
+			background: var(--bg-color, #fff);
+			z-index: 5;
+			box-shadow: 2px 0 0 var(--border-color, #d1d8dd);
+		}
+		.bulk-user-table-fixed thead th.bulk-col-priv {
+			z-index: 6;
+		}
+		[data-theme="dark"] .bulk-user-table-fixed td.bulk-col-priv,
+		[data-theme="dark"] .bulk-user-table-fixed th.bulk-col-priv {
+			background: var(--gray-900, #1f1f1f);
+		}
 	`;
 	document.head.appendChild(style);
 })();
@@ -42,6 +127,7 @@ frappe.ui.form.on("Biometric Setting", {
 		make_primary(frm, "get_checkin");
 		make_primary(frm, "get_bio");
 		refresh_device_options(frm);
+		backfill_poll_device_sns(frm);
 		render_users_tab(frm);
 		render_biodata_tab(frm);
 		render_scheduled_job_links(frm);
@@ -424,14 +510,17 @@ function refresh_device_statuses(frm, $btn) {
 					child.status = fresh.status;
 					touched = true;
 				}
-				if ((child.last_seen || null) !== (fresh.last_seen || null)) {
+				if (fresh.last_seen && fresh.last_seen !== child.last_seen) {
 					child.last_seen = fresh.last_seen;
 					touched = true;
 				}
 			});
 
 			const grid = frm.fields_dict.devices && frm.fields_dict.devices.grid;
-			if (touched && grid) grid.refresh();
+			if (touched && grid) {
+				grid.grid_rows && grid.grid_rows.forEach(gr => gr && gr.refresh && gr.refresh());
+				grid.refresh();
+			}
 			paint_device_status(frm);
 
 			frappe.show_alert({
@@ -454,14 +543,24 @@ function refresh_device_options(frm) {
 	frm.set_df_property("users_device_picker", "options", locations_opts);
 	frm.set_df_property("biodata_device_picker", "options", locations_opts);
 
-	const sns = (frm.doc.devices || [])
-		.map(d => d.device_sn)
-		.filter(sn => sn);
-	const sns_opts = "\n" + sns.join("\n");
-
 	const grid = frm.fields_dict.poll_devices && frm.fields_dict.poll_devices.grid;
 	if (grid) {
-		grid.update_docfield_property("device", "options", sns_opts);
+		grid.update_docfield_property("device", "options", locations_opts);
+
+		const set_df_options = (df) => {
+			if (!df || df.fieldname !== "device") return;
+			df.options = locations_opts;
+		};
+		(grid.docfields || []).forEach(set_df_options);
+		(grid.meta && grid.meta.fields || []).forEach(set_df_options);
+		if (grid.grid_rows) {
+			grid.grid_rows.forEach(gr => {
+				if (gr && gr.docfields) gr.docfields.forEach(set_df_options);
+				const col = gr && gr.columns && gr.columns.device;
+				if (col && col.df) col.df.options = locations_opts;
+			});
+		}
+
 		grid.refresh();
 	}
 }
@@ -476,31 +575,49 @@ function _find_device_by_location(frm, value) {
 
 function render_users_tab(frm) {
 	const wrapper = frm.fields_dict.users_html && frm.fields_dict.users_html.$wrapper;
+	const actions_wrapper = frm.fields_dict.users_actions_html && frm.fields_dict.users_actions_html.$wrapper;
 	if (!wrapper) return;
 
 	const device_match = _find_device_by_location(frm, frm.doc.users_device_picker);
+
+	const buttons_html = `
+		<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+			<button class="btn btn-sm btn-primary" id="btn-bulk-add">Add</button>
+			<button class="btn btn-sm btn-primary" id="btn-bulk-update">Update</button>
+			<button class="btn btn-sm btn-primary" id="btn-bulk-delete">Delete</button>
+			<button class="btn btn-sm btn-primary" id="btn-hydrate-templates">Sync</button>
+		</div>
+	`;
+
+	const has_actions_slot = actions_wrapper && actions_wrapper.length;
+	if (has_actions_slot) {
+		actions_wrapper.html(buttons_html);
+	}
+
 	if (!device_match) {
-		wrapper.html(`<div style="padding:20px;color:var(--text-muted)">
-			Pick a device above to view and manage its users.
-		</div>`);
+		wrapper.html(
+			(has_actions_slot ? "" : buttons_html) +
+			`<div style="padding:20px;color:var(--text-muted)">
+				Pick a device above to view and manage its users.
+			</div>`
+		);
+		const btn_scope_nm = has_actions_slot ? actions_wrapper : wrapper;
+		const remind = () => frappe.msgprint("Pick a device above first.");
+		btn_scope_nm.find("#btn-bulk-add").off("click").on("click", remind);
+		btn_scope_nm.find("#btn-bulk-update").off("click").on("click", remind);
+		btn_scope_nm.find("#btn-bulk-delete").off("click").on("click", remind);
+		btn_scope_nm.find("#btn-hydrate-templates").off("click").on("click", remind);
 		return;
 	}
 	const sn = device_match.device_sn;
 	const loc = device_match.device_location || sn;
 
-	wrapper.html(`
-		<div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap">
-			<button class="btn btn-sm btn-primary" id="btn-bulk-add">Add</button>
-			<button class="btn btn-sm btn-primary" id="btn-bulk-update">Update</button>
-			<button class="btn btn-sm btn-primary" id="btn-bulk-delete">Delete</button>
-			<button class="btn btn-sm btn-primary" id="btn-hydrate-templates">
-				Sync
-			</button>
-		</div>
-		<div id="users-table-container">
+	wrapper.html(
+		(has_actions_slot ? "" : buttons_html) +
+		`<div id="users-table-container" style="margin-top:${has_actions_slot ? 0 : 12}px">
 			<p style="color:var(--text-muted)">Loading users on ${frappe.utils.escape_html(loc)}...</p>
-		</div>
-	`);
+		</div>`
+	);
 
 	const open_bulk = (cmd) => {
 		if (!frm.doc.enable_users) {
@@ -510,10 +627,11 @@ function render_users_tab(frm) {
 		open_bulk_user_dialog(cmd, sn, loc, () => render_users_tab(frm), get_enabled_filters(frm));
 	};
 
-	wrapper.find("#btn-bulk-add").on("click", () => open_bulk("Add User"));
-	wrapper.find("#btn-bulk-update").on("click", () => open_bulk("Update User"));
-	wrapper.find("#btn-bulk-delete").on("click", () => open_bulk("Delete User"));
-	wrapper.find("#btn-hydrate-templates").on("click", () => {
+	const btn_scope = has_actions_slot ? actions_wrapper : wrapper;
+	btn_scope.find("#btn-bulk-add").off("click").on("click", () => open_bulk("Add User"));
+	btn_scope.find("#btn-bulk-update").off("click").on("click", () => open_bulk("Update User"));
+	btn_scope.find("#btn-bulk-delete").off("click").on("click", () => open_bulk("Delete User"));
+	btn_scope.find("#btn-hydrate-templates").off("click").on("click", () => {
 		frappe.call({
 			method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.hydrate_users_from_templates",
 			args: { device_sn: sn },
@@ -767,15 +885,36 @@ frappe.ui.form.on("Biometric Device", {
 });
 
 frappe.ui.form.on("Biometric Checkin", {
+	poll_devices_add: function(frm) { refresh_device_options(frm); },
 	device: function(frm, cdt, cdn) {
 		const row = locals[cdt][cdn];
-		const devices = frm.doc.devices || [];
-		const match = devices.find(d => (d.device_location || "") === row.device)
-			|| devices.find(d => d.device_sn === row.device)
-			|| null;
-		frappe.model.set_value(cdt, cdn, "device_sn", match ? (match.device_sn || "") : "");
+		const match = _find_device_by_location(frm, row.device);
+		const sn = match ? (match.device_sn || "") : "";
+		frappe.model.set_value(cdt, cdn, "device_sn", sn);
+		if (match) {
+			const loc = match.device_location || match.device_sn || "";
+			if (loc && row.device !== loc) {
+				frappe.model.set_value(cdt, cdn, "device", loc);
+			}
+		}
 	}
 });
+
+function backfill_poll_device_sns(frm) {
+	(frm.doc.poll_devices || []).forEach(row => {
+		if (!row.device) return;
+		const match = _find_device_by_location(frm, row.device);
+		if (!match) return;
+		const loc = match.device_location || match.device_sn || "";
+		const sn = match.device_sn || "";
+		if (loc && row.device !== loc) {
+			frappe.model.set_value(row.doctype, row.name, "device", loc);
+		}
+		if (sn && row.device_sn !== sn) {
+			frappe.model.set_value(row.doctype, row.name, "device_sn", sn);
+		}
+	});
+}
 
 function get_enabled_filters(frm) {
 	return {
@@ -787,12 +926,16 @@ function get_enabled_filters(frm) {
 	};
 }
 
-function _dialog_resolve_sn(d) {
-	const raw = (d.get_value("device_sn") || "").trim();
-	if (!raw) return null;
-	const map = d._device_by_label || {};
-	const match = map[raw];
-	return match ? match.device_sn : raw;
+function _dialog_selected_sns(d) {
+	return (d._selected_sns || []).slice();
+}
+
+function _dialog_selected_locations(d) {
+	const by_sn = d._device_by_sn || {};
+	return _dialog_selected_sns(d).map(sn => {
+		const dev = by_sn[sn];
+		return (dev && (dev.device_location || dev.device_sn)) || sn;
+	});
 }
 
 function open_bulk_user_dialog(command_type, default_sn, default_location, on_success, enabled_filters) {
@@ -821,17 +964,6 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		title: dialog_title,
 		size: "extra-large",
 		fields: [
-			{
-				fieldname: "device_sn",
-				fieldtype: "Select",
-				label: "Target Device",
-				reqd: 1,
-				change() {
-					const sn = _dialog_resolve_sn(d);
-					if (sn) load_users(sn);
-				}
-			},
-			{ fieldname: "col_break_filter_company", fieldtype: "Column Break" },
 			{
 				fieldname: "filter_company",
 				fieldtype: "Autocomplete",
@@ -932,39 +1064,46 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		],
 		primary_action_label: is_poll ? "Poll Selected" : `${command_type.split(" ")[0]} Selected`,
 		primary_action() {
-			let checked = get_checked_users();
-			if (!checked.length) {
-				frappe.msgprint("Select at least one user.");
+			const sns = _dialog_selected_sns(d);
+			if (!sns.length) {
+				frappe.msgprint("Tick at least one device column header.");
 				return;
 			}
 
-			let raw = d.get_value("device_sn") || "";
-			let sn  = _dialog_resolve_sn(d) || raw;
-			let loc = raw || sn;
+			const assignments = build_per_device_assignments();
+			const total_picks = assignments.reduce((n, a) => n + a.users.length, 0);
+			if (!total_picks) {
+				frappe.msgprint("Tick at least one device cell for the users you want to apply.");
+				return;
+			}
+
+			const locs = _dialog_selected_locations(d);
+			const loc_label = locs.length === 1 ? locs[0] : `${locs.length} device(s)`;
 
 			if (is_poll) {
-				const pins = checked.map(u => u.user_id).filter(Boolean);
-				if (!pins.length) {
-					frappe.msgprint("None of the selected employees have a PIN.");
+				const poll_assignments = assignments.map(a => ({
+					device_sn: a.device_sn,
+					pins: a.users.map(u => u.user_id).filter(Boolean)
+				})).filter(a => a.pins.length);
+				const total_pin_picks = poll_assignments.reduce((n, a) => n + a.pins.length, 0);
+				if (!total_pin_picks) {
+					frappe.msgprint("None of the ticked employees have a PIN.");
 					return;
 				}
-				frappe.confirm(`Poll BioData for ${pins.length} user(s) on ${loc}?`, () => {
+				frappe.confirm(`Poll BioData (${total_pin_picks} pick(s) across ${poll_assignments.length} device(s))?`, () => {
 					run_with_progress(
-						__("Polling BioData ({0} users)", [pins.length]),
+						__("Polling BioData"),
 						__("Queuing biodata poll commands..."),
 						{
-							method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.request_biodata",
-							args: {
-								device_sn: sn,
-								pins:      JSON.stringify(pins)
-							},
+							method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.request_biodata_per_device",
+							args: { assignments: JSON.stringify(poll_assignments) },
 							callback(r) {
 								if (!r.exc) {
 									d.hide();
 									if (on_success) on_success();
-									const n = (r.message && r.message.queued && r.message.queued.length) || 0;
+									const n = (r.message && r.message.queued) || 0;
 									frappe.show_alert({
-										message: `${n} biodata queries queued for ${pins.length} PIN(s) on ${loc}. Templates will arrive within 30 seconds.`,
+										message: `${n} biodata queries queued. Templates will arrive within 30 seconds.`,
 										indicator: indicator
 									}, 10);
 								}
@@ -976,26 +1115,26 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			}
 
 			let label = command_type === "Delete User"
-				? `Delete ${checked.length} user(s) from ${loc}?`
-				: `${command_type.split(" ")[0]} ${checked.length} user(s) on ${loc}?`;
+				? `Delete ${total_picks} user-device pick(s) across ${assignments.length} device(s)?`
+				: `${command_type.split(" ")[0]} ${total_picks} user-device pick(s) across ${assignments.length} device(s)?`;
 
 			frappe.confirm(label, () => {
 				run_with_progress(
-					__("{0} ({1} users)", [command_type, checked.length]),
+					__("{0} ({1} picks)", [command_type, total_picks]),
 					__("Queuing {0} commands...", [command_type]),
 					{
-						method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.bulk_command",
+						method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.bulk_command_per_device",
 						args: {
-							device_sn:    sn,
-							users:        JSON.stringify(checked),
+							assignments: JSON.stringify(assignments),
 							command_type: command_type
 						},
 						callback(r) {
 							if (!r.exc) {
 								d.hide();
 								if (on_success) on_success();
-								let msg = `${r.message.queued} command(s) queued successfully.`;
-								if (r.message.failed > 0) msg += ` ${r.message.failed} failed.`;
+								const m = r.message || {};
+								let msg = `${m.queued || 0} command(s) queued across ${assignments.length} device(s).`;
+								if (m.failed) msg += ` ${m.failed} failed.`;
 								frappe.show_alert({ message: msg, indicator: indicator }, 8);
 							}
 						}
@@ -1005,10 +1144,40 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		}
 	});
 
+	function build_per_device_assignments() {
+		const container = d.$wrapper.find("#bulk-user-table");
+		const by_sn = {};
+		(d._selected_sns || []).forEach(sn => { by_sn[sn] = []; });
+
+		container.find(".bulk-device-cell-check:checked").each(function() {
+			if (String($(this).data("locked")) === "1") return;
+			const sn  = $(this).data("sn");
+			const idx = parseInt($(this).data("idx"));
+			if (!by_sn[sn]) return;
+			const user = (d._bulk_users_data || [])[idx];
+			if (!user) return;
+
+			const priv = container.find(`.privilege-sel[data-idx="${idx}"]`).val()
+				|| user.privilege || "0";
+			const skip_name = container.find(`.skip-name-check[data-idx="${idx}"]`).is(":checked");
+			by_sn[sn].push({
+				user_id:       user.user_id,
+				employee_name: user.employee_name,
+				privilege:     priv,
+				row_name:      user.row_name || null,
+				skip_name:     skip_name ? 1 : 0
+			});
+		});
+
+		return Object.keys(by_sn)
+			.filter(sn => by_sn[sn].length)
+			.map(sn => ({ device_sn: sn, users: by_sn[sn] }));
+	}
+
 	const apply_toolbar_layout = () => {
-		const $deviceField = d.$wrapper.find(`[data-fieldname="device_sn"]`).first();
-		if (!$deviceField.length) return;
-		const $col = $deviceField.closest(".form-column");
+		const $anchor = d.$wrapper.find(`[data-fieldname="clear_filters_html"]`).first();
+		if (!$anchor.length) return;
+		const $col = $anchor.closest(".form-column");
 		const $row = $col.parent();
 		if (!$row.length) return;
 
@@ -1020,7 +1189,6 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		let visible_filter_count = 0;
 		$cols.each(function () {
 			const $c = $(this);
-			if ($c.find(`[data-fieldname="device_sn"]`).length) return;
 			if ($c.find(`[data-fieldname="clear_filters_html"]`).length) return;
 			const filter_match = filter_field_names.find(fn =>
 				$c.find(`[data-fieldname="${fn}"]`).length > 0
@@ -1042,7 +1210,7 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			);
 		}
 		const grid_cols = has_visible_filters
-			? `2fr ${"1fr ".repeat(visible_filter_count)}56px`
+			? `${"1fr ".repeat(visible_filter_count)}56px`
 			: "1fr";
 
 		$row.css({
@@ -1089,22 +1257,24 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_devices",
 		callback(r) {
 			if (r.message) {
+				d._devices = r.message;
 				d._device_by_label = {};
-				let options = r.message.map(dev => {
+				d._device_by_sn = {};
+				r.message.forEach(dev => {
 					const label = dev.device_location || dev.device_sn;
 					d._device_by_label[label] = dev;
-					return label;
+					d._device_by_sn[dev.device_sn] = dev;
 				});
-				d.set_df_property("device_sn", "options", options);
-				if (default_sn && default_location) {
-					d.set_value("device_sn", default_location || default_sn);
-					load_users(default_sn);
-				}
-				d.refresh_field("device_sn");
+				d._selected_sns = default_sn ? [default_sn] : [];
 				apply_toolbar_layout();
+				reload_users();
 			}
 		}
 	});
+
+	function reload_users() {
+		load_users();
+	}
 
 	if (any_filter_enabled) refresh_filter_options();
 
@@ -1185,8 +1355,7 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		toggle_clear_btn();
 		if (any_filter_enabled) refresh_filter_options();
 		validate_employee_against_cascade();
-		const sn = _dialog_resolve_sn(d);
-		if (sn) load_users(sn);
+		reload_users();
 	}
 
 	function validate_employee_against_cascade() {
@@ -1229,14 +1398,14 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		};
 	}
 
-	function load_users(sn) {
+	function load_users() {
 		let container = d.$wrapper.find("#bulk-user-table");
 		container.html(`<p style="color:var(--color-text-secondary)">Loading...</p>`);
 
 		let filters = get_filter_args();
-		d._current_sn = sn;
+		const all_sns = (d._devices || []).map(dev => dev.device_sn);
 
-		const proceed = () => _load_users_inner(sn, filters, container);
+		const proceed = () => _load_users_inner(all_sns, filters, container);
 
 		if (d._template_devices) {
 			proceed();
@@ -1261,12 +1430,17 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		});
 	}
 
-	function _load_users_inner(sn, filters, container) {
+	function _load_users_inner(sns, filters, container) {
 		frappe.call({
-			method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_device_users",
-			args: { device_sn: sn },
+			method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_device_users_multi",
+			args: { device_sns: JSON.stringify(sns) },
 			callback(r) {
-				let device_users = r.message || [];
+				let payload = (r && r.message) || { users: [], pins_by_device: {} };
+				let device_users = payload.users || [];
+				d._device_pins = {};
+				for (const sn_key in (payload.pins_by_device || {})) {
+					d._device_pins[sn_key] = new Set(payload.pins_by_device[sn_key] || []);
+				}
 				let has_filters = filters.employee || filters.designation || filters.department
 					|| filters.company || filters.farm;
 
@@ -1276,14 +1450,7 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 						args: Object.assign({ status: "Active" }, filters),
 						callback(er) {
 							let employees = er.message || [];
-							let rows;
-							if (command_type === "Add User") {
-								let device_pins = new Set(device_users.map(u => u.user_id));
-								rows = employees.filter(e => !device_pins.has(e.user_id));
-							} else {
-								rows = employees;
-							}
-							render_table(rows.map(e => ({
+							render_table(employees.map(e => ({
 								user_id:       e.user_id,
 								employee_name: e.full_name,
 								privilege:     "0"
@@ -1322,28 +1489,34 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 
 		let show_privilege = action === "Add User" || action === "Update User";
 		let show_skip_name = action === "Add User" || action === "Update User";
-		let skip_name_col  = show_skip_name ? `<th style="width:90px;text-align:center">Skip?</th>` : "";
-		let privilege_col  = show_privilege ? `<th style="width:120px">Privilege</th>` : "";
-		let template_devices = d._template_devices || [];
-		let pins_by_device   = d._template_pins_by_device || {};
-		if (d._current_sn) {
-			template_devices = template_devices.filter(dev => dev.device_sn !== d._current_sn);
-		}
+		let skip_name_col  = show_skip_name ? `<th class="bulk-col-skip" style="text-align:center;white-space:nowrap">Skip?</th>` : "";
+		let privilege_col  = show_privilege ? `<th class="bulk-col-priv" style="white-space:nowrap">Privilege</th>` : "";
+		const all_devices  = d._devices || [];
+		const selected_sn_set = new Set(d._selected_sns || []);
+		let device_pins    = d._device_pins || {};
 
-		let device_cols = template_devices.map(dev =>
-			`<th style="width:110px;text-align:center" title="${frappe.utils.escape_html(dev.device_sn)}">
-				${frappe.utils.escape_html(dev.device_location || dev.device_sn)}
-			</th>`
-		).join("");
+		let device_cols = all_devices.map(dev => {
+			const checked = selected_sn_set.has(dev.device_sn) ? "checked" : "";
+			const label = dev.device_location || dev.device_sn;
+			return `<th style="min-width:120px;text-align:center;white-space:nowrap;padding:6px 10px"
+				title="${frappe.utils.escape_html(label)} (${frappe.utils.escape_html(dev.device_sn)})">
+				<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;margin:0;white-space:nowrap">
+					<input type="checkbox" class="bulk-device-header-check"
+						data-sn="${frappe.utils.escape_html(dev.device_sn)}" ${checked}
+						style="margin:0;flex:0 0 auto">
+					<span style="white-space:nowrap">${frappe.utils.escape_html(label)}</span>
+				</label>
+			</th>`;
+		}).join("");
 
 		let rows = users.map((u, i) => {
 			let skip_name_cell = show_skip_name ? `
-				<td style="text-align:center">
+				<td class="bulk-col-skip" style="text-align:center;white-space:nowrap">
 					<input type="checkbox" class="skip-name-check" data-idx="${i}">
 				</td>` : "";
 
 			let privilege_cell = show_privilege ? `
-				<td>
+				<td class="bulk-col-priv" style="white-space:nowrap">
 					<select class="form-control form-control-sm privilege-sel"
 							data-idx="${i}" style="width:100px">
 						<option value="0"  ${u.privilege === "0"  ? "selected" : ""}>User</option>
@@ -1351,10 +1524,40 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 					</select>
 				</td>` : "";
 
-			let device_cells = template_devices.map(dev => {
-				const pins = pins_by_device[dev.device_sn] || new Set();
+			let device_cells = all_devices.map(dev => {
+				const pins = device_pins[dev.device_sn] || new Set();
 				const has = pins.has(u.user_id);
-				return `<td style="text-align:center">${has ? `<span style="color:var(--green-500)">✓</span>` : `<span style="color:var(--text-muted)">—</span>`}</td>`;
+				const is_target = selected_sn_set.has(dev.device_sn);
+				const presence = has
+					? `<span style="color:var(--green-500)">✓</span>`
+					: `<span style="color:var(--text-muted)">—</span>`;
+				let default_check;
+				let locked = false;
+				if (action === "Add User") {
+					default_check = !has;
+					locked = has;
+				} else if (action === "Update User" || action === "Delete User") {
+					default_check = has;
+					locked = !has;
+				} else {
+					default_check = true;
+				}
+				const visible_checked = locked
+					? has
+					: (is_target && default_check);
+				return `<td style="min-width:120px;text-align:center"
+					data-sn="${frappe.utils.escape_html(dev.device_sn)}">
+					<span class="bulk-device-presence" style="display:${is_target ? "none" : "inline"}">${presence}</span>
+					<input type="checkbox" class="bulk-device-cell-check"
+						data-sn="${frappe.utils.escape_html(dev.device_sn)}"
+						data-idx="${i}"
+						data-has="${has ? 1 : 0}"
+						data-locked="${locked ? 1 : 0}"
+						title="${locked ? frappe.utils.escape_html(action === "Add User" ? "Already enrolled on this device" : "Not enrolled on this device") : ""}"
+						style="display:${is_target ? "inline-block" : "none"};margin:0${locked ? ";opacity:0.6;cursor:not-allowed" : ""}"
+						${visible_checked ? "checked" : ""}
+						${locked ? "disabled" : ""}>
+				</td>`;
 			}).join("");
 
 			let status_badge = u.status ? `
@@ -1366,13 +1569,10 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 
 			return `
 				<tr data-idx="${i}">
-					<td style="width:40px;text-align:center">
-						<input type="checkbox" class="user-check" data-idx="${i}">
-					</td>
-					<td style="width:130px;font-family:var(--font-mono);font-size:13px">
+					<td class="bulk-col-pin" style="width:90px;font-family:var(--font-mono);font-size:13px">
 						${frappe.utils.escape_html(u.user_id || "")}
 					</td>
-					<td>
+					<td class="bulk-col-name" style="width:220px">
 						${frappe.utils.escape_html(u.employee_name || "")}
 						${status_badge}
 					</td>
@@ -1388,20 +1588,21 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 
 		container.html(`
 			<div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
-				<button class="btn btn-xs btn-default" id="select-all-btn">Select All</button>
+				<button class="btn btn-xs btn-default" id="select-all-btn"
+					title="Tick every cell in currently-selected device columns">Select All in Targets</button>
 				<button class="btn btn-xs btn-default" id="deselect-all-btn">Deselect All</button>
 				${skip_names_toggle}
 				<span style="font-size:12px;color:var(--color-text-secondary)"
-					  id="selected-count">0 / ${users.length}</span>
+					  id="selected-count">0 picks</span>
 			</div>
-			<div style="max-height:400px;overflow-y:auto;
+			<div class="bulk-user-scroller"
+				style="max-height:400px;overflow:auto;
 				border:1px solid var(--color-border-tertiary);border-radius:8px">
-				<table class="table table-sm sticky-head-table" style="margin:0">
+				<table class="table table-sm sticky-head-table bulk-user-table-fixed" style="margin:0">
 					<thead>
 						<tr>
-							<th style="width:40px"></th>
-							<th style="width:130px">PIN</th>
-							<th>Name</th>
+							<th class="bulk-col-pin"  style="width:90px">PIN</th>
+							<th class="bulk-col-name" style="width:220px">Name</th>
 							${skip_name_col}
 							${privilege_col}
 							${device_cols}
@@ -1413,21 +1614,53 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		`);
 
 		container.find("#select-all-btn").on("click", () => {
-			container.find(".user-check").prop("checked", true);
+			container.find(".bulk-device-cell-check:visible").prop("checked", true);
 			update_count();
 		});
 		container.find("#deselect-all-btn").on("click", () => {
-			container.find(".user-check").prop("checked", false);
+			container.find(".bulk-device-cell-check").prop("checked", false);
 			update_count();
 		});
-		container.find(".user-check").on("change", update_count);
+		container.find(".bulk-device-cell-check").on("change", update_count);
+
+		container.find(".bulk-device-header-check").on("change", function(e) {
+			e.stopPropagation();
+			const sn = $(this).data("sn");
+			const turned_on = this.checked;
+			const cur = new Set(d._selected_sns || []);
+			if (turned_on) cur.add(sn); else cur.delete(sn);
+			d._selected_sns = Array.from(cur);
+
+			const sn_attr = $.escapeSelector ? $.escapeSelector(sn) : sn;
+			const $cells = container.find(`td[data-sn="${sn_attr}"]`);
+			$cells.find(".bulk-device-presence").css("display", turned_on ? "none" : "inline");
+			$cells.find(".bulk-device-cell-check").each(function() {
+				const has = String($(this).data("has")) === "1";
+				let default_check;
+				let locked = false;
+				if (action === "Add User") {
+					default_check = !has;
+					locked = has;
+				} else if (action === "Update User" || action === "Delete User") {
+					default_check = has;
+					locked = !has;
+				} else {
+					default_check = true;
+				}
+				const checked_state = locked ? (turned_on && has) : (turned_on && default_check);
+				$(this).css("display", turned_on ? "inline-block" : "none")
+					.prop("disabled", locked)
+					.prop("checked", checked_state);
+			});
+			update_count();
+		});
 
 		let active_filters = get_filter_args();
 		if (active_filters.employee || active_filters.designation || active_filters.department
 			|| active_filters.company || active_filters.farm) {
-			container.find(".user-check").prop("checked", true);
-			update_count();
+			container.find(".bulk-device-cell-check:visible").prop("checked", true);
 		}
+		update_count();
 
 		if (show_skip_name) {
 			container.find("#skip-names-btn").on("click", function() {
@@ -1440,30 +1673,13 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		}
 
 		function update_count() {
-			let n = container.find(".user-check:checked").length;
-			container.find("#selected-count").text(`${n} / ${users.length}`);
+			let n = container.find('.bulk-device-cell-check:checked').filter(function() {
+				return String($(this).data("locked")) !== "1";
+			}).length;
+			container.find("#selected-count").text(`${n} pick(s)`);
 		}
 
 		d._bulk_users_data = users;
 	}
 
-	function get_checked_users() {
-		let container = d.$wrapper.find("#bulk-user-table");
-		let checked   = [];
-		container.find(".user-check:checked").each(function() {
-			let idx  = parseInt($(this).data("idx"));
-			let user = d._bulk_users_data[idx];
-			let priv = container.find(`.privilege-sel[data-idx="${idx}"]`).val()
-					   || user.privilege || "0";
-			let skip_name = container.find(`.skip-name-check[data-idx="${idx}"]`).is(":checked");
-			checked.push({
-				user_id:       user.user_id,
-				employee_name: user.employee_name,
-				privilege:     priv,
-				row_name:      user.row_name || null,
-				skip_name:     skip_name ? 1 : 0
-			});
-		});
-		return checked;
-	}
 }
