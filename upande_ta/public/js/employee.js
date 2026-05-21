@@ -416,46 +416,42 @@ function run_multi_device_command(frm, command_type, pin, per_device, dialog) {
 		"Delete User": __("Delete"),
 	}[command_type];
 
-	let queued_total = 0;
-	let failed_total = 0;
-	let remaining = per_device.length;
-
-	per_device.forEach(spec => {
-		const user_payload = [{
+	const assignments = per_device.map(spec => ({
+		device_sn: spec.device_sn,
+		users: [{
 			user_id:       pin,
 			employee_name: full_name,
 			privilege:     spec.privilege || "0",
 			skip_name:     spec.skip_name ? 1 : 0,
-		}];
+		}],
+	}));
 
-		frappe.call({
-			method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.bulk_command",
-			args: {
-				device_sn:    spec.device_sn,
-				users:        JSON.stringify(user_payload),
-				command_type: command_type,
-			},
-			callback(rr) {
-				if (!rr.exc && rr.message) {
-					queued_total += rr.message.queued || 0;
-					failed_total += rr.message.failed || 0;
-				} else {
-					failed_total += 1;
-				}
-				remaining -= 1;
-				if (remaining === 0) {
-					dialog.hide();
-					frappe.show_alert({
-						message: __("{0} queued on {1} device(s).", [verb, per_device.length])
-							+ ` (${queued_total} command(s)${failed_total ? `, ${failed_total} failed` : ""})`,
-						indicator: failed_total ? "orange" : "green",
-					}, 6);
-					frm.__upande_ta_addable_devices = null;
-					frm.__upande_ta_on_devices      = null;
-					render_device_buttons(frm);
-				}
-			},
-		});
+	frappe.call({
+		method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.bulk_command_per_device",
+		args: {
+			assignments: JSON.stringify(assignments),
+			command_type: command_type,
+		},
+		callback(rr) {
+			const m = (rr && rr.message) || {};
+			const queued_total = m.queued || 0;
+			const failed_total = m.failed || 0;
+			dialog.hide();
+			frappe.show_alert({
+				message: __("{0} queued on {1} device(s).", [verb, per_device.length])
+					+ ` (${queued_total} command(s)${failed_total ? `, ${failed_total} failed` : ""})`,
+				indicator: failed_total ? "orange" : "green",
+			}, 6);
+			frm.__upande_ta_addable_devices = null;
+			frm.__upande_ta_on_devices      = null;
+			render_device_buttons(frm);
+		},
+		error() {
+			frappe.show_alert({
+				message: __("{0} failed on one or more devices.", [verb]),
+				indicator: "red",
+			}, 6);
+		},
 	});
 }
 

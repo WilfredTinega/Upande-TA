@@ -523,34 +523,62 @@ def bulk_command(device_sn, users, command_type):
 
 @frappe.whitelist()
 def bulk_command_per_device(assignments, command_type):
+    import time
+    from pymysql.err import OperationalError
+
     if isinstance(assignments, str):
         assignments = json.loads(assignments)
     if not assignments:
         frappe.throw("No device assignments provided")
+
+    # Run device assignments in a deterministic order so concurrent requests
+    # acquire locks in the same sequence, sharply reducing deadlock risk.
+    ordered = sorted(
+        [
+            (str(e.get("device_sn") or "").strip(), e.get("users") or [])
+            for e in assignments
+        ],
+        key=lambda x: x[0],
+    )
 
     overall_queued = 0
     overall_failed = 0
     by_device = []
     errors = []
 
-    for entry in assignments:
-        sn    = (entry.get("device_sn") or "").strip()
-        users = entry.get("users") or []
+    for sn, users in ordered:
         if not sn or not users:
             continue
-        try:
-            result = bulk_command(sn, users, command_type)
-            overall_queued += int(result.get("queued") or 0)
-            overall_failed += int(result.get("failed") or 0)
-            by_device.append({
-                "device_sn": sn,
-                "queued":    result.get("queued") or 0,
-                "failed":    result.get("failed") or 0,
-                "errors":    result.get("errors") or [],
-            })
-        except Exception as e:
-            overall_failed += 1
-            errors.append({"device_sn": sn, "reason": str(e)})
+
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                result = bulk_command(sn, users, command_type)
+                overall_queued += int(result.get("queued") or 0)
+                overall_failed += int(result.get("failed") or 0)
+                by_device.append({
+                    "device_sn": sn,
+                    "queued":    result.get("queued") or 0,
+                    "failed":    result.get("failed") or 0,
+                    "errors":    result.get("errors") or [],
+                })
+                break
+            except OperationalError as e:
+                # MariaDB deadlock = error code 1213. Retry a few times with
+                # short backoff before giving up on this device.
+                code = getattr(e, "args", [None])[0]
+                if code == 1213 and attempts < 3:
+                    frappe.db.rollback()
+                    time.sleep(0.15 * attempts)
+                    continue
+                overall_failed += 1
+                errors.append({"device_sn": sn, "reason": str(e)})
+                break
+            except Exception as e:
+                overall_failed += 1
+                errors.append({"device_sn": sn, "reason": str(e)})
+                break
 
     return {
         "status":    "done",
