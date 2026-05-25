@@ -8,9 +8,6 @@ frappe.ui.form.on("Bulk Overtime", {
 			filters: { company: frm.doc.company },
 		}));
 
-		// Restrict Shift Approver to users with approver-related roles
-		frm.events.setup_shift_approver_query(frm);
-
 		// Restrict Employee in child table to selected department/group
 		frm.set_query("employee", "bulk_overtime_entries", () => ({
 			filters: {
@@ -22,54 +19,11 @@ frappe.ui.form.on("Bulk Overtime", {
 		}));
 	},
 
-	setup_shift_approver_query(frm) {
-		const default_approver_roles = [
-			"Expense Approver",
-			"Leave Approver",
-			"Wiki Approver",
-			"General Manager",
-			"HOD",
-			"HR Manager",
-			"System Manager",
-		];
-
-		// Use the default approver roles (field removed)
-		const roles_to_use = default_approver_roles;
-
-		frappe.db.get_list("Has Role", {
-			filters: { role: ["in", roles_to_use] },
-			fields: ["parent"],
-			limit_page_length: 0,
-		}).then((users) => {
-			const approver_users = [...new Set(users.map((user) => user.parent))];
-
-			const name_filter = approver_users.length
-				? approver_users
-				: ["__no_match__"];
-
-			frm.set_query("shift_approver", () => ({
-				filters: {
-					enabled: 1,
-					user_type: "System User",
-					name: ["in", name_filter],
-				},
-			}));
-		}).catch(() => {
-			frm.set_query("shift_approver", () => ({
-				filters: {
-					enabled: 1,
-					user_type: "System User",
-					name: ["in", ["__no_match__"]],
-				},
-			}));
-			frappe.show_alert({
-				message: __("Could not load approver list. Shift Approver field has been restricted."),
-				indicator: "orange",
-			}, 5);
-		});
-	},
-
 	refresh(frm) {
+		frm.events.ensure_draft_editable(frm);
+		frm.events.set_overtime_date_limits(frm);
+		frm.events.set_verification_intro(frm);
+
 		if (frm.doc.docstatus === 0 && !frm.is_new()) {
 			frm.add_custom_button(__("Get Employees"), () => {
 				frm.events.get_employees(frm);
@@ -78,16 +32,53 @@ frappe.ui.form.on("Bulk Overtime", {
 				!(frm.doc.bulk_overtime_entries || []).length,
 			);
 
-			// Add button for verification/sync dialog at Draft stage
-			frm.add_custom_button(__("Verify Overtime"), () => {
-				frm.events.show_verification_dialog(frm);
-			});
+			if (frm.events.can_verify_overtime(frm)) {
+				frm.add_custom_button(__("Verify Overtime"), () => {
+					frm.events.show_verification_dialog(frm);
+				});
+			}
 
 			// Bulk-fill child row hours_requested from header value
 			frm.add_custom_button(__("Apply Requested Hours"), () => {
 				frm.events.apply_default_requested_hours(frm);
 			});
 		}
+	},
+
+	can_verify_overtime(frm) {
+		if (!frm.doc.to_date) return false;
+		return frappe.datetime.get_diff(frappe.datetime.get_today(), frm.doc.to_date) > 0;
+	},
+
+	get_verification_available_from(frm) {
+		return frappe.datetime.add_days(frm.doc.to_date, 1);
+	},
+
+	set_verification_intro(frm) {
+		frm.set_intro("");
+
+		if (frm.doc.docstatus !== 0 || frm.is_new() || !frm.doc.to_date) return;
+
+		if (frm.events.can_verify_overtime(frm)) {
+			frm.set_intro(
+				__(
+					"The overtime period has ended. You can verify actual hours worked using the <b>Verify Overtime</b> button."
+				),
+				"blue"
+			);
+			return;
+		}
+
+		frm.set_intro(
+			__(
+				"Overtime verification will be available from <b>{0}</b> (after the overtime period ending {1}).",
+				[
+					frappe.datetime.str_to_user(frm.events.get_verification_available_from(frm)),
+					frappe.datetime.str_to_user(frm.doc.to_date),
+				]
+			),
+			"orange"
+		);
 	},
 
 	get_employees(frm) {
@@ -117,6 +108,7 @@ frappe.ui.form.on("Bulk Overtime", {
 					frm.events.apply_default_requested_hours(frm, false);
 					frm.dirty();
 				}
+				frm.events.set_overtime_date_limits(frm);
 				frm.refresh();
 				frm.scroll_to_field("bulk_overtime_entries");
 			});
@@ -125,6 +117,21 @@ frappe.ui.form.on("Bulk Overtime", {
 	// ── Verification / Attendance Sync Dialog ─────────────────────────────────
 
 	show_verification_dialog(frm) {
+		if (!frm.events.can_verify_overtime(frm)) {
+			frappe.msgprint({
+				title: __("Verification Not Available"),
+				indicator: "orange",
+				message: __(
+					"Overtime verification is only available from {0} onwards (after the overtime period ending {1}).",
+					[
+						frappe.datetime.str_to_user(frm.events.get_verification_available_from(frm)),
+						frappe.datetime.str_to_user(frm.doc.to_date),
+					]
+				),
+			});
+			return;
+		}
+
 		const entries = frm.doc.bulk_overtime_entries || [];
 		if (!entries.length) {
 			frappe.msgprint(__("No overtime entries to verify. Please fetch employees first."));
@@ -151,12 +158,12 @@ frappe.ui.form.on("Bulk Overtime", {
 			const synced_entries = frm.doc.bulk_overtime_entries || [];
 
 			let dialog = new frappe.ui.Dialog({
-					title: __('Verify Overtime Hours'),
-					fields: [
-						{
-							fieldname: 'verification_note',
-							fieldtype: 'HTML',
-							options: `
+				title: __('Verify Overtime Hours'),
+				fields: [
+					{
+						fieldname: 'verification_note',
+						fieldtype: 'HTML',
+						options: `
 								<div class="alert alert-info">
 									<strong>Verification Instructions:</strong><br>
 									• Attendance data has been synced — "Actual Hours Done" shows overtime from T&A records<br>
@@ -165,21 +172,21 @@ frappe.ui.form.on("Bulk Overtime", {
 									• Leave as 0 if the employee did not work overtime on that date
 								</div>
 							`
-						},
-						{
-							fieldname: 'entries_html',
-							fieldtype: 'HTML',
-							options: frm.events.generate_verification_table(frm, synced_entries)
-						}
-					],
-					primary_action_label: __('Confirm & Process'),
-					primary_action: function () {
-						frm.events.process_verification(frm, dialog);
+					},
+					{
+						fieldname: 'entries_html',
+						fieldtype: 'HTML',
+						options: frm.events.generate_verification_table(frm, synced_entries)
 					}
-				});
-
-				dialog.show();
+				],
+				primary_action_label: __('Confirm & Process'),
+				primary_action: function () {
+					frm.events.process_verification(frm, dialog);
+				}
 			});
+
+			dialog.show();
+		});
 	},
 
 	generate_verification_table(frm, entries) {
@@ -302,13 +309,137 @@ frappe.ui.form.on("Bulk Overtime", {
 		);
 	},
 
+	validate(frm) {
+		frm.events.validate_overtime_dates_in_range(frm);
+	},
+
+	ensure_draft_editable(frm) {
+		if (frm.doc.docstatus !== 0 || frm.is_new()) return;
+		frm.enable_save();
+	},
+
+	setup_overtime_date_picker_listener(frm) {
+		if (frm._bulk_ot_date_picker_bound) return;
+
+		const grid = frm.fields_dict?.bulk_overtime_entries?.grid;
+		if (!grid) return;
+
+		frm._bulk_ot_date_picker_bound = true;
+		grid.wrapper.on(
+			"focusin",
+			'[data-fieldname="overtime_date"] input',
+			function () {
+				const $input = $(this);
+				frm.events.apply_overtime_datepicker($input, frm);
+
+				// Also hook into the datepicker's own show event
+				// This fires AFTER the calendar renders, guaranteeing limits apply
+				const tryBindShow = (attempts = 0) => {
+					const dp = $input.data("datepicker");
+					if (dp) {
+						$input.off("show.datepicker").on("show.datepicker", function () {
+							frm.events.apply_overtime_datepicker($input, frm);
+						});
+						return;
+					}
+					if (attempts < 10) setTimeout(() => tryBindShow(attempts + 1), 50);
+				};
+				tryBindShow();
+			}
+		);
+	},
+
+	// CHANGED: use T00:00:00 suffix to force local time parsing, avoiding UTC timezone shift (EAT+3)
+	// CHANGED: air-datepicker v3 — use onSelect callback to trigger change/blur so Frappe picks up the value
+	apply_overtime_datepicker($input, frm) {
+		if (!frm.doc.from_date || !frm.doc.to_date || !$input?.length) return;
+
+		const tryApply = (attempts = 0) => {
+			const datepicker = $input.data("datepicker");
+			if (datepicker) {
+				// Set date range limits and hook onSelect so Frappe picks up the value
+				datepicker.update({
+					minDate: new Date(frm.doc.from_date + "T00:00:00"),
+					maxDate: new Date(frm.doc.to_date + "T00:00:00"),
+					onSelect({ date, formattedDate, datepicker: dp }) {
+						setTimeout(() => {
+							$input.trigger("change");
+							$input.trigger("blur");
+						}, 50);
+					},
+				});
+				datepicker.renderAll();
+				return;
+			}
+			// Datepicker not ready yet — retry up to 10 times at 50ms intervals
+			if (attempts < 10) {
+				setTimeout(() => tryApply(attempts + 1), 50);
+			}
+		};
+
+		tryApply();
+	},
+
+	set_overtime_date_limits(frm) {
+		const table = "bulk_overtime_entries";
+		const field = "overtime_date";
+		const grid = frm.fields_dict?.[table]?.grid;
+		if (!grid) return;
+
+		// Do not set min_date/max_date on the docfield — that can lock grid dates after save.
+		frm.set_df_property(table, "min_date", null, frm.doc.name, field);
+		frm.set_df_property(table, "max_date", null, frm.doc.name, field);
+
+		frm.events.setup_overtime_date_picker_listener(frm);
+	},
+
+	// REMOVED: bulk_overtime_entries_on_form_rendered — non-standard event name, never fires.
+	// form_render is now handled in the child DocType handler below.
+
+	validate_overtime_dates_in_range(frm) {
+		const from = frm.doc.from_date;
+		const to = frm.doc.to_date;
+		if (!from || !to) return;
+
+		for (const row of frm.doc.bulk_overtime_entries || []) {
+			const ot = row.overtime_date;
+			if (!ot) continue;
+
+			if (ot < from || ot > to) {
+				frappe.validated = false;
+				frappe.throw(
+					__(
+						"Row {0}: Overtime Date must be between {1} and {2}.",
+						[
+							row.idx,
+							frappe.datetime.str_to_user(from),
+							frappe.datetime.str_to_user(to),
+						]
+					)
+				);
+			}
+		}
+	},
+
 	department(frm) {
 		frm.events.clear_entries(frm);
 		frm.set_value("shift_approver", "");
 	},
 	designation(frm) { frm.events.clear_entries(frm); },
-	from_date(frm) { frm.events.clear_entries(frm); },
-	to_date(frm) { frm.events.clear_entries(frm); },
+	from_date(frm) {
+		frm.events.clear_entries(frm);
+		frm.events.set_overtime_date_limits(frm);
+		frm.events.set_verification_intro(frm);
+	},
+	to_date(frm) {
+		frm.events.clear_entries(frm);
+		frm.events.set_overtime_date_limits(frm);
+		frm.events.set_verification_intro(frm);
+	},
+
+	bulk_overtime_entries_add(frm) {
+		frm.events.set_overtime_date_limits(frm);
+	},
 
 	default_requested_hours(frm) {
 		if (frm.doc.docstatus !== 0) return;
@@ -352,6 +483,40 @@ frappe.ui.form.on("Bulk Overtime", {
 				},
 				5
 			);
+		}
+	},
+});
+
+frappe.ui.form.on("Bulk Overtime Entry", {
+	// ADDED: form_render fires each time a child row is expanded/opened in the grid.
+	// This is the correct Frappe v15/v16 hook for applying datepicker limits per row.
+	form_render(frm, cdt, cdn) {
+		const grid_row = frm.fields_dict.bulk_overtime_entries.grid.get_row(cdn);
+		const field = grid_row?.on_grid_fields_dict?.overtime_date;
+		if (field?.$input) {
+			frm.events.apply_overtime_datepicker(field.$input, frm);
+		}
+	},
+
+	overtime_date(frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		const ot = row.overtime_date;
+		const from = frm.doc.from_date;
+		const to = frm.doc.to_date;
+		if (!ot || !from || !to) return;
+
+		if (ot < from || ot > to) {
+			frappe.msgprint({
+				message: __(
+					"Overtime Date must be between {0} and {1}.",
+					[
+						frappe.datetime.str_to_user(from),
+						frappe.datetime.str_to_user(to),
+					]
+				),
+				indicator: "red",
+			});
+			frappe.model.set_value(cdt, cdn, "overtime_date", null);
 		}
 	},
 });

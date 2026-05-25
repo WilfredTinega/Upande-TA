@@ -54,7 +54,7 @@
   "fieldtype": "Link",
   "label": "Shift Approver",
   "options": "User",
-  "link_filters": "[['Has Role', 'role', 'in', ['HR Manager', 'Leave Approver', 'Expense Approver', 'General Manager', 'HOD', 'Wiki Approver', 'System Manager']]]"
+  "link_filters": "[[\"Has Role\", \"role\", \"in\", [\"HR Manager\", \"Leave Approver\", \"Expense Approver\", \"General Manager\", \"HOD\", \"Wiki Approver\", \"System Manager\"]]]"
 },
   {
    "fieldname": "section_filters",
@@ -214,11 +214,13 @@
    "write": 1
   },
   {
+   "create": 1,
    "email": 1,
    "print": 1,
    "read": 1,
    "report": 1,
-   "role": "Employee"
+   "role": "Employee",
+   "write": 1
   }
  ],
  "row_format": "Dynamic",

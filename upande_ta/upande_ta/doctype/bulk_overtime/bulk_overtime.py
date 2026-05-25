@@ -2,8 +2,9 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, getdate
+from frappe.utils import add_days, flt, getdate
 
 WORKING_HOURS_PER_MONTH = 199.33
 
@@ -13,7 +14,34 @@ class BulkOvertime(Document):
 	def validate(self):
 		if self.from_date and self.to_date:
 			if frappe.utils.getdate(self.from_date) > frappe.utils.getdate(self.to_date):
-				frappe.throw("From Date cannot be after To Date.")
+				frappe.throw(_("From Date cannot be after To Date."))
+
+		self.validate_overtime_entry_dates()
+
+	def validate_overtime_entry_dates(self):
+		if not (self.from_date and self.to_date):
+			return
+
+		from_d = getdate(self.from_date)
+		to_d = getdate(self.to_date)
+
+		for row in self.bulk_overtime_entries or []:
+			if not row.overtime_date:
+				continue
+
+			ot_date = getdate(row.overtime_date)
+			if ot_date < from_d or ot_date > to_d:
+				frappe.throw(
+					_(
+						"Row {0}: Overtime Date {1} must be between {2} and {3}."
+					).format(
+						row.idx,
+						frappe.format_date(row.overtime_date),
+						frappe.format_date(self.from_date),
+						frappe.format_date(self.to_date),
+					),
+					title=_("Date Out of Range"),
+				)
 
 	def before_save(self):
 		if self.to_date:
@@ -131,9 +159,32 @@ class BulkOvertime(Document):
 
 		return result
 
+	def is_verification_period_open(self):
+		"""Allow verification only after the overtime period has ended."""
+		if not self.to_date:
+			return False
+		return getdate() > getdate(self.to_date)
+
+	def get_verification_available_from(self):
+		return add_days(getdate(self.to_date), 1)
+
+	def validate_verification_period(self):
+		if self.is_verification_period_open():
+			return
+		frappe.throw(
+			_(
+				"Overtime verification is only available from {0} onwards (after the overtime period ending {1})."
+			).format(
+				frappe.format_date(self.get_verification_available_from()),
+				frappe.format_date(self.to_date),
+			),
+			title=_("Verification Not Available"),
+		)
+
 	@frappe.whitelist()
 	def sync_attendance_data(self):
 		"""Refresh hours_done on every child row from Attendance records."""
+		self.validate_verification_period()
 		entries = self.bulk_overtime_entries or []
 		if not entries:
 			frappe.msgprint("No overtime entries to sync. Please fetch employees first.")
@@ -204,6 +255,14 @@ class BulkOvertime(Document):
 			if hours <= 0:
 				continue
 
+			if not row.overtime_date:
+				errors.append(
+					_("{0} ({1}): Overtime Date is required to create Additional Salary").format(
+						row.employee_name, row.employee
+					)
+				)
+				continue
+
 			if not row.overtime_type:
 				row.overtime_type = "Normal Overtime"
 
@@ -226,12 +285,12 @@ class BulkOvertime(Document):
 			if "Holiday" in row.overtime_type:
 				amount = round(hourly_rate * 2.0 * hours, 2)
 				self.make_additional_salary(
-					row.employee, "Overtime 2.0", amount, row.name
+					row.employee, "Overtime 2.0", amount, row.name, row.overtime_date
 				)
 			else:
 				amount = round(hourly_rate * 1.5 * hours, 2)
 				self.make_additional_salary(
-					row.employee, "Overtime 1.5", amount, row.name
+					row.employee, "Overtime 1.5", amount, row.name, row.overtime_date
 				)
 			created += 1
 
@@ -249,14 +308,14 @@ class BulkOvertime(Document):
 				indicator="green",
 			)
 
-	def make_additional_salary(self, employee, salary_component, amount, ref_row):
+	def make_additional_salary(self, employee, salary_component, amount, ref_row, payroll_date):
 		ad = frappe.get_doc({
 			"doctype": "Additional Salary",
 			"employee": employee,
 			"company": frappe.defaults.get_global_default("company"),
 			"salary_component": salary_component,
 			"amount": amount,
-			"payroll_date": self.to_date,
+			"payroll_date": payroll_date,
 			"ref_doctype": "Bulk Overtime",
 			"ref_docname": self.name,
 			"overwrite_salary_structure_amount": 0,
