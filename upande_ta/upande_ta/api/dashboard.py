@@ -219,11 +219,14 @@ def get_ta_dashboard_checkins(date=None, company=None, farm=None,
 	def _fmt(dt):
 		return dt.strftime("%Y-%m-%d %H:%M:%S") if dt else ""
 
+	def _gap_over_10min(ci, co):
+		return bool(ci and co and (co - ci).total_seconds() > 10 * 60)
+
 	def _worked(ci, co):
 		if not ci or not co or co <= ci:
 			return ""
-		total = int((co - ci).total_seconds())
-		return f"{total // 3600:02d}:{(total % 3600) // 60:02d}"
+		hours = (co - ci).total_seconds() / 3600
+		return f"{hours:.1f}h"
 
 	return {
 		"date": str(day),
@@ -234,7 +237,7 @@ def get_ta_dashboard_checkins(date=None, company=None, farm=None,
 				"shift": r.get("shift") or "",
 				"designation": r.get("designation") or "",
 				"check_in": _fmt(r.get("check_in")),
-				"check_out": _fmt(r.get("check_out")),
+				"check_out": _fmt(r.get("check_out")) if _gap_over_10min(r.get("check_in"), r.get("check_out")) else "",
 				"worked_hours": _worked(r.get("check_in"), r.get("check_out")),
 			}
 			for r in rows
