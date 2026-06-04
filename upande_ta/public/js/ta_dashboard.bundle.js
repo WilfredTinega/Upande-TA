@@ -172,7 +172,12 @@ upande_ta.blocks.ta_dashboard.mount = function (root_element) {
           fillOptions(selectEl("employee"),    d.employees     || [], state.employee);
           resolve();
         },
-        error: () => resolve(),
+        error: () => {
+          // Fail closed: if settings can't be read, keep every toggleable filter hidden.
+          FILTERS.forEach(k => { enabled[k] = false; });
+          applyEnabledVisibility();
+          resolve();
+        },
       });
     });
   }

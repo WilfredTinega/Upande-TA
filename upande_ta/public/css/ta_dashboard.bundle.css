@@ -7,7 +7,7 @@
 .ta-refresh { line-height: 1; padding: 2px 10px; font-size: 1rem; }
 
 .ta-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 14px; padding: 10px 12px; background: var(--card-bg, var(--fg-color, #fff)); border: 1px solid var(--border-color, #e2e6ea); border-radius: 10px; }
-.ta-filter { display: flex; flex-direction: column; gap: 4px; min-width: 140px; flex: 1 1 140px; }
+.ta-filter { display: flex; flex-direction: column; gap: 4px; min-width: 200px; flex: 0 0 200px; }
 .ta-filter--date { flex: 0 0 180px; min-width: 180px; }
 .ta-filter--clear { flex: 0 0 auto; min-width: 0; }
 .ta-filter label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted, #6c7680); margin: 0; white-space: nowrap; }
