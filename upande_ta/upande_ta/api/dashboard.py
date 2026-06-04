@@ -10,7 +10,7 @@ def _scoped_employees(company, farm, department, designation, employee):
 	has_farm = _employee_has_custom_farm()
 	if not any([company, farm and has_farm, department, designation, employee]):
 		return None
-	filters = {}
+	filters = {"status": "Active"}
 	if employee:
 		filters["name"] = employee
 	if company:

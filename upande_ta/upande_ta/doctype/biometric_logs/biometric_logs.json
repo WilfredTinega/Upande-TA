@@ -10,7 +10,7 @@
   "biometric_id",
   "column_break_tair",
   "log_type",
-  "timestamp"
+  "time"
  ],
  "fields": [
   {
@@ -47,7 +47,7 @@
    "options": "\nIN\nOUT\nBreak-In\nOvertime-In\nOvertime-Out"
   },
   {
-   "fieldname": "timestamp",
+   "fieldname": "time",
    "fieldtype": "Datetime",
    "label": "Timestamp"
   }
@@ -55,7 +55,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-05-21 17:22:08.110885",
+ "modified": "2026-06-04 04:17:20.239136",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Logs",
