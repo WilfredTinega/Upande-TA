@@ -1,0 +1,24 @@
+{
+  "server_ip": "94.237.25.175",
+  "end_point": "/nodered",
+  "server_port": "1880",
+  "enable_checkin": 0,
+  "enable_users": 1,
+  "enable_bio_templates": 1,
+  "enable_flip": 0,
+  "checkin_event_frequency": "Cron",
+  "checkin_cron_format": null,
+  "biodata_event_frequency": "Daily",
+  "biodata_cron_format": null,
+  "flip_event_frequency": "",
+  "flip_cron_format": null,
+  "company": 0,
+  "farm": 0,
+  "department": 0,
+  "designation": 0,
+  "employee": 0,
+  "devices": [
+    {"device_sn": "WJA6252300019", "device_location": "Upande 1"},
+    {"device_sn": "BRAV250805036", "device_location": "Mark NL"}
+  ]
+}

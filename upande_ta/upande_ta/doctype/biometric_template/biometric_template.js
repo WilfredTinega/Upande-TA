@@ -9,9 +9,10 @@ frappe.ui.form.on("Biometric Template", {
 		load_device_options(frm);
 	},
 
-	device_sn(frm) {
-		const match = (frm._device_options || []).find(d => d.device_sn === frm.doc.device_sn);
-		frm.set_value("device_name", match ? (match.device_location || "") : "");
+	device_location(frm) {
+		const match = (frm._device_options || [])
+			.find(d => (d.device_location || d.device_sn) === frm.doc.device_location);
+		frm.set_value("device_sn", match ? (match.device_sn || "") : "");
 	},
 });
 
@@ -21,8 +22,11 @@ function load_device_options(frm) {
 		callback: (r) => {
 			const devices = (r && r.message) || [];
 			frm._device_options = devices;
-			const opts_str = "\n" + devices.map(d => d.device_sn).filter(Boolean).join("\n");
-			frm.set_df_property("device_sn", "options", opts_str);
+			const opts_str = "\n" + devices
+				.map(d => d.device_location || d.device_sn)
+				.filter(Boolean)
+				.join("\n");
+			frm.set_df_property("device_location", "options", opts_str);
 		},
 	});
 }

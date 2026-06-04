@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
- "creation": "2026-05-08 14:56:33.591294",
+ "creation": "2026-05-21 14:10:58.374511",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -23,34 +23,47 @@
   "flip_event_frequency",
   "flip_cron_format",
   "users_tab",
-  "users_device_picker",
+  "enable_users",
   "column_break_zgkt",
-  "device_location",
+  "users_actions_html",
   "section_break_iurc",
+  "users_device_picker",
+  "column_break_users_device",
+  "users_device_sn",
+  "section_break_ztmk",
   "users_html",
   "biodata_tab",
-  "biodata_device_picker",
-  "biodata_device_location",
-  "get_bio",
-  "column_break_biodata",
+  "section_break_axpd",
   "enable_bio_templates",
-  "biodata_cron_format",
   "biodata_event_frequency",
+  "biodata_cron_format",
+  "column_break_biodata",
+  "get_bio",
+  "section_break_znbu",
+  "biodata_device_picker",
+  "column_break_fwjy",
+  "biodata_device_sn",
   "section_break_biodata",
   "biometric_templates",
   "server_settings_tab",
   "server_ip",
-  "end_point",
   "server_port",
-  "enable_users",
+  "end_point",
   "column_break_xkjy",
-  "company",
+  "scope_company",
   "farm",
+  "department",
   "designation",
   "employee",
-  "department",
   "section_break_asec",
-  "devices"
+  "devices",
+  "checkin_review_filters_section",
+  "r_company",
+  "r_farm",
+  "r_department",
+  "column_break_zqrl",
+  "r_designation",
+  "r_employee"
  ],
  "fields": [
   {
@@ -96,9 +109,13 @@
    "label": "Device"
   },
   {
-   "fieldname": "device_location",
+   "fieldname": "column_break_users_device",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "users_device_sn",
    "fieldtype": "Data",
-   "label": "Device Location",
+   "label": "Device SN",
    "read_only": 1
   },
   {
@@ -118,19 +135,21 @@
   {
    "fieldname": "biodata_device_picker",
    "fieldtype": "Select",
-   "label": "Device"
+   "label": "Device Location"
   },
   {
    "fieldname": "column_break_biodata",
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "biodata_device_location",
+   "fieldname": "biodata_device_sn",
    "fieldtype": "Data",
-   "label": "Device Location",
+   "label": "Device SN",
    "read_only": 1
   },
   {
+   "collapsible": 1,
+   "collapsible_depends_on": "eval: doc.enable_bio_templates === 0",
    "fieldname": "section_break_biodata",
    "fieldtype": "Section Break"
   },
@@ -205,6 +224,7 @@
    "label": "Enable Bio Templates?"
   },
   {
+   "collapsible": 1,
    "fieldname": "checkin_events_section",
    "fieldtype": "Section Break",
    "label": "Schedule"
@@ -215,7 +235,7 @@
    "fieldtype": "Select",
    "label": "Checkin Event Frequency",
    "mandatory_depends_on": "eval:doc.enable_checkin",
-   "options": "\nDaily\nDaily Long\nCron"
+   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
   },
   {
    "depends_on": "eval:doc.enable_checkin && doc.checkin_event_frequency=='Cron'",
@@ -241,7 +261,7 @@
    "fieldtype": "Select",
    "label": "Update Event Frequency",
    "mandatory_depends_on": "eval:doc.enable_flip",
-   "options": "\nDaily\nDaily Long\nCron"
+   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
   },
   {
    "depends_on": "eval:doc.enable_flip && doc.flip_event_frequency=='Cron'",
@@ -256,7 +276,7 @@
    "fieldtype": "Select",
    "label": "Bio Data Event Frequency",
    "mandatory_depends_on": "eval:doc.enable_bio_templates",
-   "options": "\nDaily\nDaily Long\nCron"
+   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
   },
   {
    "depends_on": "eval:doc.enable_bio_templates && doc.biodata_event_frequency=='Cron'",
@@ -277,7 +297,7 @@
   },
   {
    "default": "0",
-   "fieldname": "company",
+   "fieldname": "scope_company",
    "fieldtype": "Check",
    "label": "Company"
   },
@@ -309,13 +329,74 @@
    "fieldname": "checkin_column",
    "fieldtype": "Column Break",
    "label": "Checkin"
+  },
+  {
+   "fieldname": "section_break_ztmk",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "users_actions_html",
+   "fieldtype": "HTML",
+   "label": "User Buttons"
+  },
+  {
+   "fieldname": "section_break_znbu",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_fwjy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_axpd",
+   "fieldtype": "Section Break"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "checkin_review_filters_section",
+   "fieldtype": "Section Break",
+   "label": "Checkin Review Filters"
+  },
+  {
+   "default": "0",
+   "fieldname": "r_company",
+   "fieldtype": "Check",
+   "label": "Company"
+  },
+  {
+   "default": "0",
+   "fieldname": "r_farm",
+   "fieldtype": "Check",
+   "label": "Farm"
+  },
+  {
+   "default": "0",
+   "fieldname": "r_department",
+   "fieldtype": "Check",
+   "label": "Department"
+  },
+  {
+   "fieldname": "column_break_zqrl",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "r_designation",
+   "fieldtype": "Check",
+   "label": "Designation"
+  },
+  {
+   "default": "0",
+   "fieldname": "r_employee",
+   "fieldtype": "Check",
+   "label": "Employee"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-16 17:52:53.607244",
+ "modified": "2026-05-21 16:23:52.589176",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",
@@ -328,6 +409,26 @@
    "print": 1,
    "read": 1,
    "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "HR User",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "HR Manager",
    "share": 1,
    "write": 1
   }

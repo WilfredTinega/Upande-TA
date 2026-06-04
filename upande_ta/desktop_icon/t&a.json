@@ -1,0 +1,20 @@
+{
+ "app": "upande_ta",
+ "creation": "2026-05-22 01:39:56.700890",
+ "docstatus": 0,
+ "doctype": "Desktop Icon",
+ "hidden": 0,
+ "icon_type": "App",
+ "idx": 0,
+ "label": "T&A",
+ "link": "/app/t%26a",
+ "link_type": "External",
+ "logo_url": "/assets/upande_ta/images/upande_logo.ico",
+ "modified": "2026-06-04 03:58:14.073802",
+ "modified_by": "Administrator",
+ "name": "T&A",
+ "owner": "Administrator",
+ "restrict_removal": 0,
+ "roles": [],
+ "standard": 1
+}

@@ -1,0 +1,99 @@
+<div class="ta-dashboard">
+  <div class="ta-filters">
+    <div class="ta-filter ta-filter--date">
+      <label>Date</label>
+      <div data-ta-date="date"></div>
+    </div>
+    <div class="ta-filter" data-ta-filter-wrap="company" style="display:none">
+      <label>Company</label>
+      <select class="form-control form-control-sm" data-ta-filter="company"><option value="">All</option></select>
+    </div>
+    <div class="ta-filter" data-ta-filter-wrap="farm" style="display:none">
+      <label>Farm</label>
+      <select class="form-control form-control-sm" data-ta-filter="farm"><option value="">All</option></select>
+    </div>
+    <div class="ta-filter" data-ta-filter-wrap="department" style="display:none">
+      <label>Department</label>
+      <select class="form-control form-control-sm" data-ta-filter="department"><option value="">All</option></select>
+    </div>
+    <div class="ta-filter" data-ta-filter-wrap="designation" style="display:none">
+      <label>Designation</label>
+      <select class="form-control form-control-sm" data-ta-filter="designation"><option value="">All</option></select>
+    </div>
+    <div class="ta-filter" data-ta-filter-wrap="employee" style="display:none">
+      <label>Employee</label>
+      <select class="form-control form-control-sm" data-ta-filter="employee"><option value="">All</option></select>
+    </div>
+    <div class="ta-filter ta-filter--clear">
+      <label>&nbsp;</label>
+      <button class="ta-clear btn btn-sm btn-default" type="button" title="Clear filters">Clear</button>
+    </div>
+    <div class="ta-controls">
+      <label>&nbsp;</label>
+      <button class="ta-refresh btn btn-sm btn-primary" title="Refresh">↻</button>
+    </div>
+  </div>
+
+  <div class="ta-kpis">
+    <div class="ta-kpi ta-kpi--in">
+      <div class="ta-kpi__label">Check-Ins</div>
+      <div class="ta-kpi__value" data-ta="unique_in">—</div>
+    </div>
+    <div class="ta-kpi ta-kpi--out">
+      <div class="ta-kpi__label">Check-Outs</div>
+      <div class="ta-kpi__value" data-ta="unique_out">—</div>
+    </div>
+    <div class="ta-kpi ta-kpi--employees">
+      <div class="ta-kpi__label">Total Employees</div>
+      <div class="ta-kpi__value" data-ta="total_employees">—</div>
+    </div>
+    <div class="ta-kpi ta-kpi--devices">
+      <div class="ta-kpi__label">Devices Online</div>
+      <div class="ta-kpi__value"><span data-ta="devices_online">—</span> / <span data-ta="devices_total">—</span></div>
+    </div>
+  </div>
+
+  <div class="ta-table-wrap">
+    <div class="ta-table-title">Check-Ins / Check-Outs <span class="ta-range-label" data-ta="range_label"></span></div>
+    <div class="ta-table-scroll">
+      <table class="ta-table">
+        <thead>
+          <tr>
+            <th class="ta-col-empno">Employee #</th>
+            <th>Name</th>
+            <th>Shift</th>
+            <th>Designation</th>
+            <th>Check-In</th>
+            <th>Check-Out</th>
+            <th>Worked Hours</th>
+          </tr>
+        </thead>
+        <tbody data-ta-table-body>
+          <tr><td colspan="7" class="ta-empty">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="ta-pager" data-ta-pager hidden>
+      <div class="ta-pager__size">
+        <label>Rows per page</label>
+        <select class="form-control form-control-sm" data-ta-page-size>
+          <option value="25">25</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+        </select>
+      </div>
+      <div class="ta-pager__info" data-ta-page-info></div>
+      <div class="ta-pager__nav">
+        <button type="button" class="btn btn-sm btn-default" data-ta-page-first title="First">«</button>
+        <button type="button" class="btn btn-sm btn-default" data-ta-page-prev title="Previous">‹</button>
+        <button type="button" class="btn btn-sm btn-default" data-ta-page-next title="Next">›</button>
+        <button type="button" class="btn btn-sm btn-default" data-ta-page-last title="Last">»</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="ta-footer">
+    <span class="ta-updated">Updated <span data-ta="updated_at">—</span></span>
+  </div>
+</div>

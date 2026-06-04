@@ -38,11 +38,9 @@ _FREQUENCY_WINDOWS = {
 
 class BiometricSetting(Document):
 	def validate(self):
-		self._block_removing_devices_with_templates()
+		self._block_removing_devices_with_links()
 
-	def _block_removing_devices_with_templates(self):
-		if not frappe.db.exists("DocType", "Biometric Template"):
-			return
+	def _block_removing_devices_with_links(self):
 		current_sns = {d.device_sn for d in (self.devices or []) if d.device_sn}
 		previous_sns = set(
 		 frappe.get_all(
@@ -54,20 +52,121 @@ class BiometricSetting(Document):
 		removed = previous_sns - current_sns
 		if not removed:
 			return
-		blocked = frappe.get_all(
-		 "Biometric Template",
-		 filters={"device_sn": ("in", list(removed))},
-		 fields=["name", "device_sn"],
-		)
+		blocked = _device_link_summary(list(removed))
 		if not blocked:
 			return
-		lines = "\n".join(f"  - {b.device_sn} (template: {b.name})" for b in blocked)
 		frappe.throw(
-		 f"Cannot remove the following device(s) — they have Biometric Template records:\n{lines}\n\nDelete the Biometric Template doc(s) first."
+			_format_blocked_device_message(blocked),
+			title="Cannot remove device",
 		)
 
 	def on_update(self):
 		self._sync_scheduled_jobs()
+		self._ensure_biometric_user_parents()
+		self._normalize_poll_device_values()
+
+	def _normalize_poll_device_values(self):
+		sn_to_loc = {
+			d.device_sn: (d.device_location or d.device_sn)
+			for d in (self.devices or []) if d.device_sn
+		}
+		loc_to_sn = {}
+		for d in (self.devices or []):
+			if d.device_sn and d.device_location:
+				loc_to_sn[d.device_location] = d.device_sn
+		dirty = False
+		for row in (self.poll_devices or []):
+			if not row.device:
+				continue
+			if row.device in sn_to_loc:
+				loc = sn_to_loc[row.device]
+				if loc != row.device:
+					frappe.db.set_value(
+						"Biometric Checkin", row.name, "device", loc,
+						update_modified=False,
+					)
+				if not row.device_sn or row.device_sn != row.device:
+					frappe.db.set_value(
+						"Biometric Checkin", row.name, "device_sn", row.device,
+						update_modified=False,
+					)
+				dirty = True
+			elif row.device in loc_to_sn:
+				sn = loc_to_sn[row.device]
+				if not row.device_sn or row.device_sn != sn:
+					frappe.db.set_value(
+						"Biometric Checkin", row.name, "device_sn", sn,
+						update_modified=False,
+					)
+					dirty = True
+		for picker_field, companion in (
+			("users_device_picker",   "users_device_sn"),
+			("biodata_device_picker", "biodata_device_sn"),
+		):
+			value = self.get(picker_field)
+			if not value:
+				continue
+			if value in sn_to_loc:
+				loc = sn_to_loc[value]
+				if loc != value:
+					frappe.db.set_value(
+						"Biometric Setting", self.name, picker_field, loc,
+						update_modified=False,
+					)
+				if self.get(companion) != value:
+					frappe.db.set_value(
+						"Biometric Setting", self.name, companion, value,
+						update_modified=False,
+					)
+				dirty = True
+			elif value in loc_to_sn:
+				sn = loc_to_sn[value]
+				if self.get(companion) != sn:
+					frappe.db.set_value(
+						"Biometric Setting", self.name, companion, sn,
+						update_modified=False,
+					)
+					dirty = True
+		if dirty:
+			frappe.db.commit()
+
+	def _ensure_biometric_user_parents(self):
+		has_user = frappe.db.exists("DocType", "Biometric User")
+		has_template = frappe.db.exists("DocType", "Biometric Template")
+		if not has_user and not has_template:
+			return
+
+		ensure_user = ensure_template = None
+		if has_user:
+			from upande_ta.upande_ta.doctype.biometric_user.biometric_user import (
+				_ensure_biometric_user_parent,
+			)
+			ensure_user = _ensure_biometric_user_parent
+		if has_template:
+			from upande_ta.upande_ta.doctype.biometric_template.biometric_template import (
+				_ensure_biometric_template_parent,
+			)
+			ensure_template = _ensure_biometric_template_parent
+
+		for d in (self.devices or []):
+			if not d.device_sn:
+				continue
+			if ensure_user:
+				try:
+					ensure_user(d.device_sn)
+				except Exception:
+					frappe.log_error(
+						title="Biometric User parent creation failed",
+						message=frappe.get_traceback(),
+					)
+			if ensure_template:
+				try:
+					ensure_template(d.device_sn)
+				except Exception:
+					frappe.log_error(
+						title="Biometric Template parent creation failed",
+						message=frappe.get_traceback(),
+					)
 
 	def _sync_scheduled_jobs(self, force=False):
 		for prefix, method, _label in SCHEDULER_TASKS:
@@ -246,6 +345,90 @@ def delete_device_template_row(row_name):
 	frappe.db.commit()
 	return {"status": "deleted"}
 
+def _format_blocked_device_message(blocked):
+	from urllib.parse import quote
+	from frappe.utils import escape_html
+
+	def link(doctype, name):
+		safe_name = escape_html(name)
+		href = f"/app/{doctype.lower().replace(' ', '-')}/{quote(name)}"
+		return f'<a href="{href}" target="_blank">{safe_name}</a>'
+
+	rows = []
+	for sn, info in blocked.items():
+		bullets = []
+		for tpl_name in (info.get("templates") or []):
+			bullets.append(f"<li>Biometric Template: {link('Biometric Template', tpl_name)}</li>")
+		for usr_name in (info.get("users") or []):
+			bullets.append(f"<li>Biometric User: {link('Biometric User', usr_name)}</li>")
+		rows.append(
+			f"<li><b>{escape_html(sn)}</b><ul>{''.join(bullets)}</ul></li>"
+		)
+
+	return (
+		"The following device(s) still have Biometric User or Biometric Template records. "
+		"Open each link, delete the linked rows, then remove the device again:"
+		f"<ul>{''.join(rows)}</ul>"
+	)
+
+
+def _device_link_summary(device_sns):
+	out = {}
+	if not device_sns:
+		return out
+
+	if frappe.db.exists("DocType", "Biometric Template"):
+		tpl_parents = frappe.get_all(
+		 "Biometric Template",
+		 filters={"device_sn": ("in", list(device_sns))},
+		 fields=["name", "device_sn"],
+		)
+		tpl_by_parent = {p.name: p.device_sn for p in tpl_parents}
+		if tpl_by_parent:
+			tpl_rows = frappe.get_all(
+			 "Bio Template",
+			 filters={
+				 "parenttype": "Biometric Template",
+				 "parentfield": "bio_templates",
+				 "parent": ("in", list(tpl_by_parent.keys())),
+			 },
+			 fields=["parent"],
+			)
+			for r in tpl_rows:
+				sn = tpl_by_parent.get(r.parent)
+				if not sn:
+					continue
+				out.setdefault(sn, {"templates": [], "users": []})
+				if r.parent not in out[sn]["templates"]:
+					out[sn]["templates"].append(r.parent)
+
+	if frappe.db.exists("DocType", "Biometric User"):
+		usr_parents = frappe.get_all(
+		 "Biometric User",
+		 filters={"device_sn": ("in", list(device_sns))},
+		 fields=["name", "device_sn"],
+		)
+		usr_by_parent = {p.name: p.device_sn for p in usr_parents}
+		if usr_by_parent:
+			usr_rows = frappe.get_all(
+			 "Bio User",
+			 filters={
+				 "parenttype": "Biometric User",
+				 "parentfield": "users",
+				 "parent": ("in", list(usr_by_parent.keys())),
+			 },
+			 fields=["parent"],
+			)
+			for r in usr_rows:
+				sn = usr_by_parent.get(r.parent)
+				if not sn:
+					continue
+				out.setdefault(sn, {"templates": [], "users": []})
+				if r.parent not in out[sn]["users"]:
+					out[sn]["users"].append(r.parent)
+
+	return out
+
 @frappe.whitelist()
 def devices_with_templates(device_sns):
 	import json
@@ -253,19 +436,7 @@ def devices_with_templates(device_sns):
 		return {}
 	if isinstance(device_sns, str):
 		device_sns = json.loads(device_sns)
-	if not device_sns:
-		return {}
-	if not frappe.db.exists("DocType", "Biometric Template"):
-		return {}
-	rows = frappe.get_all(
-	 "Biometric Template",
-	 filters={"device_sn": ("in", list(device_sns))},
-	 fields=["name", "device_sn"],
-	)
-	out = {}
-	for r in rows:
-		out.setdefault(r.device_sn, []).append(r.name)
-	return out
+	return _device_link_summary(device_sns)
 
 @frappe.whitelist()
 def resync_scheduled_jobs():
@@ -321,6 +492,19 @@ def _poll_attendance(start_dt, end_dt, devices):
 			failed.append({"device": device_sn, "reason": str(e)})
 	return queued, failed
 
+def _resolve_device_sn(value, devices):
+	if not value:
+		return None
+	value = (value or "").strip()
+	for d in (devices or []):
+		if d.device_sn == value:
+			return d.device_sn
+	for d in (devices or []):
+		if (d.device_location or "") == value:
+			return d.device_sn
+	return None
+
+
 @frappe.whitelist()
 def poll_devices():
 	doc = frappe.get_single("Biometric Setting")
@@ -344,8 +528,12 @@ def poll_devices():
 				failed.append({"row": row.idx, "reason": "Missing device"})
 				continue
 
-			device_sn = row.device
-			cmd_id    = frappe.generate_hash(length=10)
+			device_sn = _resolve_device_sn(row.device, doc.devices)
+			if not device_sn:
+				failed.append({"row": row.idx, "reason": f"Unknown device: {row.device}"})
+				continue
+
+			cmd_id = frappe.generate_hash(length=10)
 
 			command = (
 			 f"C:{cmd_id}:DATA QUERY ATTLOG"
@@ -385,10 +573,17 @@ def run_checkin():
 	settings = frappe.get_single("Biometric Setting")
 	if not settings.enable_checkin:
 		return {"skipped": True, "reason": "enable_checkin is off"}
-	devices = [row.device for row in (settings.poll_devices or []) if row.device]
+	devices = []
+	for row in (settings.poll_devices or []):
+		if not row.device:
+			continue
+		sn = _resolve_device_sn(row.device, settings.devices)
+		if sn:
+			devices.append(sn)
 	if not devices:
 		return {"skipped": True, "reason": "No devices in poll_devices table"}
-	start, end = _window_for("checkin")
+	end = now_datetime()
+	start = end - timedelta(days=7)
 	queued, failed = _poll_attendance(start, end, devices)
 	return {
 	 "status": "done",
@@ -488,6 +683,60 @@ def request_biodata(device_sn, pin=None, pins=None):
 	 "pins":      pin_list,
 	 "queued":    all_queued,
 	}
+
+@frappe.whitelist()
+def request_biodata_per_device(assignments):
+	if isinstance(assignments, str):
+		assignments = json.loads(assignments)
+	if not assignments:
+		frappe.throw("No device assignments provided")
+
+	total_queued = 0
+	results = []
+	for entry in assignments:
+		sn = (entry.get("device_sn") or "").strip()
+		pins = entry.get("pins") or []
+		if not sn or not pins:
+			continue
+		try:
+			r = request_biodata(sn, pins=json.dumps(pins))
+			n = len(r.get("queued") or [])
+			total_queued += n
+			results.append({"device_sn": sn, "queued": n, "pins": r.get("pins") or []})
+		except Exception as e:
+			results.append({"device_sn": sn, "error": str(e)})
+	return {
+		"status":    "queued",
+		"queued":    total_queued,
+		"by_device": results,
+	}
+
+
+@frappe.whitelist()
+def request_biodata_multi(device_sns, pins=None):
+	if isinstance(device_sns, str):
+		device_sns = json.loads(device_sns)
+	device_sns = [str(sn).strip() for sn in (device_sns or []) if str(sn).strip()]
+	if not device_sns:
+		frappe.throw("Select at least one device")
+
+	results = []
+	total_queued = 0
+	for sn in device_sns:
+		try:
+			r = request_biodata(sn, pins=pins)
+			n = len(r.get("queued") or [])
+			total_queued += n
+			results.append({"device_sn": sn, "queued": n, "pins": r.get("pins") or []})
+		except Exception as e:
+			results.append({"device_sn": sn, "error": str(e)})
+	return {
+		"status":    "queued",
+		"device_sns": device_sns,
+		"queued":    total_queued,
+		"by_device": results,
+	}
+
 
 @frappe.whitelist(allow_guest=True)
 def store_biotemplate():
@@ -595,6 +844,29 @@ def mark_stale_devices_offline_scheduled():
 		frappe.db.commit()
 		_publish_device_status_update({"updated": [], "offline": stale})
 	return {"flipped": len(stale)}
+
+
+@frappe.whitelist()
+def get_device_statuses():
+	stale = mark_stale_devices_offline()
+	if stale:
+		frappe.db.commit()
+		_publish_device_status_update({"updated": [], "offline": stale})
+
+	rows = frappe.get_all(
+		"Biometric Device",
+		filters={"parenttype": "Biometric Setting", "parentfield": "devices"},
+		fields=["name", "device_sn", "status", "last_seen"],
+	)
+	return [
+		{
+			"row_name":  r.name,
+			"device_sn": r.device_sn,
+			"status":    r.status or "Offline",
+			"last_seen": str(r.last_seen) if r.last_seen else None,
+		}
+		for r in rows
+	]
 
 
 def _publish_device_status_update(payload):
