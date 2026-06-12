@@ -30,6 +30,15 @@ after_migrate = [
 	"upande_ta.install.ensure_desktop_icon",
 ]
 
+# `csf_ke` and `payroll_africa` both ship a Salary Component Custom Field with
+# fieldname `p10a_tax_deduction_card_type` under different docnames. The second
+# fixture to sync tries to INSERT a colliding fieldname and aborts migrate. This runs
+# in `pre_schema_updates`, before `sync_fixtures()`, collapsing the duplicate to a
+# single canonical row every migrate so fixtures UPDATE instead of INSERT-collide.
+before_migrate = [
+	"upande_ta.patches.v1.fix_p10a_duplicate_custom_field.execute",
+]
+
 doc_events = {
 	"Employee Checkin": {
 		"validate": "upande_ta.upande_ta.overrides.employee_checkin.prevent_duplicate"
