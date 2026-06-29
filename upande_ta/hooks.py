@@ -16,6 +16,30 @@ add_to_apps_screen = [
 
 doctype_js = {"Employee": "public/js/employee.js"}
 
+# Monthly Attendance Sheet detailed grid: show per-leave-type abbreviations
+# (ML, PL, UL, AL, CL, ...) instead of a single generic "L". The HRMS report
+# file is shared bench-wide, so we monkey-patch it at runtime on the sites that
+# run upande_ta (e.g. kaitet, mona) rather than editing hrms in place.
+before_request = [
+	"upande_ta.upande_ta.overrides.monthly_attendance_sheet.apply_patch",
+]
+
+# Prepared/queued reports are generated in a background RQ worker, where
+# before_request never fires. before_job applies the same patch there so the
+# Monthly Attendance Sheet shows leave-type abbreviations regardless of whether
+# it renders live or via "Rebuild".
+before_job = [
+	"upande_ta.upande_ta.overrides.monthly_attendance_sheet.apply_patch",
+]
+
+# Client-side: color the per-leave-type abbreviation cells blue in the Monthly
+# Attendance Sheet (the server patch above produces ML/PL/UL/AL/CL/... which
+# HRMS' stock formatter would otherwise render grey). No-op until that report
+# is opened.
+app_include_js = [
+	"/assets/upande_ta/js/monthly_attendance_sheet_colors.js",
+]
+
 after_install = [
 	"upande_ta.patches.v1.ensure_daily_checkin_summary_report.execute",
 	"upande_ta.install.ensure_desktop_icon",
