@@ -1,3 +1,5 @@
+# Copyright (c) 2026, Upande LTD and contributors
+
 import frappe
 from frappe import _
 
@@ -19,5 +21,7 @@ def validate(doc, method=None):
 
 
 def on_trash(doc, method=None):
+	if frappe.flags.in_uninstall or frappe.flags.in_migrate or frappe.flags.in_install:
+		return
 	if _is_protected(doc):
 		frappe.throw(_("The {0} workspace cannot be deleted.").format(doc.name))

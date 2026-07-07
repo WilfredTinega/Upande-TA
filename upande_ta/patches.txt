@@ -5,5 +5,3 @@ upande_ta.patches.v1.dedupe_and_lock_bio_template
 upande_ta.patches.v1.rename_biometric_setting_device_fields
 upande_ta.patches.v1.backfill_device_location_fields
 upande_ta.patches.v1.rename_biometric_setting_company_field
-upande_ta.patches.v1.ensure_daily_checkin_summary_report
-upande_ta.patches.v1.fix_p10a_duplicate_custom_field

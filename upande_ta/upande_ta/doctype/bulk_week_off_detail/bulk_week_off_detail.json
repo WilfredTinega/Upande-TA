@@ -12,7 +12,8 @@
   "designation",
   "current_holiday_list",
   "assigned_off_day",
-  "employee_transfer"
+  "employee_transfer",
+  "holiday_list_assignment"
  ],
  "fields": [
   {
@@ -77,6 +78,14 @@
    "label": "Employee Transfer",
    "no_copy": 1,
    "options": "Employee Transfer",
+   "read_only": 1
+  },
+  {
+   "fieldname": "holiday_list_assignment",
+   "fieldtype": "Link",
+   "label": "Holiday List Assignment",
+   "no_copy": 1,
+   "options": "Holiday List Assignment",
    "read_only": 1
   }
  ],

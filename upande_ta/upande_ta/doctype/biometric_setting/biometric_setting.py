@@ -5,7 +5,7 @@ from datetime import timedelta
 
 import frappe
 from frappe.model.document import Document
-from frappe.utils import now_datetime
+from frappe.utils import getdate, now_datetime, nowdate
 from upande_ta.upande_ta.doctype.biometric_user.biometric_user import _post_to_nodered
 
 SCHEDULER_TASKS = [
@@ -13,6 +13,30 @@ SCHEDULER_TASKS = [
  ("biodata", "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_biodata_sync", "Biometric: Sync BioData"),
  ("flip",    "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_flip_last_in", "Biometric: Flip Last IN → OUT"),
 ]
+
+SCHEDULER_EVENT_AGAINST = "Biometric Setting"
+
+
+def _ensure_scheduler_event(method):
+	"""Return the name of a Scheduler Event linking `method` to Biometric Setting,
+	creating it if missing. Returns None when the Scheduler Event doctype is absent
+	(older Frappe), in which case the job is simply left unstamped."""
+	if not frappe.db.exists("DocType", "Scheduler Event"):
+		return None
+	name = frappe.db.get_value(
+		"Scheduler Event",
+		{"scheduled_against": SCHEDULER_EVENT_AGAINST, "method": method},
+		"name",
+	)
+	if name:
+		return name
+	doc = frappe.get_doc({
+		"doctype": "Scheduler Event",
+		"scheduled_against": SCHEDULER_EVENT_AGAINST,
+		"method": method,
+	})
+	doc.insert(ignore_permissions=True)
+	return doc.name
 
 _TASK_BY_PREFIX = {prefix: (method, label) for prefix, method, label in SCHEDULER_TASKS}
 
@@ -126,9 +150,6 @@ class BiometricSetting(Document):
 						"Biometric Setting", self.name, companion, sn,
 						update_modified=False,
 					)
-					dirty = True
-		if dirty:
-			frappe.db.commit()
 
 	def _ensure_biometric_user_parents(self):
 		has_user = frappe.db.exists("DocType", "Biometric User")
@@ -177,7 +198,16 @@ class BiometricSetting(Document):
 			)
 			if not force and not any(self.has_value_changed(f) for f in fields):
 				continue
-			self._upsert_scheduled_job(prefix, method)
+			if force:
+				try:
+					self._upsert_scheduled_job(prefix, method)
+				except Exception:
+					frappe.log_error(
+						title=f"Biometric Setting: failed to sync '{prefix}' scheduled job",
+						message=frappe.get_traceback(),
+					)
+			else:
+				self._upsert_scheduled_job(prefix, method)
 
 	def _upsert_scheduled_job(self, prefix, method):
 		frequency = (self.get(f"{prefix}_event_frequency") or "").strip()
@@ -190,27 +220,28 @@ class BiometricSetting(Document):
 
 		effective_frequency = "Daily" if (frequency == "Cron" and not cron_format) else frequency
 
+		new_frequency = effective_frequency or "Daily"
+		new_cron = cron_format if new_frequency == "Cron" else ""
+
 		job_name = frappe.db.get_value("Scheduled Job Type", {"method": method})
 
 		if not job_name:
-			if stopped:
-				return
 			job = frappe.new_doc("Scheduled Job Type")
 			job.method = method
-			job.create_log = effective_frequency not in ("All", "Cron")
-			job.frequency = effective_frequency
-			job.cron_format = cron_format if effective_frequency == "Cron" else ""
-			job.stopped = 0
+			event_name = _ensure_scheduler_event(method)
+			if event_name:
+				job.scheduler_event = event_name
+			job.create_log = new_frequency not in ("All", "Cron")
+			job.frequency = new_frequency
+			job.cron_format = new_cron
+			job.stopped = stopped
 			job.insert(ignore_permissions=True)
 			return
-
-		new_frequency = effective_frequency or "Daily"
-		new_cron = cron_format if effective_frequency == "Cron" else ""
 
 		current = frappe.db.get_value(
 		 "Scheduled Job Type",
 		 job_name,
-		 ["frequency", "cron_format", "stopped"],
+		 ["frequency", "cron_format", "stopped", "scheduler_event"],
 		 as_dict=True,
 		)
 		updates = {}
@@ -220,6 +251,9 @@ class BiometricSetting(Document):
 			updates["cron_format"] = new_cron
 		if int(current.stopped or 0) != stopped:
 			updates["stopped"] = stopped
+		event_name = _ensure_scheduler_event(method)
+		if event_name and (current.scheduler_event or "") != event_name:
+			updates["scheduler_event"] = event_name
 
 		if updates:
 			frappe.db.set_value("Scheduled Job Type", job_name, updates)
@@ -335,16 +369,6 @@ def get_device_templates(device_sn):
 		})
 	return out
 
-@frappe.whitelist()
-def delete_device_template_row(row_name):
-	if not row_name:
-		frappe.throw("row_name is required")
-	if not frappe.db.exists("Bio Template", row_name):
-		return {"status": "not_found"}
-	frappe.db.delete("Bio Template", {"name": row_name})
-	frappe.db.commit()
-	return {"status": "deleted"}
-
 def _format_blocked_device_message(blocked):
 	from urllib.parse import quote
 	from frappe.utils import escape_html
@@ -440,25 +464,24 @@ def devices_with_templates(device_sns):
 
 @frappe.whitelist()
 def resync_scheduled_jobs():
-	try:
-		doc = frappe.get_single("Biometric Setting")
-		doc._sync_scheduled_jobs(force=True)
-		frappe.db.commit()
-		return {
-		 "jobs": frappe.get_all(
-		  "Scheduled Job Type",
-		  filters={"method": ["like", "%biometric_setting%"]},
-		  fields=["method", "frequency", "cron_format", "stopped"],
-		  order_by="method",
-		 )
-		}
-	except Exception:
+	"""after_migrate hook: re-stamp/recreate the per-site biometric Scheduled Job
+	Type rows. With each row linked to a Scheduler Event, sync_jobs no
+	longer deletes them — this remains the path that backfills the marker on
+	pre-existing rows and keeps frequency/cron in sync with Biometric Setting."""
+	if not frappe.db.exists("DocType", "Biometric Setting"):
+		return {"jobs": [], "skipped": True, "reason": "DocType not yet installed"}
 
-		frappe.log_error(
-		 title="Biometric Setting: resync_scheduled_jobs skipped",
-		 message=frappe.get_traceback(),
-		)
-		return {"jobs": [], "skipped": True}
+	doc = frappe.get_single("Biometric Setting")
+	doc._sync_scheduled_jobs(force=True)
+	frappe.db.commit()
+	return {
+	 "jobs": frappe.get_all(
+	  "Scheduled Job Type",
+	  filters={"method": ["like", "%biometric_setting%"]},
+	  fields=["method", "frequency", "cron_format", "stopped", "scheduler_event"],
+	  order_by="method",
+	 )
+	}
 
 def _window_for(prefix):
 	doc = frappe.get_single("Biometric Setting")
@@ -582,8 +605,7 @@ def run_checkin():
 			devices.append(sn)
 	if not devices:
 		return {"skipped": True, "reason": "No devices in poll_devices table"}
-	end = now_datetime()
-	start = end - timedelta(days=7)
+	start, end = _window_for("checkin")
 	queued, failed = _poll_attendance(start, end, devices)
 	return {
 	 "status": "done",
@@ -757,8 +779,17 @@ def store_device_status():
 		frappe.response["message"] = {"status": "error", "error": "Missing device_sn"}
 		return
 
-	if not last_seen:
-		last_seen = frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
+	server_now = frappe.utils.now_datetime()
+	if last_seen:
+		try:
+			last_seen = frappe.utils.get_datetime(last_seen)
+		except Exception:
+			last_seen = server_now
+	else:
+		last_seen = server_now
+	if last_seen > server_now:
+		last_seen = server_now
+	last_seen = last_seen.strftime("%Y-%m-%d %H:%M:%S")
 
 	parent_name = frappe.db.get_value(
 		"Biometric Device",
@@ -891,4 +922,17 @@ def run_flip_last_in():
 		return {"skipped": True, "reason": "enable_flip is off"}
 	from upande_ta.upande_ta.overrides.employee_checkin import auto_close_open_ins
 	return auto_close_open_ins()
+
+
+@frappe.whitelist()
+def flip_checkins_for_date(date=None):
+	"""Manually run the IN→OUT flip for a single date (the Checkin tab's Update
+	button). For each employee with more than one IN scan that day, the trailing
+	IN is flipped to OUT based on the employee's assigned shift window; middle
+	scans are left intact. Defaults to today when no date is given."""
+	frappe.only_for(("System Manager", "HR Manager"))
+	from upande_ta.upande_ta.overrides.employee_checkin import auto_close_open_ins
+
+	day = getdate(date) if date else getdate(nowdate())
+	return auto_close_open_ins(target_date=day, days=1)
 	
