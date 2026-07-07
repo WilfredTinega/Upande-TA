@@ -1,7 +1,7 @@
 {
  "app": "upande_ta",
  "charts": [],
- "content": "[{\"id\":\"hdr-setup\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Setup and Settings</b></span>\",\"col\":12}},{\"id\":\"sc-setting\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Biometric Setting\",\"col\":3}},{\"id\":\"sc-user\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Biometric User\",\"col\":3}},{\"id\":\"sc-shift\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Shift Type\",\"col\":3}},{\"id\":\"sc-template\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Biometric Template\",\"col\":3}},{\"id\":\"sp-2\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"hdr-activity\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Activity</b></span>\",\"col\":12}},{\"id\":\"sc-logs\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Biometric Logs\",\"col\":3}},{\"id\":\"sc-checkin\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Employee Checkin\",\"col\":3}},{\"id\":\"sc-attendance\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Attendance\",\"col\":3}},{\"id\":\"sc-daily-summary\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Daily Checkin Summary\",\"col\":3}},{\"id\":\"sp-3\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"hdr-overview\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Checkin Overview</b></span>\",\"col\":12}},{\"id\":\"cb-ta-dash\",\"type\":\"custom_block\",\"data\":{\"custom_block_name\":\"T&A Dashboard\",\"col\":12}}]",
+ "content": "[{\"id\":\"hdr-setup\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Setup and Settings</b></span>\",\"col\":12}},{\"id\":\"sc-setting\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Biometric Setting\",\"col\":3}},{\"id\":\"sc-user\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Biometric User\",\"col\":3}},{\"id\":\"sc-shift\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Shift Type\",\"col\":3}},{\"id\":\"sc-template\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Biometric Template\",\"col\":3}},{\"id\":\"sp-2\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"hdr-activity\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Activity</b></span>\",\"col\":12}},{\"id\":\"sc-logs\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Biometric Logs\",\"col\":3}},{\"id\":\"sc-checkin\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Employee Checkin\",\"col\":3}},{\"id\":\"sc-attendance\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Attendance\",\"col\":3}},{\"id\":\"sp-3\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"hdr-overview\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Checkin Overview</b></span>\",\"col\":12}},{\"id\":\"cb-ta-dash\",\"type\":\"custom_block\",\"data\":{\"custom_block_name\":\"T&A Dashboard\",\"col\":12}}]",
  "creation": "2026-05-21 00:00:00.000000",
  "custom_blocks": [
   {
@@ -18,27 +18,7 @@
  "indicator_color": "blue",
  "is_hidden": 0,
  "label": "T&A",
- "links": [
-  {
-   "hidden": 0,
-   "is_query_report": 0,
-   "label": "Reports",
-   "link_count": 1,
-   "onboard": 0,
-   "type": "Card Break"
-  },
-  {
-   "dependencies": "Employee Checkin",
-   "hidden": 0,
-   "is_query_report": 1,
-   "label": "Daily Checkin Summary",
-   "link_count": 0,
-   "link_to": "Daily Checkin Summary",
-   "link_type": "Report",
-   "onboard": 0,
-   "type": "Link"
-  }
- ],
+ "links": [],
  "modified": "2026-05-21 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
@@ -110,15 +90,6 @@
    "link_to": "Shift Type",
    "stats_filter": "[]",
    "type": "DocType"
-  },
-  {
-   "color": "Blue",
-   "doc_view": "",
-   "format": "{} Total",
-   "label": "Daily Checkin Summary",
-   "link_to": "Daily Checkin Summary",
-   "report_ref_doctype": "Employee Checkin",
-   "type": "Report"
   }
  ],
  "title": "T&A",

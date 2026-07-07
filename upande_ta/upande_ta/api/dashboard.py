@@ -1,5 +1,36 @@
+# Copyright (c) 2026, Upande LTD and contributors
+
+from datetime import time as _time
+
 import frappe
-from frappe.utils import getdate, nowdate
+from frappe.utils import add_days, get_datetime, get_time, getdate, nowdate
+
+_MAX_SHIFT_SECONDS = 14 * 3600
+
+_NIGHT_DIVIDER = _time(12, 0)
+
+
+def _overnight_shift_map():
+	"""{shift_name: split_time} for shifts treated as crossing midnight, so the
+	dashboard pairs yesterday-evening (check-in) with this-morning (check-out).
+
+	A shift qualifies if its Shift Type start_time > end_time (e.g. 18:00 -> 06:00)
+	OR its name contains both "security" and "night" — the latter catches security
+	night shifts even when their times aren't configured as overnight. The split
+	time (the shift's start_time, or noon as a fallback) separates the evening
+	clock-in from the early-morning clock-out."""
+	out = {}
+	for s in frappe.get_all("Shift Type", fields=["name", "start_time", "end_time"]):
+		nm = (s.name or "").lower()
+		named = "security" in nm and "night" in nm
+		by_time = (
+			s.start_time is not None
+			and s.end_time is not None
+			and get_time(s.start_time) > get_time(s.end_time)
+		)
+		if named or by_time:
+			out[s.name] = get_time(s.start_time) if s.start_time is not None else _time(12, 0)
+	return out
 
 
 def _employee_has_custom_farm():
@@ -158,11 +189,39 @@ def _empty_payload(from_date, to_date):
 	}
 
 
+def _overnight_shift_assignments(employees, on_date, overnight_types):
+	"""{employee: (start_time, end_time)} for each employee on an Active, submitted
+	overnight Shift Assignment covering `on_date`. Bulk-fetched to avoid N+1."""
+	if not overnight_types or not employees:
+		return {}
+	rows = frappe.db.sql(
+		"""
+		SELECT employee, shift_type
+		FROM `tabShift Assignment`
+		WHERE docstatus = 1
+		  AND status = 'Active'
+		  AND shift_type IN %(shifts)s
+		  AND start_date <= %(d)s
+		  AND (end_date IS NULL OR end_date >= %(d)s)
+		  AND employee IN %(emps)s
+		ORDER BY start_date DESC
+		""",
+		{"shifts": tuple(overnight_types.keys()), "d": on_date, "emps": tuple(employees)},
+		as_dict=True,
+	)
+	out = {}
+	for r in rows:
+		if r.employee not in out:
+			out[r.employee] = overnight_types[r.shift_type]
+	return out
+
+
 @frappe.whitelist()
 def get_ta_dashboard_checkins(date=None, company=None, farm=None,
                               department=None, designation=None, employee=None,
                               limit: int = 5000):
 	day = getdate(date) if date else getdate(nowdate())
+	prev_day = add_days(day, -1)
 	limit = max(1, min(int(limit or 5000), 10000))
 
 	scoped = _scoped_employees(company, farm, department, designation, employee)
@@ -170,79 +229,127 @@ def get_ta_dashboard_checkins(date=None, company=None, farm=None,
 		return {"date": str(day), "rows": []}
 
 	emp_clause = ""
-	params = {"day": day, "limit": limit}
+	params = {
+		"win_start": get_datetime(f"{prev_day} 00:00:00"),
+		"win_end": get_datetime(f"{add_days(day, 1)} 00:00:00"),
+	}
 	if scoped is not None:
 		emp_clause = " AND ec.employee IN %(emp_list)s"
 		params["emp_list"] = tuple(scoped)
 
-	rows = frappe.db.sql(
+	scans = frappe.db.sql(
 		f"""
 		SELECT
 			ec.employee,
 			COALESCE(ec.employee_name, e.employee_name) AS employee_name,
 			e.attendance_device_id,
 			e.designation,
-			MAX(ec.shift) AS shift,
-			MIN(CASE WHEN ec.log_type = 'IN'  THEN ec.time END) AS check_in,
-			MAX(CASE WHEN ec.log_type = 'OUT' THEN ec.time END) AS check_out,
-			TIMESTAMPDIFF(
-				SECOND,
-				MIN(CASE WHEN ec.log_type = 'IN'  THEN ec.time END),
-				MAX(CASE WHEN ec.log_type = 'OUT' THEN ec.time END)
-			) AS worked_seconds
+			ec.time,
+			ec.log_type,
+			ec.shift
 		FROM `tabEmployee Checkin` ec
 		LEFT JOIN `tabEmployee` e ON e.name = ec.employee
-		WHERE DATE(ec.time) = %(day)s
+		WHERE ec.time >= %(win_start)s AND ec.time < %(win_end)s
 		{emp_clause}
-		GROUP BY ec.employee, employee_name, e.attendance_device_id, e.designation
-		ORDER BY (TIMESTAMPDIFF(
-		             SECOND,
-		             MIN(CASE WHEN ec.log_type = 'IN'  THEN ec.time END),
-		             MAX(CASE WHEN ec.log_type = 'OUT' THEN ec.time END)
-		         ) IS NULL OR TIMESTAMPDIFF(
-		             SECOND,
-		             MIN(CASE WHEN ec.log_type = 'IN'  THEN ec.time END),
-		             MAX(CASE WHEN ec.log_type = 'OUT' THEN ec.time END)
-		         ) <= 0),
-		         TIMESTAMPDIFF(
-		             SECOND,
-		             MIN(CASE WHEN ec.log_type = 'IN'  THEN ec.time END),
-		             MAX(CASE WHEN ec.log_type = 'OUT' THEN ec.time END)
-		         ) DESC,
-		         MIN(CASE WHEN ec.log_type = 'IN' THEN ec.time END) ASC
-		LIMIT %(limit)s
+		ORDER BY ec.employee ASC, ec.time ASC
 		""",
 		params,
 		as_dict=True,
 	)
 
+	by_emp = {}
+	for s in scans:
+		by_emp.setdefault(s.employee, []).append(s)
+
+	from upande_ta.upande_ta.overrides.employee_checkin import _overnight_shift_types
+
+	overnight_map = _overnight_shift_map()
+	overnight_types = _overnight_shift_types()
+	overnight_emp = _overnight_shift_assignments(list(by_emp.keys()), prev_day, overnight_types)
+
 	def _fmt(dt):
 		return dt.strftime("%Y-%m-%d %H:%M:%S") if dt else ""
 
-	def _gap_over_10min(ci, co):
-		return bool(ci and co and (co - ci).total_seconds() > 10 * 60)
+	result_rows = []
+	for emp, emp_scans in by_emp.items():
+		meta = emp_scans[0]
 
-	def _worked(ci, co):
-		if not ci or not co or co <= ci:
-			return ""
-		hours = (co - ci).total_seconds() / 3600
-		return f"{hours:.1f}h"
+		ov_start = None
+		for s in emp_scans:
+			if s.shift and s.shift in overnight_map:
+				ov_start = overnight_map[s.shift]
+				break
+		if ov_start is None and emp in overnight_emp:
+			ov_start = get_time(overnight_emp[emp][0])
 
-	return {
-		"date": str(day),
-		"rows": [
-			{
-				"employee_number": r.get("attendance_device_id") or "",
-				"employee_name": r.get("employee_name") or r.get("employee") or "",
-				"shift": r.get("shift") or "",
-				"designation": r.get("designation") or "",
-				"check_in": _fmt(r.get("check_in")),
-				"check_out": _fmt(r.get("check_out")) if _gap_over_10min(r.get("check_in"), r.get("check_out")) else "",
-				"worked_hours": _worked(r.get("check_in"), r.get("check_out")),
-			}
-			for r in rows
-		],
-	}
+		if ov_start is not None:
+			evening, morning = [], []
+			for s in emp_scans:
+				t = get_datetime(s.time)
+				d = getdate(t)
+				tod = get_time(t)
+				if d == prev_day and tod >= _NIGHT_DIVIDER:
+					evening.append(t)
+				elif d == day and tod < _NIGHT_DIVIDER:
+					morning.append(t)
+			check_in = min(evening) if evening else None
+			if check_in is not None:
+				morning = [
+					t for t in morning
+					if (t - check_in).total_seconds() <= _MAX_SHIFT_SECONDS
+				]
+			check_out = max(morning) if morning else None
+		else:
+			ins = [get_datetime(s.time) for s in emp_scans
+			       if getdate(s.time) == day and (s.log_type or "") == "IN"]
+			outs = [get_datetime(s.time) for s in emp_scans
+			        if getdate(s.time) == day and (s.log_type or "") == "OUT"]
+			check_in = min(ins) if ins else None
+			if check_in is not None:
+				outs = [
+					t for t in outs
+					if (t - check_in).total_seconds() <= _MAX_SHIFT_SECONDS
+				]
+			check_out = max(outs) if outs else None
+
+		if check_in is None and check_out is None:
+			continue
+
+		show_out = bool(check_out) and (
+			not check_in or (check_out - check_in).total_seconds() > 10 * 60
+		)
+		worked_seconds = None
+		if check_in and check_out and check_out > check_in:
+			worked_seconds = (check_out - check_in).total_seconds()
+
+		shift_vals = [s.shift for s in emp_scans if s.get("shift")]
+		result_rows.append({
+			"employee_number": meta.get("attendance_device_id") or "",
+			"employee_name": meta.get("employee_name") or emp,
+			"shift": max(shift_vals) if shift_vals else "",
+			"designation": meta.get("designation") or "",
+			"check_in": _fmt(check_in),
+			"check_out": _fmt(check_out) if show_out else "",
+			"worked_hours": f"{worked_seconds / 3600:.1f}h" if worked_seconds else "",
+			"_worked_seconds": worked_seconds,
+			"_check_in": check_in,
+		})
+
+	def _sort_key(row):
+		ws = row["_worked_seconds"]
+		has_pair = ws is not None and ws > 0
+		return (
+			0 if has_pair else 1,
+			-(ws or 0),
+			row["_check_in"] or get_datetime(f"{add_days(day, 1)} 00:00:00"),
+		)
+
+	result_rows.sort(key=_sort_key)
+	for row in result_rows:
+		row.pop("_worked_seconds", None)
+		row.pop("_check_in", None)
+
+	return {"date": str(day), "rows": result_rows[:limit]}
 
 
 @frappe.whitelist()
