@@ -1,3 +1,5 @@
+# Copyright (c) 2026, Upande LTD and contributors
+
 app_name = "upande_ta"
 app_title = "T&A"
 app_publisher = "Upande LTD"
@@ -41,8 +43,16 @@ app_include_js = [
 ]
 
 after_install = [
-	"upande_ta.patches.v1.ensure_daily_checkin_summary_report.execute",
 	"upande_ta.install.ensure_desktop_icon",
+	# Create + seed the `abbreviation` field on Leave Type (source of truth for
+	# the codes shown in the Monthly Attendance Sheet grid).
+	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
+]
+
+# Remove the custom fields this app created so uninstall leaves standard
+# doctypes clean.
+before_uninstall = [
+	"upande_ta.upande_ta.overrides.leave_type.remove_abbreviation_field",
 ]
 
 # Frappe's scheduler sync deletes Scheduled Job Type rows whose method isn't declared in any
@@ -52,15 +62,9 @@ after_migrate = [
 	"upande_ta.patches.v1.sanitize_link_filters.after_migrate_drop_check",
 	"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.resync_scheduled_jobs",
 	"upande_ta.install.ensure_desktop_icon",
-]
-
-# `csf_ke` and `payroll_africa` both ship a Salary Component Custom Field with
-# fieldname `p10a_tax_deduction_card_type` under different docnames. The second
-# fixture to sync tries to INSERT a colliding fieldname and aborts migrate. This runs
-# in `pre_schema_updates`, before `sync_fixtures()`, collapsing the duplicate to a
-# single canonical row every migrate so fixtures UPDATE instead of INSERT-collide.
-before_migrate = [
-	"upande_ta.patches.v1.fix_p10a_duplicate_custom_field.execute",
+	# Re-assert the Leave Type `abbreviation` field and seed any new leave types.
+	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
+	"upande_ta.upande_ta.cleanup.remove_orphans",
 ]
 
 doc_events = {
@@ -78,12 +82,12 @@ doc_events = {
 }
 
 scheduler_events = {
-	"daily": [
-		"upande_ta.upande_ta.doctype.bulk_week_off.bulk_week_off.submit_due_employee_transfers"
-	],
 	"cron": {
+		"0 0 * * *": [
+			"upande_ta.upande_ta.doctype.bulk_week_off.bulk_week_off.submit_due_employee_transfers"
+		],
 		"* * * * *": [
 			"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.mark_stale_devices_offline_scheduled"
-		]
+		],
 	},
 }

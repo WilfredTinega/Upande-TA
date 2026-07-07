@@ -126,6 +126,11 @@ frappe.ui.form.on("Biometric Setting", {
 	refresh: function(frm) {
 		make_primary(frm, "get_checkin");
 		make_primary(frm, "get_bio");
+		make_primary(frm, "update");
+		if (!frm.doc.date) {
+			frm.doc.date = frappe.datetime.get_today();
+			frm.refresh_field("date");
+		}
 		refresh_device_options(frm);
 		backfill_poll_device_sns(frm);
 		render_users_tab(frm);
@@ -172,6 +177,36 @@ frappe.ui.form.on("Biometric Setting", {
 	checkin_cron_format:      autosave_on_change,
 	biodata_cron_format:      autosave_on_change,
 	flip_cron_format:         autosave_on_change,
+
+	update: function(frm) {
+		const day = frm.doc.date || frappe.datetime.get_today();
+		const run_flip = () => {
+			run_with_progress(
+				__("Updating check-ins"),
+				__("Flipping trailing IN → OUT for {0} by assigned shift...", [day]),
+				{
+					method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.flip_checkins_for_date",
+					args: { date: day },
+					callback: function(r) {
+						if (!r.exc && r.message) {
+							const m = r.message;
+							frappe.show_alert({
+								message: __("Updated {0}: flipped {1} IN→OUT across {2} shift window(s).",
+									[day, m.flipped || 0, m.candidates || 0]),
+								indicator: (m.flipped ? "green" : "blue")
+							}, 10);
+						}
+					}
+				}
+			);
+		};
+
+		if (frm.is_dirty()) {
+			frm.save().then(run_flip);
+		} else {
+			run_flip();
+		}
+	},
 
 	get_checkin: function(frm) {
 		if (!frm.doc.enable_checkin) {

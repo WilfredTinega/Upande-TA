@@ -1,5 +1,6 @@
 {
  "actions": [],
+ "allow_bulk_edit": 1,
  "allow_rename": 1,
  "creation": "2026-05-21 14:10:58.374511",
  "doctype": "DocType",
@@ -22,6 +23,8 @@
   "enable_flip",
   "flip_event_frequency",
   "flip_cron_format",
+  "date",
+  "update",
   "users_tab",
   "enable_users",
   "column_break_zgkt",
@@ -224,7 +227,6 @@
    "label": "Enable Bio Templates?"
   },
   {
-   "collapsible": 1,
    "fieldname": "checkin_events_section",
    "fieldtype": "Section Break",
    "label": "Schedule"
@@ -390,13 +392,24 @@
    "fieldname": "r_employee",
    "fieldtype": "Check",
    "label": "Employee"
+  },
+  {
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "label": "Date"
+  },
+  {
+   "depends_on": "eval:doc.date != null",
+   "fieldname": "update",
+   "fieldtype": "Button",
+   "label": "Update"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-21 16:23:52.589176",
+ "modified": "2026-07-07 23:28:42.921250",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",
