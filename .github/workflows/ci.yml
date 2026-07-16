@@ -20,33 +20,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy-sim:
+  tests:
     name: Install + Migrate (Frappe v16 · ERPNext · HRMS)
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
     services:
-      mariadb:
+      mysql:
         image: mariadb:11.8
         env:
-          MARIADB_ROOT_PASSWORD: root
+          MARIADB_ROOT_PASSWORD: "root"
         ports:
           - 3306:3306
-        options: >-
-          --health-cmd="healthcheck.sh --connect --innodb_initialized"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-
-      redis-cache:
-        image: redis:alpine
-        ports:
-          - 13000:6379
-
-      redis-queue:
-        image: redis:alpine
-        ports:
-          - 11000:6379
+        options: --health-cmd="mariadb-admin ping" --health-interval=5s --health-timeout=2s --health-retries=5
 
     steps:
       - name: Clone
@@ -57,17 +43,21 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Check Python compiles & no merge conflicts
+      - name: Check for valid Python & Merge Conflicts
         run: |
           python -m compileall -q "${GITHUB_WORKSPACE}/upande_ta"
           if grep -lr --exclude-dir=node_modules "^<<<<<<< " "${GITHUB_WORKSPACE}/upande_ta"; then
             echo "Found merge conflict markers"; exit 1
           fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          check-latest: true
+
+      - name: Add to Hosts
+        run: echo "127.0.0.1 test_site" | sudo tee -a /etc/hosts
 
       - name: Cache pip
         uses: actions/cache@v4
@@ -76,23 +66,24 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
           restore-keys: ${{ runner.os }}-pip-
 
-      - name: System dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            pkg-config \
-            python3-dev \
-            default-libmysqlclient-dev \
-            libcups2-dev \
-            libffi-dev \
-            libssl-dev \
-            redis-server \
-            mariadb-client
-          sudo systemctl start redis-server || true
+      - name: Get yarn cache directory
+        id: yarn-cache-dir
+        run: echo "dir=$(yarn cache dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache yarn
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.yarn-cache-dir.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: ${{ runner.os }}-yarn-
 
       - name: Install & Migrate (deploy simulation)
         run: bash ${GITHUB_WORKSPACE}/.github/helper/install.sh
+        env:
+          FRAPPE_BRANCH: version-16
+          ERPNEXT_BRANCH: version-16
+          HRMS_BRANCH: version-16
+          PAYMENTS_BRANCH: version-16
 
       - name: Run app tests
         working-directory: /home/runner/frappe-bench

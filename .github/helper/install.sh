@@ -1,55 +1,63 @@
 #!/bin/bash
-# Mimics a Frappe Cloud deploy: init a Frappe v16 bench, pull the exact
-# dependency apps (ERPNext + HRMS on version-16), install this app, and migrate.
-# Any failure here (bad frappe-dependencies, broken after_migrate hook, an
-# import that doesn't exist on the target version, etc.) fails CI the same way
-# a real deploy would.
+# Mirrors the ERPNext/HRMS CI install flow: clone Frappe, init a bench,
+# pre-create the test DB, drop in site_config.json, pull the dependency apps
+# (payments + erpnext + hrms) and this app, then reinstall + install-app.
+# Reproduces a real deploy — a bad frappe-dependency, a broken after_migrate
+# hook, or a v16-only import fails here the same way it would on Frappe Cloud.
+
 set -e
 
 cd ~ || exit
 
-FRAPPE_BRANCH="version-16"
+sudo apt update
+sudo apt remove -y mysql-server mysql-client || true
+sudo apt install -y libcups2-dev redis-server mariadb-client libmariadb-dev pkg-config
 
-echo "::group::Install Bench"
 pip install frappe-bench
-echo "::endgroup::"
 
-echo "::group::Init Bench & Install Frappe ($FRAPPE_BRANCH)"
-bench init \
-  --frappe-branch "$FRAPPE_BRANCH" \
-  --skip-redis-config-generation \
-  --skip-assets \
-  --python "$(which python)" \
-  frappe-bench
+frappeuser=${FRAPPE_USER:-"frappe"}
+frappebranch=${FRAPPE_BRANCH:-"version-16"}
+erpnextbranch=${ERPNEXT_BRANCH:-"version-16"}
+hrmsbranch=${HRMS_BRANCH:-"version-16"}
+paymentsbranch=${PAYMENTS_BRANCH:-"version-16"}
+
+git clone "https://github.com/${frappeuser}/frappe" --branch "${frappebranch}" --depth 1
+bench init --skip-assets --frappe-path ~/frappe --python "$(which python)" frappe-bench
+
+mkdir ~/frappe-bench/sites/test_site
+cp -r "${GITHUB_WORKSPACE}/.github/helper/site_config.json" ~/frappe-bench/sites/test_site/
+
+mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "SET GLOBAL character_set_server = 'utf8mb4'"
+mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "SET GLOBAL collation_server = 'utf8mb4_unicode_ci'"
+
+mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "CREATE USER 'test_frappe'@'localhost' IDENTIFIED BY 'test_frappe'"
+mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "CREATE DATABASE test_frappe"
+mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "GRANT ALL PRIVILEGES ON \`test_frappe\`.* TO 'test_frappe'@'localhost'"
+mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "FLUSH PRIVILEGES"
+
+install_wkhtmltopdf() {
+    wget -O /tmp/wkhtmltox.tar.xz https://github.com/frappe/wkhtmltopdf/raw/master/wkhtmltox-0.12.3_linux-generic-amd64.tar.xz
+    tar -xf /tmp/wkhtmltox.tar.xz -C /tmp
+    sudo mv /tmp/wkhtmltox/bin/wkhtmltopdf /usr/local/bin/wkhtmltopdf
+    sudo chmod o+x /usr/local/bin/wkhtmltopdf
+}
+install_wkhtmltopdf &
+
 cd ~/frappe-bench || exit
-echo "::endgroup::"
 
-echo "::group::Point Bench at CI services"
-bench set-config -g db_host 127.0.0.1
-bench set-config -g redis_cache "redis://127.0.0.1:13000"
-bench set-config -g redis_queue "redis://127.0.0.1:11000"
-bench set-config -g redis_socketio "redis://127.0.0.1:13000"
-echo "::endgroup::"
+sed -i 's/watch:/# watch:/g' Procfile
+sed -i 's/schedule:/# schedule:/g' Procfile
+sed -i 's/socketio:/# socketio:/g' Procfile
+sed -i 's/redis_socketio:/# redis_socketio:/g' Procfile
 
-echo "::group::Fetch dependency apps (must match Frappe $FRAPPE_BRANCH)"
-bench get-app erpnext --branch "$FRAPPE_BRANCH" --resolve-deps
-bench get-app hrms --branch "$FRAPPE_BRANCH"
+bench get-app "https://github.com/${frappeuser}/payments" --branch "$paymentsbranch"
+bench get-app "https://github.com/${frappeuser}/erpnext" --branch "$erpnextbranch" --resolve-deps
+bench get-app "https://github.com/${frappeuser}/hrms" --branch "$hrmsbranch"
 bench get-app upande_ta "${GITHUB_WORKSPACE}"
-echo "::endgroup::"
+bench setup requirements --dev
 
-echo "::group::Create fresh site (a brand-new bench)"
-bench new-site test_site \
-  --db-root-password root \
-  --admin-password admin \
-  --no-mariadb-socket
-echo "::endgroup::"
+bench start &>> ~/frappe-bench/bench_start.log &
+CI=Yes bench build --app frappe &
+bench --site test_site reinstall --yes
 
-echo "::group::Install apps in dependency order (the deploy step)"
-bench --site test_site install-app erpnext hrms upande_ta
-echo "::endgroup::"
-
-echo "::group::Migrate (exercises after_migrate hooks + patches)"
-bench --site test_site migrate
-echo "::endgroup::"
-
-echo "Install + migrate complete — deploy simulation passed."
+bench --verbose --site test_site install-app upande_ta

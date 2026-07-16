@@ -1,7 +1,13 @@
-name: Semantic Commits
+name: Semantic PR Title
+
+# Lints the PULL REQUEST TITLE (not each commit) as a Conventional Commit.
+# Squash-merge the PR so its title becomes the commit on `main` that
+# semantic-release reads to compute the next version. Individual dev commits
+# on the branch can have any message.
 
 on:
-  pull_request: {}
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
 
 permissions:
   contents: read
@@ -12,23 +18,22 @@ concurrency:
 
 jobs:
   commitlint:
-    name: Check Commit Titles
+    name: Check PR Title
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 200
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           check-latest: true
 
-      - name: Check commit titles
+      - name: Check PR title is a Conventional Commit
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: >
+          echo "$PR_TITLE" |
           npx --yes
           -p @commitlint/cli
           -p @commitlint/config-conventional
           commitlint --verbose
-          --from ${{ github.event.pull_request.base.sha }}
-          --to ${{ github.event.pull_request.head.sha }}
