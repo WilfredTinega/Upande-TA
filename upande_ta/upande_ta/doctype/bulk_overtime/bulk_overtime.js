@@ -18,49 +18,39 @@ frappe.ui.form.on("Bulk Overtime", {
 		}
 	},
 
-	refresh(frm) {
-		if (frm.doc.docstatus === 0 && !frm.is_new()) {
-			frm.add_custom_button(__("Get Employees"), () => {
-				frm.events.get_employees(frm);
-			}).toggleClass("btn-primary", !(frm.doc.bulk_overtime_entries || []).length);
-		}
-	},
+	// Employees are fetched automatically whenever a scoping filter changes (once the
+	// mandatory Company + dates are set) — no manual "Get Employees" button.
+	company(frm) { frm.events.auto_fetch(frm); },
+	branch(frm) { frm.events.auto_fetch(frm); },
+	department(frm) { frm.events.auto_fetch(frm); },
+	designation(frm) { frm.events.auto_fetch(frm); },
+	grade(frm) { frm.events.auto_fetch(frm); },
+	from_date(frm) { frm.events.auto_fetch(frm); },
+	to_date(frm) { frm.events.auto_fetch(frm); },
 
-	get_employees(frm) {
-		const mandatory = ["company", "from_date", "to_date"];
-		const missing = mandatory.filter(f => !frm.doc[f]);
+	auto_fetch(frm) {
+		if (frm.doc.docstatus !== 0) return;
 
-		if (missing.length) {
-			frappe.msgprint({
-				title: __("Missing Fields"),
-				indicator: "red",
-				message: __("Please fill in: ") + missing.map(f => __(frappe.unscrub(f))).join(", "),
-			});
+		// Need company + date range before we can compute overtime.
+		if (!frm.doc.company || !frm.doc.from_date || !frm.doc.to_date) {
+			frm.events.clear_entries(frm);
 			return;
 		}
 
-		return frappe.call({
-			doc: frm.doc,
-			method: "fill_employee_details",
-			freeze: true,
-			freeze_message: __("Fetching Employees…"),
-		}).then(r => {
-			if (r.docs?.[0]?.bulk_overtime_entries) {
-				frm.dirty();
-				frm.save();
-			}
-			frm.refresh();
-			frm.scroll_to_field("bulk_overtime_entries");
-		});
+		// Debounce rapid successive filter changes into a single fetch.
+		if (frm._ot_fetch_timer) clearTimeout(frm._ot_fetch_timer);
+		frm._ot_fetch_timer = setTimeout(() => {
+			frappe.call({
+				doc: frm.doc,
+				method: "fill_employee_details",
+				freeze: true,
+				freeze_message: __("Fetching Employees…"),
+			}).then(() => {
+				frm.refresh_field("bulk_overtime_entries");
+				frm.refresh_field("number_of_employees");
+			});
+		}, 300);
 	},
-
-	company(frm) { frm.events.clear_entries(frm); },
-	branch(frm) { frm.events.clear_entries(frm); },
-	department(frm) { frm.events.clear_entries(frm); },
-	designation(frm) { frm.events.clear_entries(frm); },
-	grade(frm) { frm.events.clear_entries(frm); },
-	from_date(frm) { frm.events.clear_entries(frm); },
-	to_date(frm) { frm.events.clear_entries(frm); },
 
 	clear_entries(frm) {
 		frm.clear_table("bulk_overtime_entries");

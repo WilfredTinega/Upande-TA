@@ -25,8 +25,18 @@
 .ta-kpi__sub { font-size: 0.7rem; color: var(--text-muted, #6c7680); margin-top: 2px; }
 .ta-kpi--in .ta-kpi__value { color: #29CD42; }
 .ta-kpi--out .ta-kpi__value { color: #FF5858; }
+.ta-kpi--absent .ta-kpi__value { color: #C0392B; }
+.ta-kpi--leave .ta-kpi__value { color: #1565C0; }
+.ta-kpi--weekoff .ta-kpi__value { color: #8E44AD; }
 .ta-kpi--employees .ta-kpi__value { color: #F0A500; }
 .ta-kpi--devices .ta-kpi__value { color: #4C7CFC; }
+.ta-kpi--filter { cursor: pointer; transition: border-color 0.12s, box-shadow 0.12s; }
+/* Hover/active border uses each tile's own data colour, and stays on click. */
+.ta-kpi--in.ta-kpi--filter:hover, .ta-kpi--in.ta-kpi--filter.is-active { border-color: #29CD42; box-shadow: 0 0 0 1px #29CD42 inset; }
+.ta-kpi--out.ta-kpi--filter:hover, .ta-kpi--out.ta-kpi--filter.is-active { border-color: #FF5858; box-shadow: 0 0 0 1px #FF5858 inset; }
+.ta-kpi--absent.ta-kpi--filter:hover, .ta-kpi--absent.ta-kpi--filter.is-active { border-color: #C0392B; box-shadow: 0 0 0 1px #C0392B inset; }
+.ta-kpi--leave.ta-kpi--filter:hover, .ta-kpi--leave.ta-kpi--filter.is-active { border-color: #1565C0; box-shadow: 0 0 0 1px #1565C0 inset; }
+.ta-kpi--weekoff.ta-kpi--filter:hover, .ta-kpi--weekoff.ta-kpi--filter.is-active { border-color: #8E44AD; box-shadow: 0 0 0 1px #8E44AD inset; }
 
 .ta-table-wrap { background: var(--card-bg, var(--fg-color, #fff)); border: 1px solid var(--border-color, #e2e6ea); border-radius: 10px; padding: 12px 14px; }
 .ta-table-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 8px; }
@@ -56,3 +66,62 @@
 .ta-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; font-size: 0.82rem; color: var(--text-muted, #6c7680); }
 .ta-link { color: var(--primary-color, var(--primary, #4C7CFC)); text-decoration: none; }
 .ta-link:hover { text-decoration: underline; }
+
+/* Skeleton loading (shown while stats / check-in data are being fetched) */
+@keyframes ta-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.ta-skel { display: block; height: 13px; width: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--skeleton-bg, #edeef1), var(--control-bg, #f7f8f9), var(--skeleton-bg, #edeef1)); background-size: 200% 100%; animation: ta-shimmer 1.2s ease-in-out infinite; }
+.ta-skel-row td { vertical-align: middle; }
+.ta-kpi.is-loading .ta-kpi__value { position: relative; color: transparent; }
+.ta-kpi.is-loading .ta-kpi__value::after { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 64%; height: 1.15em; border-radius: 5px; background: linear-gradient(90deg, var(--skeleton-bg, #edeef1), var(--control-bg, #f7f8f9), var(--skeleton-bg, #edeef1)); background-size: 200% 100%; animation: ta-shimmer 1.2s ease-in-out infinite; }
+
+/* Status badges (table Status column + modal grid cells) */
+.ta-status { display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; line-height: 1.4; }
+.ta-st-present { background: #e8f5e9; color: #2e7d32; }
+.ta-st-absent { background: #ffebee; color: #c62828; }
+.ta-st-wo { background: #f3e5f5; color: #6a1b9a; }
+.ta-st-leave { background: #e3f2fd; color: #1565c0; }
+
+/* Sortable column headers */
+.ta-table thead th.ta-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.ta-table thead th.ta-sortable:hover { color: var(--text-color, #1a1a1a); }
+.ta-sort-arrow { opacity: 0.4; font-size: 0.8em; margin-left: 2px; }
+.ta-table thead th.is-sorted .ta-sort-arrow { opacity: 1; color: var(--primary, #4C7CFC); }
+
+/* Clickable rows */
+.ta-table tbody tr.ta-row { cursor: pointer; }
+.ta-table tbody tr.ta-row:hover td { background: var(--control-bg, #f7f8f9); }
+
+/* Per-employee attendance modal */
+.ta-modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 1050; display: flex; align-items: center; justify-content: center; padding: 4vh 2vw; }
+.ta-modal[hidden] { display: none; }
+.ta-modal__box { background: var(--card-bg, var(--fg-color, #fff)); border-radius: 12px; width: 98vw; max-width: 1400px; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3); }
+.ta-modal__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border-color, #e2e6ea); }
+.ta-modal__headinfo { flex: 1; min-width: 0; }
+.ta-modal__title { font-size: 1rem; font-weight: 700; color: var(--text-color, #1a1a1a); }
+.ta-modal__sub { font-size: 0.78rem; color: var(--text-muted, #6c7680); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.03em; }
+.ta-modal__controls { display: flex; align-items: center; gap: 16px; margin-top: 10px; flex-wrap: wrap; }
+.ta-modal__range { display: flex; flex-direction: column; align-items: stretch; gap: 6px; font-size: 0.8rem; color: var(--text-muted, #6c7680); flex: 0 0 auto; }
+.ta-modal__rf { display: flex; align-items: center; gap: 6px; margin: 0; white-space: nowrap; }
+.ta-modal__rf input { width: auto; margin-left: auto; }
+.ta-modal__tiles { display: flex; gap: 8px; flex: 1 1 auto; }
+.ta-mtile { background: var(--control-bg, #f5f5f5); border-radius: 7px; padding: 5px 14px; flex: 1 1 0; min-width: 90px; }
+.ta-mtile__l { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted, #6c7680); }
+.ta-mtile__v { font-size: 1.05rem; font-weight: 700; color: var(--text-color, #1a1a1a); }
+.ta-mtile__v.c-green { color: #2e7d32; } .ta-mtile__v.c-red { color: #c62828; } .ta-mtile__v.c-purple { color: #6a1b9a; } .ta-mtile__v.c-blue { color: #1565c0; }
+.ta-modal__x { border: none; background: var(--control-bg, #f0f0f0); border-radius: 6px; width: 30px; height: 30px; font-size: 20px; line-height: 1; cursor: pointer; color: var(--text-muted, #555); flex: 0 0 auto; }
+.ta-modal__body { padding: 16px 20px; overflow: auto; }
+.ta-mgrid-wrap { overflow-x: auto; }
+.ta-mgrid { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 0.62rem; }
+.ta-mgrid th { border: 1px solid var(--border-color, #e0e0e0); padding: 4px 1px; background: var(--control-bg, #f5f5f5); color: var(--text-muted, #666); white-space: nowrap; font-weight: 600; text-align: center; overflow: hidden; text-overflow: ellipsis; }
+.ta-mgrid td { border: 1px solid var(--border-color, #eee); padding: 4px 2px; text-align: center; }
+.ta-mgrid .ta-status { display: block; width: 100%; padding: 2px 0; font-size: 0.62rem; border-radius: 4px; box-sizing: border-box; }
+
+/* Suppress the blue highlight on the focused day/month/year segment of native
+   date inputs (Chromium/WebKit), so clicking reads as "open calendar", not "edit text". */
+.ta-dashboard input[type="date"]::-webkit-datetime-edit-day-field:focus,
+.ta-dashboard input[type="date"]::-webkit-datetime-edit-month-field:focus,
+.ta-dashboard input[type="date"]::-webkit-datetime-edit-year-field:focus {
+  background: transparent;
+  color: inherit;
+  outline: none;
+}

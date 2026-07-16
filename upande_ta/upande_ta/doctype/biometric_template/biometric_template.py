@@ -235,13 +235,17 @@ def store_biotemplate():
             "parentfield": "bio_templates",
             "employee":    employee_name,
         },
-        ("name", "employee_name") + tuple(new_values),
+        ("name", "employee_name", "user_id") + tuple(new_values),
         as_dict=True,
     )
 
     changed_fields = []
     if existing:
         changed = {k: v for k, v in new_values.items() if existing.get(k) != v}
+        # Rows are matched by employee, so a changed PIN (payroll number) must be
+        # written back — otherwise the stored user_id drifts from the device.
+        if user_id and existing.get("user_id") != user_id:
+            changed["user_id"] = user_id
         if changed:
             changed["deleted"] = 0
             if employee_full_name and existing.get("employee_name") != employee_full_name:
@@ -315,6 +319,8 @@ def store_biotemplate():
             update_payload["deleted"] = 0
             if employee_full_name:
                 update_payload["employee_name"] = employee_full_name
+            if user_id:
+                update_payload["user_id"] = user_id
             frappe.db.set_value(
                 "Bio Template", existing_name, update_payload,
                 update_modified=False,
