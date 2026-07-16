@@ -2,10 +2,19 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.model.document import Document
-from frappe.utils import flt, getdate
+from frappe.utils import flt
 
 WORKING_HOURS_PER_MONTH = 199.33
+
+# Overtime Type -> (multiplier, salary component) used when generating Overtime Slips.
+NORMAL_OT_TYPE = "Overtime 1.5"
+HOLIDAY_OT_TYPE = "Overtime 2.0"
+OT_TYPES = {
+	NORMAL_OT_TYPE: {"multiplier": 1.5, "component": "Overtime 1.5"},
+	HOLIDAY_OT_TYPE: {"multiplier": 2.0, "component": "Overtime 2.0"},
+}
 
 
 class BulkOvertime(Document):
@@ -14,6 +23,56 @@ class BulkOvertime(Document):
 		if self.from_date and self.to_date:
 			if frappe.utils.getdate(self.from_date) > frappe.utils.getdate(self.to_date):
 				frappe.throw("From Date cannot be after To Date.")
+
+			if frappe.utils.getdate(self.to_date) > frappe.utils.getdate(frappe.utils.today()):
+				frappe.throw("To Date cannot be a future date. Today is <b>%s</b>." % frappe.utils.today())
+
+			existing = frappe.db.get_value("Bulk Overtime", filters={
+				"company": self.company,
+				"name": ("!=", self.name or ""),
+				"docstatus": ("!=", 2),
+				"from_date": ("<=", self.to_date),
+				"to_date": (">=", self.from_date),
+			}, fieldname=["name", "bulk_overtime_title", "from_date", "to_date"], as_dict=True)
+
+			if existing:
+				new_from = frappe.utils.getdate(self.from_date)
+				ex_from = frappe.utils.getdate(existing.from_date)
+
+				if new_from < ex_from:
+					before_date = frappe.utils.add_days(existing.from_date, -1)
+					frappe.throw(
+						"Dates overlap with <a href='/app/bulk-overtime/%s'>%s</a> "
+						"(%s to %s). To Date must be on or before <b>%s</b>." % (
+							existing.name,
+							existing.bulk_overtime_title or existing.name,
+							existing.from_date,
+							existing.to_date,
+							before_date,
+						)
+					)
+				else:
+					after_date = frappe.utils.add_days(existing.to_date, 1)
+					frappe.throw(
+						"Dates overlap with <a href='/app/bulk-overtime/%s'>%s</a> "
+						"(%s to %s). From Date must be on or after <b>%s</b>." % (
+							existing.name,
+							existing.bulk_overtime_title or existing.name,
+							existing.from_date,
+							existing.to_date,
+							after_date,
+						)
+					)
+
+		# Manual rows must carry hours; biometric rows are validated from attendance.
+		for row in self.bulk_overtime_entries:
+			if (row.verification_type or "Biometric") == "Manual":
+				if flt(row.normal_hours) <= 0 and flt(row.holiday_hours) <= 0:
+					frappe.throw(
+						"Row #%s (%s): Manual entries must have Normal or Holiday hours." % (
+							row.idx, row.employee_name or row.employee
+						)
+					)
 
 	def before_save(self):
 		if self.to_date:
@@ -27,10 +86,14 @@ class BulkOvertime(Document):
 				row.overtime_type = self.get_overtime_type(row.employee, row.overtime_date)
 
 	def on_submit(self):
-		self.create_additional_salaries()
+		# Re-validate biometric rows against attendance across the whole period so the
+		# figures are current at submission; manual rows are left exactly as entered.
+		if self.get("auto_validate_worked_hours"):
+			self.revalidate_biometric_hours()
+		self.create_overtime_slips()
 
 	def on_cancel(self):
-		self.cancel_additional_salaries()
+		self.cancel_overtime_slips()
 
 	@frappe.whitelist()
 	def fill_employee_details(self):
@@ -73,12 +136,27 @@ class BulkOvertime(Document):
 
 		self.number_of_employees = len(employees)
 
-	def get_overtime_hours(self, employee_list):
-		"""Return a dict keyed by (employee, date_str) -> overtime hours.
+	def revalidate_biometric_hours(self):
+		"""Recompute Normal/Holiday hours from attendance for Biometric rows only."""
+		bio_rows = [
+			r for r in self.bulk_overtime_entries
+			if (r.verification_type or "Biometric") != "Manual"
+		]
+		if not bio_rows:
+			return
+		hours_map = self.get_overtime_hours([r.employee for r in bio_rows])
+		for row in bio_rows:
+			ot = hours_map.get(row.employee, {"normal": 0, "holiday": 0})
+			row.normal_hours = ot["normal"]
+			row.holiday_hours = ot["holiday"]
 
-		For holidays the full working_hours count as overtime.
-		For normal days overtime = working_hours - shift_hours (min 0).
-		"""
+	def get_overtime_hours(self, employee_list):
+		"""Overtime hours per employee across the whole from_date..to_date range.
+
+		Rest-day work counts fully as holiday-rate overtime: if the day is a weekly
+		off, a public holiday, or an approved leave day for the employee AND they have
+		Present attendance, the entire working_hours is holiday overtime. On an
+		ordinary working day, overtime is the hours worked beyond the shift length."""
 		if not employee_list:
 			return {}
 
@@ -92,7 +170,7 @@ class BulkOvertime(Document):
 				a.working_hours,
 				a.shift,
 				COALESCE(
-					TIMESTAMPDIFF(MINUTE, st.start_time, st.end_time) / 60.0,
+					MOD(TIMESTAMPDIFF(MINUTE, st.start_time, st.end_time) + 1440, 1440) / 60.0,
 					8
 				) AS shift_hours,
 				CASE
@@ -103,7 +181,17 @@ class BulkOvertime(Document):
 						AND h.holiday_date = a.attendance_date
 					) THEN 1
 					ELSE 0
-				END AS is_holiday
+				END AS is_holiday,
+				CASE
+					WHEN EXISTS (
+						SELECT 1 FROM `tabLeave Application` la
+						WHERE la.employee = a.employee
+						AND la.status = 'Approved'
+						AND la.docstatus = 1
+						AND a.attendance_date BETWEEN la.from_date AND la.to_date
+					) THEN 1
+					ELSE 0
+				END AS is_leave
 			FROM `tabAttendance` a
 			LEFT JOIN `tabShift Type` st ON st.name = a.shift
 			WHERE a.employee IN ({placeholders})
@@ -118,18 +206,20 @@ class BulkOvertime(Document):
 		result = {}
 		for row in data:
 			emp = row.employee
-			date_key = str(row.attendance_date)
-			wh = row.working_hours or 0
-			shift_hrs = row.shift_hours or 8
+			# Guard against bad/negative working_hours in attendance data.
+			wh = max(row.working_hours or 0, 0)
+			shift_hrs = row.shift_hours if row.shift_hours and row.shift_hours > 0 else 8
 
-			if row.is_holiday:
-				ot = wh
-			else:
-				ot = max(wh - shift_hrs, 0)
+			# Worked on a rest day (weekly off / public holiday / approved leave) -> all
+			# hours are overtime at the holiday rate; otherwise only hours beyond shift.
+			is_rest_day = row.is_holiday or row.is_leave
 
 			result[(emp, date_key)] = round(ot, 2)
 
-		return result
+			if is_rest_day:
+				result[emp]["holiday"] = result[emp]["holiday"] + wh
+			else:
+				result[emp]["normal"] = result[emp]["normal"] + max(wh - shift_hrs, 0)
 
 	@frappe.whitelist()
 	def sync_attendance_data(self):
@@ -172,26 +262,11 @@ class BulkOvertime(Document):
 			"updated_rows": updated_rows
 		}
 
-	
-	@frappe.whitelist()
-	def get_overtime_type(self, employee, overtime_date):
-		if not employee or not overtime_date:
-			return None
+	def create_overtime_slips(self):
+		"""Create + submit one Overtime Slip per eligible employee. Each slip creates
+		the Additional Salary (see the Overtime Slip override)."""
+		ensure_overtime_setup()
 
-		ot_date = getdate(overtime_date)
-		if ot_date.weekday() >= 5:
-			return "Holiday Overtime"
-
-		holiday_list = frappe.db.get_value("Employee", employee, "holiday_list")
-		if holiday_list and frappe.db.exists(
-			"Holiday",
-			{"parent": holiday_list, "holiday_date": ot_date},
-		):
-			return "Holiday Overtime"
-
-		return "Normal Overtime"
-
-	def create_additional_salaries(self):
 		created = 0
 		errors = []
 
@@ -199,9 +274,9 @@ class BulkOvertime(Document):
 			if row.row_status == "Rejected":
 				continue
 
-			# Use actual hours where available, otherwise fall back to requested hours.
-			hours = flt(row.hours_done or row.hours_requested or 0)
-			if hours <= 0:
+			normal_hours = flt(row.normal_hours)
+			holiday_hours = flt(row.holiday_hours)
+			if normal_hours <= 0 and holiday_hours <= 0:
 				continue
 
 			if not row.overtime_type:
@@ -223,21 +298,40 @@ class BulkOvertime(Document):
 
 			hourly_rate = ssa.base / WORKING_HOURS_PER_MONTH
 
-			if "Holiday" in row.overtime_type:
-				amount = round(hourly_rate * 2.0 * hours, 2)
-				self.make_additional_salary(
-					row.employee, "Overtime 2.0", amount, row.name
-				)
-			else:
-				amount = round(hourly_rate * 1.5 * hours, 2)
-				self.make_additional_salary(
-					row.employee, "Overtime 1.5", amount, row.name
-				)
-			created += 1
+			slip = frappe.get_doc({
+				"doctype": "Overtime Slip",
+				"employee": row.employee,
+				"company": self.company,
+				"posting_date": frappe.utils.today(),
+				"start_date": self.from_date,
+				"end_date": self.to_date,
+				"custom_bulk_overtime": self.name,
+			})
+
+			details = []
+			if normal_hours > 0:
+				details.append((NORMAL_OT_TYPE, normal_hours))
+			if holiday_hours > 0:
+				details.append((HOLIDAY_OT_TYPE, holiday_hours))
+
+			for ot_type, hrs in details:
+				cfg = OT_TYPES[ot_type]
+				slip.append("overtime_details", {
+					"date": self.to_date,
+					"overtime_type": ot_type,
+					"overtime_duration": hrs,
+					"standard_working_hours": 8,
+					"custom_salary_component": cfg["component"],
+					"custom_amount": round(hourly_rate * cfg["multiplier"] * float(hrs), 2),
+				})
+
+			slip.insert(ignore_permissions=True)
+			slip.submit()
+			created = created + 1
 
 		if errors:
 			frappe.msgprint(
-				"Could not create Additional Salary for the following employees:<br>"
+				"Could not create Overtime Slips for the following employees:<br>"
 				+ "<br>".join(errors),
 				title="Warnings",
 				indicator="orange",
@@ -245,39 +339,87 @@ class BulkOvertime(Document):
 
 		if created:
 			frappe.msgprint(
-				"%s Additional Salary record(s) created." % created,
+				"%s Overtime Slip(s) created." % created,
 				indicator="green",
 			)
 
-	def make_additional_salary(self, employee, salary_component, amount, ref_row):
-		ad = frappe.get_doc({
-			"doctype": "Additional Salary",
-			"employee": employee,
-			"company": frappe.defaults.get_global_default("company"),
-			"salary_component": salary_component,
-			"amount": amount,
-			"payroll_date": self.to_date,
-			"ref_doctype": "Bulk Overtime",
-			"ref_docname": self.name,
-			"overwrite_salary_structure_amount": 0,
-		})
-		ad.insert(ignore_permissions=True)
-		ad.submit()
+	def cancel_overtime_slips(self):
+		cancelled = 0
 
-	def cancel_additional_salaries(self):
-		existing = frappe.get_all(
+		# New flow: cancel linked Overtime Slips (each cancels its Additional Salary).
+		# Guard on the real column so cancellation never breaks on a site where the
+		# custom field/column was not created (e.g. submitted before this feature).
+		if "custom_bulk_overtime" in frappe.db.get_table_columns("Overtime Slip"):
+			for name in frappe.get_all(
+				"Overtime Slip",
+				filters={"custom_bulk_overtime": self.name, "docstatus": 1},
+				pluck="name",
+			):
+				frappe.get_doc("Overtime Slip", name).cancel()
+				cancelled += 1
+
+		# Legacy flow: Additional Salary created directly by older submissions.
+		for name in frappe.get_all(
 			"Additional Salary",
 			filters={"ref_doctype": "Bulk Overtime", "ref_docname": self.name, "docstatus": 1},
-			fields=["name"],
-		)
+			pluck="name",
+		):
+			frappe.get_doc("Additional Salary", name).cancel()
+			cancelled += 1
 
-		for row in existing:
-			ad = frappe.get_doc("Additional Salary", row.name)
-			ad.cancel()
-
-		if existing:
+		if cancelled:
 			frappe.msgprint(
-				"%s Additional Salary record(s) cancelled." % len(existing),
+				"%s linked record(s) cancelled." % cancelled,
 				indicator="orange",
 			)
 
+
+def ensure_overtime_setup():
+	"""Idempotently create the custom fields and Overtime Types that link
+	Bulk Overtime -> Overtime Slip -> Additional Salary."""
+	create_custom_fields(
+		{
+			"Overtime Details": [
+				{
+					"fieldname": "custom_salary_component",
+					"label": "Salary Component (Bulk OT)",
+					"fieldtype": "Link",
+					"options": "Salary Component",
+					"read_only": 1,
+					"insert_after": "standard_working_hours",
+				},
+				{
+					"fieldname": "custom_amount",
+					"label": "Amount (Bulk OT)",
+					"fieldtype": "Currency",
+					"read_only": 1,
+					"insert_after": "custom_salary_component",
+				},
+			],
+			"Overtime Slip": [
+				{
+					"fieldname": "custom_bulk_overtime",
+					"label": "Bulk Overtime",
+					"fieldtype": "Link",
+					"options": "Bulk Overtime",
+					"read_only": 1,
+					"insert_after": "department",
+				},
+			],
+		},
+		ignore_validate=True,
+	)
+
+	for ot_type, cfg in OT_TYPES.items():
+		if frappe.db.exists("Overtime Type", ot_type):
+			continue
+		if not frappe.db.exists("Salary Component", cfg["component"]):
+			continue
+		doc = frappe.new_doc("Overtime Type")
+		doc.name = ot_type
+		doc.overtime_salary_component = cfg["component"]
+		doc.standard_multiplier = cfg["multiplier"]
+		doc.applicable_for_weekend = 0
+		doc.overtime_calculation_method = "Fixed Hourly Rate"
+		doc.hourly_rate = 0
+		doc.insert(ignore_permissions=True)

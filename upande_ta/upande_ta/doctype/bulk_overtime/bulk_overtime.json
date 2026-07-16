@@ -9,21 +9,17 @@
  "field_order": [
   "naming_series",
   "company",
-  "column_break_ufzn",
-  "section_period",
+  "shift_approver",
+  "column_break_control_1",
   "from_date",
-  "column_break_period_1",
   "to_date",
+  "number_of_employees",
+  "request_details_column",
+  "reason_for_overtime",
   "section_filters",
   "department",
-  "designation",
   "column_break_filters_1",
-  "shift_approver",
-  "number_of_employees",
-  "section_request_details",
-  "reason_for_overtime",
-  "column_break_fbuf",
-  "default_requested_hours",
+  "grade",
   "section_entries",
   "bulk_overtime_entries",
   "section_notes",
@@ -50,12 +46,16 @@
    "reqd": 1
   },
   {
-  "fieldname": "shift_approver",
-  "fieldtype": "Link",
-  "label": "Shift Approver",
-  "options": "User",
-  "link_filters": "[['Has Role', 'role', 'in', ['HR Manager', 'Leave Approver', 'Expense Approver', 'General Manager', 'HOD', 'Wiki Approver', 'System Manager']]]"
-},
+   "fieldname": "column_break_control_1",
+   "fieldtype": "Column Break",
+   "label": "Period"
+  },
+  {
+   "fieldname": "shift_approver",
+   "fieldtype": "Link",
+   "label": "Shift Approver",
+   "options": "User"
+  },
   {
    "fieldname": "section_filters",
    "fieldtype": "Section Break",
@@ -66,13 +66,8 @@
    "fieldtype": "Link",
    "in_standard_filter": 1,
    "label": "Department",
-   "options": "Department"
-  },
-  {
-   "fieldname": "designation",
-   "fieldtype": "Link",
-   "label": "Designation",
-   "options": "Designation"
+   "options": "Department",
+   "reqd": 1
   },
   {
    "fieldname": "column_break_filters_1",
@@ -85,20 +80,11 @@
    "read_only": 1
   },
   {
-   "fieldname": "section_period",
-   "fieldtype": "Section Break",
-   "label": "Period"
-  },
-  {
    "fieldname": "from_date",
    "fieldtype": "Date",
    "in_list_view": 1,
    "label": "From Date",
    "reqd": 1
-  },
-  {
-   "fieldname": "column_break_period_1",
-   "fieldtype": "Column Break"
   },
   {
    "fieldname": "to_date",
@@ -108,11 +94,7 @@
    "reqd": 1
   },
   {
-   "fieldname": "section_request_details",
-   "fieldtype": "Section Break",
-   "label": "Request Details"
-  },
-  {
+   "depends_on": "eval:doc.purpose === 'Request'",
    "fieldname": "reason_for_overtime",
    "fieldtype": "Small Text",
    "label": "Reason for Overtime",
@@ -161,13 +143,21 @@
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "column_break_ufzn",
-   "fieldtype": "Column Break"
+   "fieldname": "bulk_overtime_title",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Bulk Overtime",
+   "read_only": 1
+  },
+  {
+   "fieldname": "request_details_column",
+   "fieldtype": "Column Break",
+   "label": "Request Details"
   }
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2026-05-13 14:08:16.189250",
+ "modified": "2026-07-15 20:42:11.763380",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime",

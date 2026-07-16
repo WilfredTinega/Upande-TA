@@ -81,8 +81,11 @@
    "options": "\nPending\nApproved\nRejected"
   },
   {
+   "default": "Biometric",
+   "description": "Biometric = worked hours validated from attendance. Manual = enter hours by hand.",
    "fieldname": "verification_type",
    "fieldtype": "Select",
+   "in_list_view": 1,
    "label": "Verification Type",
    "options": "\nBiometric\nManual"
   },
@@ -90,6 +93,22 @@
    "fieldname": "remarks",
    "fieldtype": "Small Text",
    "label": "Remarks"
+  },
+  {
+   "fieldname": "holiday_hours",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Holiday Hours",
+   "precision": "1",
+   "read_only_depends_on": "eval:doc.verification_type != \"Manual\""
+  },
+  {
+   "fieldname": "normal_hours",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Normal Hours",
+   "precision": "1",
+   "read_only_depends_on": "eval:doc.verification_type != \"Manual\""
   }
  ],
  "istable": 1,

@@ -35,6 +35,63 @@ def _employee_has_custom_farm():
     return "custom_farm" in frappe.db.get_table_columns("Employee")
 
 
+def _parse_farms(value):
+    """Split the comma-separated `farms` field of a Biometric Device row into a
+    clean list of Farm docnames."""
+    if not value:
+        return []
+    if isinstance(value, (list, tuple)):
+        items = value
+    else:
+        items = str(value).split(",")
+    return [f.strip() for f in items if f and f.strip()]
+
+
+def _coerce_farms_arg(value):
+    """Normalise the `farms` argument received over HTTP into a list of farm
+    docnames. The frontend may send a JSON array string (``["A", "B"]``), a
+    plain comma-separated string, an empty/blank string (null form arg), or an
+    already-decoded list. Falls back to comma-splitting when the string isn't
+    valid JSON so we never raise on unexpected input."""
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return []
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            pass  # not JSON — let _parse_farms comma-split the raw string
+    return _parse_farms(value)
+
+
+def _device_farms(device_sn):
+    """Return the list of Farm docnames a device is linked to, read from the
+    single Biometric Setting's devices table. Empty list = no restriction."""
+    if not device_sn:
+        return []
+    farms = frappe.db.get_value(
+        "Biometric Device",
+        {"parent": "Biometric Setting", "device_sn": device_sn},
+        "farms",
+    )
+    return _parse_farms(farms)
+
+
+def _employee_farms_by_pin(user_ids):
+    """Map device PIN (Employee.attendance_device_id) -> custom_farm for the
+    given PINs, in a single query. Returns {} when the custom_farm field is
+    absent."""
+    user_ids = [u for u in {str(u).strip() for u in (user_ids or [])} if u]
+    if not user_ids or not _employee_has_custom_farm():
+        return {}
+    rows = frappe.get_all(
+        "Employee",
+        filters={"attendance_device_id": ["in", user_ids]},
+        fields=["attendance_device_id", "custom_farm"],
+    )
+    return {r.attendance_device_id: r.custom_farm for r in rows}
+
+
 def _ensure_biometric_user_parent(device_sn):
     if not device_sn:
         frappe.throw("device_sn is required to resolve a Biometric User parent")
@@ -268,6 +325,7 @@ def get_devices():
             "name":            d.device_sn,
             "device_sn":       d.device_sn,
             "device_location": d.device_location or d.device_sn,
+            "farms":           _parse_farms(d.farms),
         }
         for d in (settings.devices or [])
     ]
@@ -300,7 +358,7 @@ def get_device_users(device_sn):
 
 @frappe.whitelist()
 def get_employees(status="Active", employee=None, designation=None, department=None,
-                  company=None, farm=None):
+                  company=None, farm=None, farms=None):
     filters = {"attendance_device_id": ["!=", ""]}
     if status == "Active":
         filters["status"] = "Active"
@@ -317,7 +375,12 @@ def get_employees(status="Active", employee=None, designation=None, department=N
         filters["company"] = company
 
     has_farm = _employee_has_custom_farm()
-    if farm and has_farm:
+    farms = _coerce_farms_arg(farms)
+    if farms and has_farm:
+        # A single explicit `farm` pick narrows within the device scope.
+        scoped = [farm] if (farm and farm in farms) else farms
+        filters["custom_farm"] = ["in", scoped]
+    elif farm and has_farm:
         filters["custom_farm"] = farm
 
     fields = [
@@ -349,12 +412,18 @@ def get_employees(status="Active", employee=None, designation=None, department=N
 
 
 @frappe.whitelist()
-def get_active_filter_options(department=None, designation=None, company=None, farm=None):
+def get_active_filter_options(department=None, designation=None, company=None, farm=None, farms=None):
     has_farm = _employee_has_custom_farm()
+    device_farms = _coerce_farms_arg(farms)
     fields = ["designation", "department", "company"]
     if has_farm:
         fields.append("custom_farm")
     all_employees = frappe.get_all("Employee", fields=fields)
+
+    # When the selected device(s) restrict farms, only consider employees of
+    # those farms everywhere below.
+    if device_farms and has_farm:
+        all_employees = [e for e in all_employees if e.get("custom_farm") in device_farms]
 
     companies = sorted({e.company for e in all_employees if e.company})
     farms     = sorted({e.custom_farm for e in all_employees if e.get("custom_farm")}) if has_farm else []
@@ -379,8 +448,11 @@ def get_active_filter_options(department=None, designation=None, company=None, f
         employee_filters["designation"] = designation
     if company:
         employee_filters["company"] = company
-    if farm and has_farm:
-        employee_filters["custom_farm"] = farm
+    if has_farm:
+        if farm:
+            employee_filters["custom_farm"] = farm
+        elif device_farms:
+            employee_filters["custom_farm"] = ["in", device_farms]
     employee_count = frappe.db.count("Employee", employee_filters)
 
     return {
@@ -413,6 +485,19 @@ def bulk_command(device_sn, users, command_type):
     failed = []
     post_queue = []
 
+    # Farm scoping: when a device is linked to one or more farms, only employees
+    # of those farms may be ADDED or UPDATED on it. Delete is exempt — deletion
+    # is cleanup (removing stale/foreign/old-PIN enrollments is exactly what an
+    # operator needs on a farm-scoped device), so gating it would trap orphans.
+    # Devices with no farm assigned are unrestricted. This is the authoritative
+    # guard for every entry point (bulk_command_per_device / _multi call here).
+    farm_gated = command_type in ("Add User", "Update User")
+    allowed_farms = _device_farms(device_sn) if farm_gated else []
+    farm_by_pin = (
+        _employee_farms_by_pin([u.get("user_id") for u in users])
+        if allowed_farms else {}
+    )
+
     for user in users:
         try:
             user_id       = str(user.get("user_id") or "").strip()
@@ -423,6 +508,16 @@ def bulk_command(device_sn, users, command_type):
             if not user_id:
                 failed.append({"user_id": user_id, "reason": "Missing PIN"})
                 continue
+
+            if allowed_farms:
+                emp_farm = farm_by_pin.get(user_id)
+                if emp_farm not in allowed_farms:
+                    failed.append({
+                        "user_id": user_id,
+                        "reason": "Employee not assigned to this device's farm(s): "
+                                  + ", ".join(allowed_farms),
+                    })
+                    continue
 
             cmd_id = frappe.generate_hash(length=10)
 
@@ -458,11 +553,14 @@ def bulk_command(device_sn, users, command_type):
                     failed.append({"user_id": user_id, "reason": "User not on device"})
                     continue
 
+                # Preserve the existing employee link if the PIN no longer
+                # resolves to an Employee (e.g. the PIN was changed): re-resolving
+                # to None here would silently wipe the row's employee link.
                 employee = frappe.db.get_value(
                     "Employee",
                     {"attendance_device_id": user_id},
                     "name",
-                )
+                ) or existing.employee
 
                 tpl = _get_template_row(employee)
                 device_name = "" if skip_name else employee_name
@@ -854,3 +952,88 @@ def _post_to_nodered(payload):
 
     except Exception as e:
         frappe.log_error(f"Node-RED post failed: {str(e)}", "Node-RED Post Error")
+
+
+def handle_pin_change(employee, old_pin, new_pin):
+    """React to an Employee's device PIN (attendance_device_id / payroll number)
+    changing. Re-key every biometric enrollment from the old PIN to the new one
+    and re-sync each device the employee is on (remove old PIN, add new PIN).
+
+    DB rows are re-keyed synchronously so records stay consistent immediately;
+    the device commands are enqueued so a slow/unreachable node-RED never blocks
+    the Employee save.
+    """
+    old_pin = (old_pin or "").strip()
+    new_pin = (new_pin or "").strip()
+    if not old_pin or not new_pin or old_pin == new_pin:
+        return
+
+    # Re-key the Bio User rows enrolled under the old PIN, collecting the devices.
+    bio_user_rows = frappe.get_all(
+        "Bio User",
+        filters={"user_id": old_pin, "parentfield": "users"},
+        fields=["name", "parent"],
+    )
+    device_sns = set()
+    for r in bio_user_rows:
+        device_sn = frappe.db.get_value("Biometric User", r.parent, "device_sn")
+        if device_sn:
+            device_sns.add(device_sn)
+        frappe.db.set_value(
+            "Bio User", r.name,
+            {"user_id": new_pin, "employee": employee},
+            update_modified=False,
+        )
+
+    # Re-key Bio Template rows (they are keyed on user_id too).
+    for name in frappe.get_all("Bio Template", filters={"user_id": old_pin}, pluck="name"):
+        frappe.db.set_value("Bio Template", name, "user_id", new_pin, update_modified=False)
+
+    frappe.db.commit()
+
+    if device_sns:
+        frappe.enqueue(
+            "upande_ta.upande_ta.doctype.biometric_user.biometric_user.resync_pin_on_devices",
+            queue="short",
+            employee=employee,
+            old_pin=old_pin,
+            new_pin=new_pin,
+            device_sns=sorted(device_sns),
+        )
+
+
+def resync_pin_on_devices(employee, old_pin, new_pin, device_sns):
+    """Background worker: on each device, delete the old PIN then (re)add the new
+    PIN with the employee's name/template, and re-push biodata. Per-device
+    failures are logged, never raised, so one dead device can't stall the rest."""
+    tpl = _get_template_row(employee)
+    employee_name = (frappe.db.get_value("Employee", employee, "employee_name") or "")[:24]
+
+    for device_sn in (device_sns or []):
+        try:
+            del_id = frappe.generate_hash(length=10)
+            _post_to_nodered({
+                "command_id":    del_id,
+                "command_type":  "Delete User",
+                "device_sn":     device_sn,
+                "user_id":       old_pin,
+                "employee_name": employee_name,
+                "command":       f"C:{del_id}:DATA DELETE USERINFO\tPIN={old_pin}",
+            })
+
+            add_id = frappe.generate_hash(length=10)
+            _post_to_nodered({
+                "command_id":    add_id,
+                "command_type":  "Add User",
+                "device_sn":     device_sn,
+                "user_id":       new_pin,
+                "employee_name": employee_name,
+                "command":       _build_userinfo_command(add_id, new_pin, employee_name, "0", tpl),
+            })
+
+            _queue_biodata_for_user(device_sn, new_pin, employee=employee, tpl=tpl)
+        except Exception as e:
+            frappe.log_error(
+                f"PIN resync failed for device {device_sn} ({old_pin}->{new_pin}): {e}",
+                "Biometric PIN Resync",
+            )

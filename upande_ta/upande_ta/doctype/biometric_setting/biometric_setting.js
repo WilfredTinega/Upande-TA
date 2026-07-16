@@ -140,19 +140,24 @@ frappe.ui.form.on("Biometric Setting", {
 		paint_device_status(frm);
 		subscribe_device_status(frm);
 		add_device_refresh_button(frm);
+		wire_device_farms(frm);
 	},
 
 	devices_on_form_rendered: function(frm) {
 		paint_device_status(frm);
 		add_device_refresh_button(frm);
+		wire_device_farms(frm);
 	},
 
 	devices_add: function(frm, cdt, cdn) {
 		const row = locals[cdt] && locals[cdt][cdn];
 		if (row && !row.status) row.status = "Offline";
 		add_device_refresh_button(frm);
+		wire_device_farms(frm);
 		setTimeout(() => paint_device_status(frm), 0);
 		setTimeout(() => paint_device_status(frm), 150);
+		setTimeout(() => paint_device_farms(frm), 0);
+		setTimeout(() => paint_device_farms(frm), 150);
 	},
 
 	users_device_picker: function(frm) {
@@ -569,6 +574,135 @@ function refresh_device_statuses(frm, $btn) {
 	});
 }
 
+function _split_farms(value) {
+	if (!value) return [];
+	if (Array.isArray(value)) return value.filter(Boolean);
+	return String(value).split(",").map(s => s.trim()).filter(Boolean);
+}
+
+// The Devices grid `farms` cell is read-only; clicking it opens a multi-select
+// pills dialog. We store the picked Farm docnames as a comma-separated string.
+function open_device_farms_dialog(frm, row, on_close) {
+	let dlg;
+	dlg = new frappe.ui.Dialog({
+		title: __("Farms for {0}", [row.device_location || row.device_sn || __("device")]),
+		fields: [
+			{
+				fieldtype: "MultiSelectPills",
+				fieldname: "farms",
+				label: __("Farms"),
+				get_data(txt) {
+					// Drop already-selected farms from the suggestion list.
+					// `dlg` is undefined while the dialog is still constructing
+					// (get_data runs during field render) — guard against it.
+					const selected = dlg ? _split_farms(dlg.get_value("farms")) : [];
+					return frappe.db.get_link_options("Farm", txt).then(opts =>
+						(opts || []).filter(o => {
+							const v = (o && o.value !== undefined) ? o.value : o;
+							return !selected.includes(v);
+						})
+					// The Farm doctype may not be installed on this site (it ships
+					// with upande_kaitet). Swallow the rejection so the dialog opens
+					// cleanly instead of throwing "DocType Farm does not exist" and
+					// bouncing back to the workspace.
+					).catch(() => []);
+				}
+			}
+		],
+		primary_action_label: __("Save"),
+		primary_action(values) {
+			// MultiSelectPills returns an array; store as comma-separated string.
+			const val = _split_farms(values.farms).join(",");
+			frappe.model.set_value(row.doctype, row.name, "farms", val);
+			paint_device_farms(frm);
+			dlg.hide();
+		}
+	});
+	if (on_close) dlg.$wrapper.one("hidden.bs.modal", () => on_close());
+	dlg.show();
+	// Prefill AFTER show and with an ARRAY — the pills control does value.map(),
+	// so a string here throws and the dialog would never open.
+	dlg.set_value("farms", _split_farms(row.farms));
+}
+
+// Render the read-only `farms` cell as ", "-joined farm names (or a hint when
+// empty) and mark it clickable.
+function paint_device_farms(frm) {
+	const grid = frm.fields_dict.devices && frm.fields_dict.devices.grid;
+	if (!grid || !grid.wrapper) return;
+
+	const by_name = {};
+	(frm.doc.devices || []).forEach(d => { if (d && d.name) by_name[d.name] = d; });
+
+	$(grid.wrapper).find(".grid-row").each(function () {
+		const row_name = $(this).attr("data-name");
+		if (!row_name) return;
+		const child = by_name[row_name]
+			|| (locals["Biometric Device"] && locals["Biometric Device"][row_name]);
+		const farms = _split_farms(child && child.farms);
+		const $cell = $(this).find('[data-fieldname="farms"]');
+		$cell.css("cursor", "pointer");
+		const $static = $cell.find(".static-area");
+		if ($static.length) {
+			if (farms.length) {
+				$static.text(farms.join(", "));
+			} else {
+				$static.html(
+					`<span class="text-muted">${frappe.utils.escape_html(__("Click to set farms"))}</span>`
+				);
+			}
+			$static.css("display", "block");
+		}
+	});
+}
+
+function wire_device_farms(frm) {
+	const grid = frm.fields_dict.devices && frm.fields_dict.devices.grid;
+	if (!grid || !grid.wrapper) return;
+
+	if (!grid._farms_click_handler) {
+		// Open the picker from the Farms cell on mousedown. preventDefault stops
+		// the cell entering the grid's inline-edit/focus state (which on a
+		// not-saved doc can trigger revalidation/route side-effects); the modal
+		// is the only way to edit farms. Works for saved rows (static span) and
+		// new rows (the cell is now a normal, non-read-only input).
+		$(grid.wrapper).on("mousedown", '[data-fieldname="farms"]', function (e) {
+			const $cell = $(e.target).closest('[data-fieldname="farms"]');
+			if (!$cell.length) return;
+			e.preventDefault();
+			e.stopPropagation();
+			if (grid._farms_dialog_open) return;
+			const row_name = $cell.closest(".grid-row").attr("data-name");
+			if (!row_name) return;
+			const row = (locals["Biometric Device"] && locals["Biometric Device"][row_name])
+				|| (frm.doc.devices || []).find(d => d.name === row_name);
+			if (!row) return;
+			grid._farms_dialog_open = true;
+			open_device_farms_dialog(frm, row, () => {
+				setTimeout(() => { grid._farms_dialog_open = false; }, 200);
+			});
+		});
+		// Swallow the trailing click so it can't re-enter the cell edit state.
+		$(grid.wrapper).on("click", '[data-fieldname="farms"]', function (e) {
+			e.preventDefault();
+			e.stopPropagation();
+		});
+		grid._farms_click_handler = true;
+	}
+
+	if (!grid._farms_refresh_hook) {
+		const original_refresh = grid.refresh.bind(grid);
+		grid.refresh = function () {
+			const result = original_refresh.apply(this, arguments);
+			setTimeout(() => paint_device_farms(frm), 0);
+			return result;
+		};
+		grid._farms_refresh_hook = true;
+	}
+
+	paint_device_farms(frm);
+}
+
 function refresh_device_options(frm) {
 	const locations = (frm.doc.devices || [])
 		.map(d => d.device_location || d.device_sn)
@@ -973,6 +1107,25 @@ function _dialog_selected_locations(d) {
 	});
 }
 
+// Union of the selected device(s)' farms, used to scope the employee candidate
+// list to what the server will accept. Returns [] (no client scoping) when any
+// selected device is unrestricted (no farms), since the server enforces per
+// device anyway and we must not hide employees valid for that device.
+function _dialog_device_farms(d) {
+	const by_sn = d._device_by_sn || {};
+	let sns = _dialog_selected_sns(d);
+	if (!sns.length) sns = Object.keys(by_sn);
+	if (!sns.length) return [];
+	const set = new Set();
+	for (const sn of sns) {
+		const dev = by_sn[sn];
+		const farms = (dev && dev.farms) || [];
+		if (!farms.length) return [];
+		farms.forEach(f => { if (f) set.add(f); });
+	}
+	return Array.from(set);
+}
+
 function open_bulk_user_dialog(command_type, default_sn, default_location, on_success, enabled_filters) {
 	enabled_filters = enabled_filters || {
 		company: false, farm: false, department: false, designation: false, employee: false
@@ -1067,7 +1220,12 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 					if (dept) f.department  = dept;
 					if (desg) f.designation = desg;
 					if (comp) f.company     = comp;
-					if (frm_) f.custom_farm = frm_;
+					if (frm_) {
+						f.custom_farm = frm_;
+					} else {
+						const device_farms = _dialog_device_farms(d);
+						if (device_farms.length) f.custom_farm = ["in", device_farms];
+					}
 					return { filters: f };
 				},
 				change() { reload_with_filters(); }
@@ -1318,9 +1476,10 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		let designation = d.get_value("filter_designation") || null;
 		let company     = d.get_value("filter_company")     || null;
 		let farm        = d.get_value("filter_farm")        || null;
+		const device_farms = _dialog_device_farms(d);
 		frappe.call({
 			method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_active_filter_options",
-			args: { department, designation, company, farm },
+			args: { department, designation, company, farm, farms: device_farms.length ? JSON.stringify(device_farms) : null },
 			callback(r) {
 				let opts = r.message || {};
 				let valid_designations = opts.designations || [];
@@ -1424,12 +1583,14 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 	}
 
 	function get_filter_args() {
+		const device_farms = _dialog_device_farms(d);
 		return {
 			employee:    d.get_value("filter_employee")    || null,
 			designation: d.get_value("filter_designation") || null,
 			department:  d.get_value("filter_department")  || null,
 			company:     d.get_value("filter_company")     || null,
-			farm:        d.get_value("filter_farm")        || null
+			farm:        d.get_value("filter_farm")        || null,
+			farms:       device_farms.length ? JSON.stringify(device_farms) : null
 		};
 	}
 

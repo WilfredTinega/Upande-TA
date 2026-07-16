@@ -5,14 +5,10 @@ import frappe
 
 LEAVE_TYPE_ABBR_FIELD = "abbreviation"
 
-LEAVE_TYPE_ABBR = {
-	"maternity leave": "ML",
-	"paternity leave": "PL",
-	"unpaid leave": "UL",
-	"annual leave": "AL",
-	"compassionate leave": "CL",
-	"compationate leave": "CL",
-}
+# Optional overrides: lowercased Leave Type name -> fixed abbreviation. Any leave
+# type not listed here is auto-generated from its initials (with collision
+# handling) by generate_leave_abbr(). Empty = auto-generate everything.
+LEAVE_TYPE_ABBR = {}
 
 _abbr_cache = {}
 
@@ -50,26 +46,23 @@ def ensure_abbreviation_field():
 	if not frappe.db.table_exists("Leave Type"):
 		return
 
-	from frappe.custom.doctype.custom_field.custom_field import create_custom_field
-
-	if not frappe.db.exists(
-		"Custom Field", {"dt": "Leave Type", "fieldname": LEAVE_TYPE_ABBR_FIELD}
-	):
-		create_custom_field(
-			"Leave Type",
-			{
-				"fieldname": LEAVE_TYPE_ABBR_FIELD,
-				"label": "Abbreviation",
-				"fieldtype": "Data",
-				"length": 6,
-				"insert_after": "leave_type_name",
-				"description": (
-					"Short code shown in the Monthly Attendance Sheet grid "
-					"(e.g. AL, ML, PL). Leave blank to auto-generate."
-				),
-				"module": "Upande TA",
-			},
-		)
+	from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+	create_custom_fields(
+		{
+			"Leave Type": [
+				{
+					"fieldname": LEAVE_TYPE_ABBR_FIELD,
+					"label": "Abbreviation",
+					"fieldtype": "Data",
+					"length": 6,
+					"insert_after": "leave_type_name",
+					"description": "Leave blank to auto-generate.",
+					"module": "Upande TA",
+				}
+			]
+		},
+		update=True,
+	)
 
 	populate_abbreviations()
 

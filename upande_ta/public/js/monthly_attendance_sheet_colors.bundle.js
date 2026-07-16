@@ -1,22 +1,13 @@
-// Monthly Attendance Sheet client enhancement (kaitet/mona, via upande_ta):
-// Color the per-leave-type abbreviation cells (ML, PL, UL, AL, CL, SLFP, ...)
-// blue, matching how the stock report colors the generic "L". Abbreviations come
-// from the server patch (overrides/monthly_attendance_sheet.py); HRMS' own
-// formatter only knows "L". Also bold/border the appended summary rows.
-//
-// Column freezing/pinning is intentionally NOT handled here — frappe-datatable
-// now provides native "Freeze up to this column" / "Unfreeze columns", so a
-// custom implementation would only duplicate the header menu.
 
 frappe.provide("frappe.views");
 
 (function () {
 	const REPORT = "Monthly Attendance Sheet";
 
-	// A day column's fieldname is a date like "07-05-2026".
 	const DAY_RE = /^\d{2}-\d{2}-\d{4}$/;
-	// Codes we recognise as attendance statuses. Anything else (shift names,
-	// summary count numbers, blanks) is left untouched.
+
+	const SUMMARY_LABEL_FIELD = "employee";
+
 	const STATUS_CODES = /^(P|A|WFH|H|WO|HD\/P|HD\/A)$/;
 
 	function leaveColorFormatter(value, row, column, data, default_formatter) {
@@ -29,7 +20,7 @@ frappe.provide("frappe.views");
 			summarized_view = frappe.query_report.get_filter_value("summarized_view");
 			group_by = frappe.query_report.get_filter_value("group_by");
 		} catch (e) {
-			/* filters not ready */
+			
 		}
 
 		if (group_by && column.colIndex === 1) {
@@ -38,6 +29,18 @@ frappe.provide("frappe.views");
 
 		if (data && data._is_summary) {
 			if (rawValue === null || rawValue === undefined || rawValue === "") return value;
+			const fn = column && (column.fieldname || column.id);
+
+			if (fn === SUMMARY_LABEL_FIELD) {
+
+				return (
+					"<b class='ta-summary-label' style=\"position:absolute; left:0; top:0; bottom:0;" +
+					" display:flex; align-items:center; padding-left:15px; white-space:nowrap;" +
+					" z-index:5; background:#f7f7f7;\">" +
+					rawValue +
+					"</b>"
+				);
+			}
 			return "<b>" + rawValue + "</b>";
 		}
 
@@ -71,7 +74,8 @@ frappe.provide("frappe.views");
 	function ensureSummaryStyle() {
 		if (document.getElementById("ta-mas-summary-style")) return;
 		const css =
-			".dt-row.ta-summary-row .dt-cell { background:#f7f7f7 !important; }" +
+			
+			".dt-row.ta-summary-row .dt-cell { background:#f7f7f7 !important; position:relative; }" +
 			".dt-row.ta-summary-top .dt-cell { border-top:2px solid #000 !important; }";
 		const style = document.createElement("style");
 		style.id = "ta-mas-summary-style";
@@ -79,7 +83,7 @@ frappe.provide("frappe.views");
 		document.head.appendChild(style);
 	}
 
-	// Tag the appended summary rows so CSS can bold/border them as a block.
+
 	function markSummaryRows(report) {
 		try {
 			const wrapper = report && report.$report && report.$report[0];
@@ -108,6 +112,69 @@ frappe.provide("frappe.views");
 		}
 	}
 
+	function installSummaryObserver(report) {
+		try {
+			const wrapper = report && report.$report && report.$report[0];
+			if (!wrapper || wrapper.__ta_summary_observer) return;
+
+			let scheduled = false;
+			const obs = new MutationObserver(() => {
+				if (scheduled) return;
+				scheduled = true;
+				requestAnimationFrame(() => {
+					scheduled = false;
+					markSummaryRows(report);
+				});
+			});
+			obs.observe(wrapper, { childList: true, subtree: true });
+			wrapper.__ta_summary_observer = obs;
+		} catch (e) {
+			console.warn("[MAS observer]", e);
+		}
+	}
+
+
+	function pinSummaryRows(datatable, dataRows) {
+		try {
+			const dm = datatable && datatable.datamanager;
+			if (!dm || !Array.isArray(dm.rowViewOrder) || !dataRows) return;
+
+			const normal = [];
+			const summary = [];
+			dm.rowViewOrder.forEach((idx) => {
+				if (dataRows[idx] && dataRows[idx]._is_summary) summary.push(idx);
+				else normal.push(idx);
+			});
+			if (!summary.length) return;
+			summary.sort((a, b) => a - b); // preserve Present/Absent/.../Total order
+
+			dm.rowViewOrder.splice(0, dm.rowViewOrder.length, ...normal, ...summary);
+
+			// keep the Sr. No. column consistent with the new view order
+			if (dm.hasColumnById && dm.hasColumnById("_rowIndex")) {
+				const sr = dm.getColumnIndexById("_rowIndex");
+				dm.rows.forEach((row, index) => {
+					const viewIndex = dm.rowViewOrder.indexOf(index);
+					if (row[sr]) row[sr].content = viewIndex + 1 + "";
+				});
+			}
+		} catch (e) {
+			console.warn("[MAS pin summary]", e);
+		}
+	}
+
+	function onSortColumnPin() {
+		try {
+			const rep = frappe.query_report;
+			if (!rep || rep.report_name !== REPORT) return;
+			pinSummaryRows(this, rep.data);
+			if (this.rowmanager && this.rowmanager.refreshRows) this.rowmanager.refreshRows();
+			setTimeout(() => markSummaryRows(rep), 30);
+		} catch (e) {
+			console.warn("[MAS onSortColumn]", e);
+		}
+	}
+
 	function patchPrototype() {
 		const QR = frappe.views && frappe.views.QueryReport;
 		if (!QR || !QR.prototype) return false;
@@ -118,9 +185,23 @@ frappe.provide("frappe.views");
 			try {
 				if (this.report_name === REPORT && this.report_settings) {
 					this.report_settings.formatter = leaveColorFormatter;
+
+
+					if (!this.report_settings.__ta_gdo) {
+						const origGDO = this.report_settings.get_datatable_options;
+						this.report_settings.get_datatable_options = function (options) {
+							options = origGDO ? origGDO(options) || options : options;
+							options.saveSorting = false;
+							options.events = Object.assign({}, options.events, {
+								onSortColumn: onSortColumnPin,
+							});
+							return options;
+						};
+						this.report_settings.__ta_gdo = true;
+					}
 				}
 			} catch (e) {
-				/* never break the report */
+				
 			}
 			return origPrepareColumns.apply(this, arguments);
 		};
@@ -129,6 +210,7 @@ frappe.provide("frappe.views");
 		QR.prototype.render_datatable = function () {
 			const out = origRender.apply(this, arguments);
 			if (this.report_name === REPORT) {
+				installSummaryObserver(this);
 				setTimeout(() => {
 					markSummaryRows(this);
 				}, 50);
