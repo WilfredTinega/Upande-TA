@@ -1,44 +1,30 @@
 # Copyright (c) 2026, Upande LTD and contributors
 
-"""Remove the superseded SCP child-table approach.
+"""Remove the superseded SCP child-table approach — but ONLY artifacts this app
+actually owns (``module == "Upande TA"``).
 
-An earlier version added Stock Entry child-table fields (``employee_data`` /
-``biometric_data`` / ``biometric_verified`` and their ``custom_``-prefixed
-predecessors) backed by the "Employee Request" and "Biometric Data" child
-DocTypes. These were replaced by the "Biometric Verification" section (see
-``overrides/stock_entry.py``), so this patch removes the stale custom fields and
-DocTypes from sites that already had them.
+An earlier iteration of upande_ta briefly shipped ``Employee Request`` /
+``Biometric Data`` child DocTypes and Stock Entry Table fields, replaced by the
+"Biometric Verification" section. This drops any such DocTypes that belong to
+upande_ta.
 
-Idempotent and safe: a no-op on sites that never installed the old approach.
-Custom fields are dropped first so the DocTypes (used as their Table options)
-delete cleanly.
+IMPORTANT: it is strictly module-scoped. Other apps (e.g. upande_kaitet) ship
+DocTypes with the SAME names and their own Stock Entry customizations — those
+must never be touched here. Upande-TA-owned custom fields no longer in the spec
+are pruned by ``overrides.stock_entry.ensure_biometric_stock_entry_fields``
+(module-scoped reconciliation), so this patch only handles DocTypes.
 """
 
 import frappe
 
 
-OLD_STOCK_ENTRY_FIELDS = (
-	"custom_employee_data",
-	"custom_biometric_data",
-	"custom_biometric_verified",
-	"employee_data",
-	"biometric_data",
-	"biometric_verified",
-)
-
 OLD_DOCTYPES = ("Employee Request", "Biometric Data")
+MODULE = "Upande TA"
 
 
 def execute():
-	# 1. Drop the old Stock Entry custom fields (both naming variants).
-	for fieldname in OLD_STOCK_ENTRY_FIELDS:
-		name = frappe.db.get_value("Custom Field", {"dt": "Stock Entry", "fieldname": fieldname})
-		if name:
-			frappe.delete_doc("Custom Field", name, ignore_permissions=True, force=True)
-
-	# 2. Drop the old child DocTypes (also drops their DB tables).
 	for doctype in OLD_DOCTYPES:
-		if frappe.db.exists("DocType", doctype):
+		if frappe.db.get_value("DocType", doctype, "module") == MODULE:
 			frappe.delete_doc(
 				"DocType", doctype, ignore_permissions=True, force=True, ignore_missing=True
 			)
