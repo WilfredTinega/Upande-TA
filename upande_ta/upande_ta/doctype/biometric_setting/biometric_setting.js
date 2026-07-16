@@ -660,12 +660,32 @@ function wire_device_farms(frm) {
 	const grid = frm.fields_dict.devices && frm.fields_dict.devices.grid;
 	if (!grid || !grid.wrapper) return;
 
+	// `farms` is a read-only field, so when a device row is in edit mode Frappe
+	// renders it as a DISABLED <input>. Disabled inputs swallow mouse events —
+	// they don't fire and don't bubble — so the delegated mousedown handler below
+	// would never see clicks on it and the picker would never open. Make the
+	// cell's inner input/areas transparent to pointer events so clicks fall
+	// through to the `.grid-static-col` wrapper (which is NOT disabled and DOES
+	// receive the event). Scoped to this grid so the dialog's own `farms` picker
+	// field is unaffected.
+	$(grid.wrapper).addClass("bio-farms-grid");
+	if (!document.getElementById("bio-farms-style")) {
+		const style = document.createElement("style");
+		style.id = "bio-farms-style";
+		style.textContent =
+			'.bio-farms-grid [data-fieldname="farms"] .field-area,' +
+			'.bio-farms-grid [data-fieldname="farms"] .static-area{pointer-events:none;}' +
+			'.bio-farms-grid [data-fieldname="farms"]{cursor:pointer;}';
+		document.head.appendChild(style);
+	}
+
 	if (!grid._farms_click_handler) {
 		// Open the picker from the Farms cell on mousedown. preventDefault stops
 		// the cell entering the grid's inline-edit/focus state (which on a
 		// not-saved doc can trigger revalidation/route side-effects); the modal
-		// is the only way to edit farms. Works for saved rows (static span) and
-		// new rows (the cell is now a normal, non-read-only input).
+		// is the only way to edit farms. Clicks land on the cell wrapper for both
+		// saved rows (static span) and rows in edit mode (disabled input made
+		// click-through above).
 		$(grid.wrapper).on("mousedown", '[data-fieldname="farms"]', function (e) {
 			const $cell = $(e.target).closest('[data-fieldname="farms"]');
 			if (!$cell.length) return;

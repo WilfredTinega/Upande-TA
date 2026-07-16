@@ -7,3 +7,4 @@ upande_ta.patches.v1.backfill_device_location_fields
 upande_ta.patches.v1.rename_biometric_setting_company_field
 upande_ta.patches.v1.migrate_device_farm_to_farms
 upande_ta.patches.v1.drop_scp_child_table_fields
+upande_ta.patches.v1.consolidate_ta_workspace
