@@ -26,14 +26,13 @@ jobs:
     timeout-minutes: 60
 
     services:
-      mysql:
+      mariadb:
         image: mariadb:11.8
         env:
-          # Empty root password — no credential is hardcoded anywhere.
-          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+          MARIADB_ROOT_PASSWORD: 'root'
         ports:
           - 3306:3306
-        options: --health-cmd="mariadb-admin ping" --health-interval=5s --health-timeout=2s --health-retries=5
+        options: --health-cmd="mariadb-admin ping" --health-interval=5s --health-timeout=2s --health-retries=3
 
     steps:
       - name: Clone
