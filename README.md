@@ -19,10 +19,13 @@ dashboard, and an enhanced Monthly Attendance Sheet.
 - [3. Bulk Overtime](#3-bulk-overtime)
 - [4. Bulk Week Off](#4-bulk-week-off)
 - [5. TA Dashboard](#5-ta-dashboard)
+- [6. upande_scp integration](#6-upande_scp-integration)
 - [App lifecycle & scheduled jobs](#app-lifecycle--scheduled-jobs)
 - [Compatibility](#compatibility)
 - [Known limitations](#known-limitations)
 - [Data-migration patches](#data-migration-patches)
+- [Versioning & releases](#versioning--releases)
+- [Continuous integration](#continuous-integration)
 - [Installation](#installation)
 - [Contributing](#contributing)
 - [License](#license)
@@ -310,6 +313,29 @@ All endpoints scope by company / farm / department / designation / employee. The
 
 ---
 
+## 6. upande_scp integration
+
+`upande_ta` owns the biometric/employee-assignment DocTypes the **upande_scp**
+store-keeper transfer flow depends on, so `upande_scp` only needs `upande_ta`,
+`upande_core`, ERPNext, and Frappe.
+
+- **Biometric Logs** (already present) — SCP reads it read-only for live
+  finger-scan verification (`employee`, `employee_name`, `biometric_id`, `time`,
+  `log_type`).
+- **Employee Request** (child table) — used as `Stock Entry.employee_data`
+  (transfer employee assignment): `employee`, `employee_name`.
+- **Biometric Data** (child table) — used as `Stock Entry.biometric_data`
+  (written on biometric-authorized submit): `employee`, `employee_name`,
+  `biometric_id`.
+
+The three Stock Entry custom fields — `employee_data`
+(Table → Employee Request), `biometric_data` (Table → Biometric Data),
+and `biometric_verified` (Check) — are **created programmatically** on
+install/migrate and removed on uninstall (see
+`overrides/stock_entry.py`), **not** shipped as fixtures.
+
+---
+
 ## App lifecycle & scheduled jobs
 
 **`after_install`** — desktop icon, TA Dashboard block, Leave Type abbreviation
@@ -455,27 +481,6 @@ Optional:
 - **Baseline tag** — with no existing tag, the first release is **`v1.0.0`**. To
   keep the current `0.x` line instead, create a baseline tag once:
   `git tag v0.0.1 && git push origin v0.0.1`.
-
-## upande_scp integration
-
-`upande_ta` owns the biometric/employee-assignment DocTypes the **upande_scp**
-store-keeper transfer flow depends on, so `upande_scp` only needs `upande_ta`,
-`upande_core`, ERPNext, and Frappe.
-
-- **Biometric Logs** (already present) — SCP reads it read-only for live
-  finger-scan verification (`employee`, `employee_name`, `biometric_id`, `time`,
-  `log_type`).
-- **Employee Request** (child table) — used as `Stock Entry.employee_data`
-  (transfer employee assignment): `employee`, `employee_name`.
-- **Biometric Data** (child table) — used as `Stock Entry.biometric_data`
-  (written on biometric-authorized submit): `employee`, `employee_name`,
-  `biometric_id`.
-
-The three Stock Entry custom fields — `employee_data`
-(Table → Employee Request), `biometric_data` (Table → Biometric Data),
-and `biometric_verified` (Check) — are **created programmatically** on
-install/migrate and removed on uninstall (see
-`overrides/stock_entry.py`), **not** shipped as fixtures.
 
 ## Continuous integration
 
