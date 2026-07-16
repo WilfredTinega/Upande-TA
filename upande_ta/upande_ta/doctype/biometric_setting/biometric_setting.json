@@ -2,7 +2,7 @@
  "actions": [],
  "allow_bulk_edit": 1,
  "allow_rename": 1,
- "creation": "2026-05-21 14:10:58.374511",
+ "creation": "2026-07-15 18:28:04.288223",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -58,6 +58,9 @@
   "department",
   "designation",
   "employee",
+  "payroll_dates_column",
+  "from",
+  "to",
   "section_break_asec",
   "devices",
   "checkin_review_filters_section",
@@ -403,13 +406,30 @@
    "fieldname": "update",
    "fieldtype": "Button",
    "label": "Update"
+  },
+  {
+   "fieldname": "payroll_dates_column",
+   "fieldtype": "Column Break",
+   "label": "Payroll Dates"
+  },
+  {
+   "fieldname": "from",
+   "fieldtype": "Select",
+   "label": "From",
+   "options": "\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31"
+  },
+  {
+   "fieldname": "to",
+   "fieldtype": "Select",
+   "label": "To",
+   "options": "\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-07 23:28:42.921250",
+ "modified": "2026-07-15 18:42:11.445750",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

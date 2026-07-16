@@ -65,35 +65,87 @@ def get_attendance_records(filters):
 	return query.run(as_dict=1)
 
 
+def build_shift_resolver(employees, filters):
+	"""Return resolve(employee, attendance_date) -> assigned shift name.
+
+	Rows in the detailed view are grouped by this value, so an employee is
+	grouped under the shift they were *assigned* (Shift Assignment, then the
+	Employee's default shift) rather than whatever shift each individual
+	Attendance record happened to be stamped with. This collapses the split
+	rows produced by different attendance sources (manual Mark Attendance,
+	Attendance Request, auto-marked Weekly Off, auto leave from Leave
+	Application) into a single row per assigned shift.
+	"""
+	employees = list(employees)
+	if not employees:
+		return lambda employee, attendance_date: ""
+
+	start_date, end_date = _hrms.get_date_range_from_filters(filters)
+
+	ShiftAssignment = frappe.qb.DocType("Shift Assignment")
+	rows = (
+		frappe.qb.from_(ShiftAssignment)
+		.select(
+			ShiftAssignment.employee,
+			ShiftAssignment.shift_type,
+			ShiftAssignment.start_date,
+			ShiftAssignment.end_date,
+		)
+		.where(
+			(ShiftAssignment.docstatus == 1)
+			& (ShiftAssignment.status == "Active")
+			& (ShiftAssignment.employee.isin(employees))
+			& (ShiftAssignment.start_date <= end_date)
+			& (ShiftAssignment.end_date.isnull() | (ShiftAssignment.end_date >= start_date))
+		)
+		.orderby(ShiftAssignment.start_date)
+	).run(as_dict=1)
+
+	assignments = {}
+	for r in rows:
+		assignments.setdefault(r.employee, []).append(r)
+
+	default_shifts = dict(
+		frappe.get_all(
+			"Employee",
+			filters={"name": ("in", employees)},
+			fields=["name", "default_shift"],
+			as_list=1,
+		)
+	)
+
+	def resolve(employee, attendance_date):
+		day = getdate(attendance_date)
+		for a in assignments.get(employee, []):
+			if a.start_date and getdate(a.start_date) > day:
+				continue
+			if a.end_date and getdate(a.end_date) < day:
+				continue
+			if a.shift_type:
+				return a.shift_type
+		return default_shifts.get(employee) or ""
+
+	return resolve
+
+
 def get_attendance_map(filters):
 	attendance_list = get_attendance_records(filters)
+
+	resolve_shift = build_shift_resolver({d.employee for d in attendance_list}, filters)
+
 	attendance_map = {}
-	leave_map = {}
 
 	for d in attendance_list:
+		shift = resolve_shift(d.employee, d.attendance_date)
+		day_map = attendance_map.setdefault(d.employee, {}).setdefault(shift, {})
+
 		if d.status == "On Leave":
-			leave_map.setdefault(d.employee, {}).setdefault(d.shift, []).append(
-				(d.attendance_date, d.leave_type)
-			)
-			continue
-
-		if d.shift is None:
-			d.shift = ""
-
-		attendance_map.setdefault(d.employee, {}).setdefault(d.shift, {})
-		attendance_map[d.employee][d.shift][d.attendance_date] = d.status
-
-	for employee, leave_days in leave_map.items():
-		for assigned_shift, entries in leave_days.items():
-			if employee not in attendance_map:
-				attendance_map.setdefault(employee, {}).setdefault(assigned_shift, {})
-
-			for attendance_date, leave_type in entries:
-				value = "On Leave"
-				if leave_type:
-					value = f"On Leave{_LEAVE_SEP}{leave_type}"
-				for shift in attendance_map[employee].keys():
-					attendance_map[employee][shift][attendance_date] = value
+			value = "On Leave"
+			if d.leave_type:
+				value = f"On Leave{_LEAVE_SEP}{d.leave_type}"
+			day_map[d.attendance_date] = value
+		else:
+			day_map[d.attendance_date] = d.status
 
 	return attendance_map
 
@@ -246,7 +298,10 @@ def build_summary_rows(data, columns):
 	if not day_fields:
 		return []
 
-	label_field = "employee_name"
+	# Put the label in the first column so the client can render it spanning the
+	# three empty leading columns (Employee / Employee Name / Shift), left-aligned,
+	# instead of being truncated inside the narrow Employee Name column.
+	label_field = "employee"
 
 	per_day_emp = {d: {} for d in day_fields}
 
@@ -296,9 +351,28 @@ def execute(filters=None):
 
 	columns, data, message, chart = original(filters)
 
+	# Shift holds long labels (e.g. "LOE/ECE SECURITY DAY SHIFT"); left-align it
+	# so the names read naturally instead of hugging the right edge.
+	for c in columns or []:
+		if c.get("fieldname") == "shift":
+			c["align"] = "left"
+			break
+
 	filters = frappe._dict(filters or {})
 	if data and not filters.summarized_view:
 		try:
+			# Group the default view by shift on the server so users don't need to
+			# click-sort the Shift column (whose persisted sort would otherwise
+			# scatter the summary block on load). Skipped when group_by is set, as
+			# that inserts its own group-header rows we must not reorder.
+			if not filters.group_by:
+				data = sorted(
+					data,
+					key=lambda r: (
+						str(r.get("shift") or "").lower(),
+						str(r.get("employee_name") or ""),
+					),
+				)
 			data = list(data) + build_summary_rows(data, columns)
 		except Exception:
 			frappe.log_error(

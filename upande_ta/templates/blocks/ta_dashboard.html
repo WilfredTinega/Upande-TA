@@ -35,13 +35,25 @@
   </div>
 
   <div class="ta-kpis">
-    <div class="ta-kpi ta-kpi--in">
+    <div class="ta-kpi ta-kpi--in ta-kpi--filter" data-ta-cat="present" title="Show checked-in employees">
       <div class="ta-kpi__label">Check-Ins</div>
       <div class="ta-kpi__value" data-ta="unique_in">—</div>
     </div>
-    <div class="ta-kpi ta-kpi--out">
+    <div class="ta-kpi ta-kpi--out ta-kpi--filter" data-ta-cat="present" title="Show checked-in employees">
       <div class="ta-kpi__label">Check-Outs</div>
       <div class="ta-kpi__value" data-ta="unique_out">—</div>
+    </div>
+    <div class="ta-kpi ta-kpi--absent ta-kpi--filter" data-ta-cat="absent" title="Show absent employees">
+      <div class="ta-kpi__label">Absent</div>
+      <div class="ta-kpi__value" data-ta="absent">—</div>
+    </div>
+    <div class="ta-kpi ta-kpi--leave ta-kpi--filter" data-ta-cat="leave" title="Show employees on leave">
+      <div class="ta-kpi__label">Leaves</div>
+      <div class="ta-kpi__value" data-ta="leave">—</div>
+    </div>
+    <div class="ta-kpi ta-kpi--weekoff ta-kpi--filter" data-ta-cat="weekly_off" title="Show employees on weekly off">
+      <div class="ta-kpi__label">Week Off</div>
+      <div class="ta-kpi__value" data-ta="weekly_off">—</div>
     </div>
     <div class="ta-kpi ta-kpi--employees">
       <div class="ta-kpi__label">Total Employees</div>
@@ -54,22 +66,23 @@
   </div>
 
   <div class="ta-table-wrap">
-    <div class="ta-table-title">Check-Ins / Check-Outs <span class="ta-range-label" data-ta="range_label"></span></div>
+    <div class="ta-table-title"><span data-ta-table-heading>Check-Ins / Check-Outs</span> <span class="ta-range-label" data-ta="range_label"></span></div>
     <div class="ta-table-scroll">
       <table class="ta-table">
         <thead>
           <tr>
-            <th class="ta-col-empno">Employee #</th>
-            <th>Name</th>
-            <th>Shift</th>
-            <th>Designation</th>
-            <th>Check-In</th>
-            <th>Check-Out</th>
-            <th>Worked Hours</th>
+            <th class="ta-col-empno ta-sortable" data-sort="employee_number">Employee # <span class="ta-sort-arrow">↕</span></th>
+            <th class="ta-sortable" data-sort="employee_name">Name <span class="ta-sort-arrow">↕</span></th>
+            <th class="ta-sortable" data-sort="shift">Shift <span class="ta-sort-arrow">↕</span></th>
+            <th class="ta-sortable" data-sort="designation">Designation <span class="ta-sort-arrow">↕</span></th>
+            <th class="ta-sortable" data-sort="check_in">Check-In <span class="ta-sort-arrow">↕</span></th>
+            <th class="ta-sortable" data-sort="check_out">Check-Out <span class="ta-sort-arrow">↕</span></th>
+            <th class="ta-sortable" data-sort="worked_hours">Worked Hours <span class="ta-sort-arrow">↕</span></th>
+            <th class="ta-sortable" data-sort="status">Status <span class="ta-sort-arrow">↕</span></th>
           </tr>
         </thead>
         <tbody data-ta-table-body>
-          <tr><td colspan="7" class="ta-empty">Loading…</td></tr>
+          <tr><td colspan="8" class="ta-empty">Loading…</td></tr>
         </tbody>
       </table>
     </div>
@@ -95,5 +108,27 @@
 
   <div class="ta-footer">
     <span class="ta-updated">Updated <span data-ta="updated_at">—</span></span>
+  </div>
+
+  <div class="ta-modal" data-ta-modal hidden>
+    <div class="ta-modal__box">
+      <div class="ta-modal__head">
+        <div class="ta-modal__headinfo">
+          <div class="ta-modal__title" data-tam="name"></div>
+          <div class="ta-modal__sub" data-tam="sub"></div>
+          <div class="ta-modal__controls">
+            <div class="ta-modal__range">
+              <span class="ta-modal__rf">From <span class="ta-modal__rfctrl" data-tam="from-wrap"></span></span>
+              <span class="ta-modal__rf">To <span class="ta-modal__rfctrl" data-tam="to-wrap"></span></span>
+            </div>
+            <div class="ta-modal__tiles" data-tam="tiles"></div>
+          </div>
+        </div>
+        <button type="button" class="ta-modal__x" data-tam="close" title="Close">×</button>
+      </div>
+      <div class="ta-modal__body">
+        <div class="ta-mgrid-wrap"><table class="ta-mgrid" data-tam="grid"></table></div>
+      </div>
+    </div>
   </div>
 </div>
