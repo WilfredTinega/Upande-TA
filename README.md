@@ -463,17 +463,58 @@ from notes (`.github/release.yml`).
 
 ### Commit message → version bump
 
-| Commit prefix | Example | Bump |
-|---|---|---|
-| `fix:` | `fix: prevent duplicate checkin race` | patch (`x.y.Z`) |
-| `feat:` | `feat: bulk week-off scheduler` | minor (`x.Y.0`) |
-| `chore:` / `ci:` / `docs:` / `style:` / `test:` / `refactor:` / `perf:` / `build:` | `docs: update README` | no release |
+The version is **`MAJOR.MINOR.PATCH`**. `semantic-release` reads each commit's
+**type prefix** and bumps the matching position — a higher bump resets the lower
+positions to `0`. Taking a current version of **`1.4.2`** as the example:
 
-Breaking changes are **not** auto-bumped to a major (`releaseRules` in
-`.releaserc.json`) — majors are managed manually, mirroring ERPNext (whose major
-tracks the Frappe version). PR commit titles are enforced by the
-`Semantic Commits` workflow (`.github/workflows/semantic-commits.yml` +
-`commitlint.config.js`).
+| Commit prefix | Example | Bumps | `1.4.2` → |
+|---|---|---|---|
+| `feat:` | `feat: bulk week-off scheduler` | **MINOR** (`x.`**`Y`**`.0`) | `1.5.0` |
+| `fix:` | `fix: prevent duplicate checkin race` | **PATCH** (`x.y.`**`Z`**) | `1.4.3` |
+| `perf:` | `perf: index checkin lookups` | **PATCH** (`x.y.`**`Z`**) | `1.4.3` |
+| `revert:` | `revert: bad migration` | **PATCH** (`x.y.`**`Z`**) | `1.4.3` |
+| `chore:` `ci:` `docs:` `style:` `test:` `refactor:` `build:` | `docs: update README` | — | `1.4.2` (no release) |
+| `BREAKING CHANGE:` / `feat!:` | `feat!: drop v15 support` | **MAJOR is disabled** | `1.4.2` (no auto-bump) |
+
+Position by position:
+
+- **MAJOR** (`X.y.z`, the `1` in `1.x.y`) — **never** bumped automatically.
+  `releaseRules` in `.releaserc.json` sets `{ "breaking": true, "release": false }`,
+  so a breaking change does **not** roll `1.x.y → 2.0.0`; majors are cut by hand
+  (the major tracks the Frappe version, mirroring ERPNext). Tag manually to go up.
+- **MINOR** (`x.Y.z`) — `feat:` only, and it resets PATCH to `0` (`1.4.2 → 1.5.0`).
+- **PATCH** (`x.y.Z`) — `fix:`, `perf:`, `revert:` (the last two via the angular
+  preset's built-in rules), incrementing the last number (`1.4.2 → 1.4.3`).
+
+> `perf:` and `revert:` bump PATCH because the angular preset supplies those
+> default rules and our `releaseRules` overrides only the breaking case. To make
+> them release nothing, add `{ "type": "perf", "release": false }` (and the same
+> for `revert`) to `releaseRules` in `.releaserc.json`.
+
+### Which commit is read — merge strategy matters
+
+The version is computed from the commit(s) that land on **`main`**, *not* from
+the PR title directly. So the merge strategy determines whether a bump happens:
+
+| Merge method | What lands on `main` | Result |
+|---|---|---|
+| **Squash & merge** (recommended) | one commit, subject = PR title | the conventional PR title is read → bumps by its type |
+| Merge commit | every PR commit + a merge commit | non-conventional commits (`update`, `wip`) are ignored → usually **no bump** |
+| Rebase & merge | every PR commit, replayed | each commit is read individually; only `feat:`/`fix:` among them bump |
+
+Because the app is validated by the `Semantic Commits` workflow
+(`.github/workflows/semantic-commits.yml` + `commitlint.config.js`), which lints
+the **PR title** (not every commit), the intended flow is:
+
+1. Write work-in-progress commits freely (`update`, `wip`, …).
+2. Give the **PR a Conventional-Commit title** (`feat: …`, `fix: …`, `chore: …`).
+3. **Squash & merge** so that title becomes the single commit on `main`.
+
+To make squash use the PR title automatically, enable **Settings → General →
+Pull Requests → "Default to pull request title for squash merge commits"**. A
+PR with several commits then collapses to one conventional commit, and the bump
+is decided by that title's type (multiple mixed changes get a single bump —
+choose the most significant type, e.g. `feat:`).
 
 ### Setup
 
