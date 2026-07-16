@@ -1,9 +1,13 @@
 #!/bin/bash
 # Mirrors the ERPNext/HRMS CI install flow: clone Frappe, init a bench,
-# pre-create the test DB, drop in site_config.json, pull the dependency apps
-# (payments + erpnext + hrms) and this app, then reinstall + install-app.
-# Reproduces a real deploy — a bad frappe-dependency, a broken after_migrate
-# hook, or a v16-only import fails here the same way it would on Frappe Cloud.
+# create the test DB, pull the dependency apps (payments + erpnext + hrms) and
+# this app, then reinstall + install-app. Reproduces a real deploy.
+#
+# No credentials are committed anywhere:
+#   * the MariaDB root account uses an EMPTY password
+#     (MARIADB_ALLOW_EMPTY_ROOT_PASSWORD is set on the service in ci.yml),
+#   * the site DB-user and admin passwords are generated at runtime, and
+#   * site_config.json is written here at runtime, not stored in the repo.
 
 set -e
 
@@ -21,19 +25,43 @@ erpnextbranch=${ERPNEXT_BRANCH:-"version-16"}
 hrmsbranch=${HRMS_BRANCH:-"version-16"}
 paymentsbranch=${PAYMENTS_BRANCH:-"version-16"}
 
+# Runtime-generated credentials — never committed to the repo.
+DB_NAME="test_frappe"
+DB_USER="test_frappe"
+DB_PASSWORD="$(openssl rand -hex 16)"
+ADMIN_PASSWORD="$(openssl rand -hex 16)"
+
 git clone "https://github.com/${frappeuser}/frappe" --branch "${frappebranch}" --depth 1
 bench init --skip-assets --frappe-path ~/frappe --python "$(which python)" frappe-bench
 
 mkdir ~/frappe-bench/sites/test_site
-cp -r "${GITHUB_WORKSPACE}/.github/helper/site_config.json" ~/frappe-bench/sites/test_site/
 
-mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "SET GLOBAL character_set_server = 'utf8mb4'"
-mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "SET GLOBAL collation_server = 'utf8mb4_unicode_ci'"
+# MariaDB root has an empty password (set on the service container in ci.yml),
+# so no password is passed on the command line.
+mysql_root=(mariadb --host 127.0.0.1 --port 3306 -u root)
+"${mysql_root[@]}" -e "SET GLOBAL character_set_server = 'utf8mb4'"
+"${mysql_root[@]}" -e "SET GLOBAL collation_server = 'utf8mb4_unicode_ci'"
+"${mysql_root[@]}" -e "CREATE USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}'"
+"${mysql_root[@]}" -e "CREATE DATABASE ${DB_NAME}"
+"${mysql_root[@]}" -e "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost'"
+"${mysql_root[@]}" -e "FLUSH PRIVILEGES"
 
-mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "CREATE USER 'test_frappe'@'localhost' IDENTIFIED BY 'test_frappe'"
-mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "CREATE DATABASE test_frappe"
-mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "GRANT ALL PRIVILEGES ON \`test_frappe\`.* TO 'test_frappe'@'localhost'"
-mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "FLUSH PRIVILEGES"
+# site_config.json is generated at runtime — no credentials live in the repo.
+cat > ~/frappe-bench/sites/test_site/site_config.json <<EOF
+{
+    "db_host": "127.0.0.1",
+    "db_port": 3306,
+    "db_name": "${DB_NAME}",
+    "db_password": "${DB_PASSWORD}",
+    "use_mysqlclient": 1,
+    "admin_password": "${ADMIN_PASSWORD}",
+    "root_login": "root",
+    "root_password": "",
+    "host_name": "http://test_site:8000",
+    "install_apps": ["payments", "erpnext", "hrms"],
+    "throttle_user_limit": 100
+}
+EOF
 
 install_wkhtmltopdf() {
     wget -O /tmp/wkhtmltox.tar.xz https://github.com/frappe/wkhtmltopdf/raw/master/wkhtmltox-0.12.3_linux-generic-amd64.tar.xz

@@ -29,7 +29,8 @@ jobs:
       mysql:
         image: mariadb:11.8
         env:
-          MARIADB_ROOT_PASSWORD: "root"
+          # Empty root password — no credential is hardcoded anywhere.
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
         ports:
           - 3306:3306
         options: --health-cmd="mariadb-admin ping" --health-interval=5s --health-timeout=2s --health-retries=5
