@@ -19,10 +19,13 @@ dashboard, and an enhanced Monthly Attendance Sheet.
 - [3. Bulk Overtime](#3-bulk-overtime)
 - [4. Bulk Week Off](#4-bulk-week-off)
 - [5. TA Dashboard](#5-ta-dashboard)
+- [6. upande_scp integration](#6-upande_scp-integration)
 - [App lifecycle & scheduled jobs](#app-lifecycle--scheduled-jobs)
 - [Compatibility](#compatibility)
 - [Known limitations](#known-limitations)
 - [Data-migration patches](#data-migration-patches)
+- [Versioning & releases](#versioning--releases)
+- [Continuous integration](#continuous-integration)
 - [Installation](#installation)
 - [Contributing](#contributing)
 - [License](#license)
@@ -310,17 +313,50 @@ All endpoints scope by company / farm / department / designation / employee. The
 
 ---
 
+## 6. upande_scp integration
+
+`upande_ta` owns the biometric pieces the **upande_scp** store-keeper transfer
+flow depends on, so `upande_scp` only needs `upande_ta`, `upande_core`, ERPNext,
+and Frappe.
+
+- **Biometric Logs** (already present) — read read-only for the live finger-scan
+  match (`employee`, `employee_name`, `biometric_id`, `time`, `log_type`).
+- **Stock Entry Type `require_biometric`** (Check) — enabling it on a Stock
+  Entry Type makes entries of that type show the Biometric Verification section.
+- **Stock Entry "Biometric Verification" section** — a set of custom fields
+  **created programmatically** on install/migrate and removed on uninstall (see
+  `overrides/stock_entry.py`), **not** shipped as fixtures. The section shows
+  only when `requires_biometric` is set:
+
+  | Field | Type | Purpose |
+  |---|---|---|
+  | `requires_biometric` | Check (read-only) | fetched from the Stock Entry Type's `require_biometric`; gates the section |
+  | `bio_employee` | Link → Employee | Employee (Receiving) |
+  | `bio_employee_name` | Data (fetch) | from `bio_employee` |
+  | `department` | Link → Department (fetch) | from `bio_employee` |
+  | `biometric_status` | Select | Pending / Verified / Failed |
+  | `biometric_verified_at` | Datetime | stamped on a successful match |
+  | `matched_biometric_log` | Link → Biometric Logs | the row that matched |
+
+The verification UI lives in `public/js/stock_entry.js` (wired via `doctype_js`,
+like `employee.js`): a **Check Biometric Log** button matches the latest
+Biometric Logs scan for `bio_employee` within a 1-minute window, flips
+`biometric_status` to Verified/Failed with a styled badge, auto-submits on
+success, and soft-blocks submit (escalation warning) when unverified.
+
+---
+
 ## App lifecycle & scheduled jobs
 
 **`after_install`** — desktop icon, TA Dashboard block, Leave Type abbreviation
-field, SCP Stock Entry custom fields.
+field, Biometric Verification Stock Entry fields.
 
 **`after_migrate`** (in order) — sanitize link filters, resync scheduled jobs,
-desktop icon, dashboard block, abbreviation field, SCP Stock Entry custom
-fields, `cleanup.remove_orphans`, `ensure_overtime_setup`.
+desktop icon, dashboard block, abbreviation field, Biometric Verification Stock
+Entry fields, `cleanup.remove_orphans`, `ensure_overtime_setup`.
 
-**`before_uninstall`** — remove the Leave Type abbreviation field and the SCP
-Stock Entry custom fields.
+**`before_uninstall`** — remove the Leave Type abbreviation field and the
+Biometric Verification Stock Entry fields.
 
 **`cleanup.remove_orphans`** deletes standard records (Reports, Pages, Print
 Formats, Notifications, Dashboards/Charts/Number Cards, Custom HTML Blocks,
@@ -455,27 +491,6 @@ Optional:
 - **Baseline tag** — with no existing tag, the first release is **`v1.0.0`**. To
   keep the current `0.x` line instead, create a baseline tag once:
   `git tag v0.0.1 && git push origin v0.0.1`.
-
-## upande_scp integration
-
-`upande_ta` owns the biometric/employee-assignment DocTypes the **upande_scp**
-store-keeper transfer flow depends on, so `upande_scp` only needs `upande_ta`,
-`upande_core`, ERPNext, and Frappe.
-
-- **Biometric Logs** (already present) — SCP reads it read-only for live
-  finger-scan verification (`employee`, `employee_name`, `biometric_id`, `time`,
-  `log_type`).
-- **Employee Request** (child table) — used as `Stock Entry.employee_data`
-  (transfer employee assignment): `employee`, `employee_name`.
-- **Biometric Data** (child table) — used as `Stock Entry.biometric_data`
-  (written on biometric-authorized submit): `employee`, `employee_name`,
-  `biometric_id`.
-
-The three Stock Entry custom fields — `employee_data`
-(Table → Employee Request), `biometric_data` (Table → Biometric Data),
-and `biometric_verified` (Check) — are **created programmatically** on
-install/migrate and removed on uninstall (see
-`overrides/stock_entry.py`), **not** shipped as fixtures.
 
 ## Continuous integration
 

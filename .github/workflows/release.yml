@@ -28,7 +28,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
+
+      - name: Setup dependencies
+        run: |
+          npm install @semantic-release/git @semantic-release/exec --no-save
 
       - name: Create Release
         env:
@@ -38,9 +42,4 @@ jobs:
           GIT_AUTHOR_EMAIL: "info@upande.com"
           GIT_COMMITTER_NAME: "Upande Release Bot"
           GIT_COMMITTER_EMAIL: "info@upande.com"
-        run: >
-          npx --yes
-          -p semantic-release
-          -p @semantic-release/git
-          -p @semantic-release/exec
-          semantic-release
+        run: npx semantic-release

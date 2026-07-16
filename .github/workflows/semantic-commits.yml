@@ -1,5 +1,10 @@
 name: Semantic Commits
 
+# Lints EVERY commit title in the PR as a Conventional Commit, exactly like
+# ERPNext's semantic-commits.yml. semantic-release reads these commit messages
+# on `main` to compute the next version, so each commit must be conventional
+# (fix:, feat:, chore:, ...). Prefer rebase-merging the PR to preserve them.
+
 on:
   pull_request: {}
 
@@ -21,14 +26,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           check-latest: true
 
       - name: Check commit titles
-        run: >
-          npx --yes
-          -p @commitlint/cli
-          -p @commitlint/config-conventional
-          commitlint --verbose
-          --from ${{ github.event.pull_request.base.sha }}
-          --to ${{ github.event.pull_request.head.sha }}
+        run: |
+          npm install @commitlint/cli @commitlint/config-conventional
+          npx commitlint --verbose --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }}

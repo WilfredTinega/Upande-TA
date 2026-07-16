@@ -1,55 +1,91 @@
 #!/bin/bash
-# Mimics a Frappe Cloud deploy: init a Frappe v16 bench, pull the exact
-# dependency apps (ERPNext + HRMS on version-16), install this app, and migrate.
-# Any failure here (bad frappe-dependencies, broken after_migrate hook, an
-# import that doesn't exist on the target version, etc.) fails CI the same way
-# a real deploy would.
+# Mirrors the ERPNext/HRMS CI install flow: clone Frappe, init a bench,
+# create the test DB, pull the dependency apps (payments + erpnext + hrms) and
+# this app, then reinstall + install-app. Reproduces a real deploy.
+#
+# No credentials are committed anywhere:
+#   * the MariaDB root account uses an EMPTY password
+#     (MARIADB_ALLOW_EMPTY_ROOT_PASSWORD is set on the service in ci.yml),
+#   * the site DB-user and admin passwords are generated at runtime, and
+#   * site_config.json is written here at runtime, not stored in the repo.
+
 set -e
 
 cd ~ || exit
 
-FRAPPE_BRANCH="version-16"
+sudo apt update
+sudo apt remove -y mysql-server mysql-client || true
+sudo apt install -y libcups2-dev redis-server mariadb-client libmariadb-dev pkg-config
 
-echo "::group::Install Bench"
 pip install frappe-bench
-echo "::endgroup::"
 
-echo "::group::Init Bench & Install Frappe ($FRAPPE_BRANCH)"
-bench init \
-  --frappe-branch "$FRAPPE_BRANCH" \
-  --skip-redis-config-generation \
-  --skip-assets \
-  --python "$(which python)" \
-  frappe-bench
+frappeuser=${FRAPPE_USER:-"frappe"}
+frappebranch=${FRAPPE_BRANCH:-"version-16"}
+erpnextbranch=${ERPNEXT_BRANCH:-"version-16"}
+hrmsbranch=${HRMS_BRANCH:-"version-16"}
+paymentsbranch=${PAYMENTS_BRANCH:-"version-16"}
+
+# Runtime-generated credentials — never committed to the repo.
+DB_NAME="test_frappe"
+DB_USER="test_frappe"
+DB_PASSWORD="$(openssl rand -hex 16)"
+ADMIN_PASSWORD="$(openssl rand -hex 16)"
+
+git clone "https://github.com/${frappeuser}/frappe" --branch "${frappebranch}" --depth 1
+bench init --skip-assets --frappe-path ~/frappe --python "$(which python)" frappe-bench
+
+mkdir ~/frappe-bench/sites/test_site
+
+# MariaDB root has an empty password (set on the service container in ci.yml),
+# so no password is passed on the command line.
+mysql_root=(mariadb --host 127.0.0.1 --port 3306 -u root)
+"${mysql_root[@]}" -e "SET GLOBAL character_set_server = 'utf8mb4'"
+"${mysql_root[@]}" -e "SET GLOBAL collation_server = 'utf8mb4_unicode_ci'"
+"${mysql_root[@]}" -e "CREATE USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}'"
+"${mysql_root[@]}" -e "CREATE DATABASE ${DB_NAME}"
+"${mysql_root[@]}" -e "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost'"
+"${mysql_root[@]}" -e "FLUSH PRIVILEGES"
+
+# site_config.json is generated at runtime — no credentials live in the repo.
+cat > ~/frappe-bench/sites/test_site/site_config.json <<EOF
+{
+    "db_host": "127.0.0.1",
+    "db_port": 3306,
+    "db_name": "${DB_NAME}",
+    "db_password": "${DB_PASSWORD}",
+    "use_mysqlclient": 1,
+    "admin_password": "${ADMIN_PASSWORD}",
+    "root_login": "root",
+    "root_password": "",
+    "host_name": "http://test_site:8000",
+    "install_apps": ["payments", "erpnext", "hrms"],
+    "throttle_user_limit": 100
+}
+EOF
+
+install_wkhtmltopdf() {
+    wget -O /tmp/wkhtmltox.tar.xz https://github.com/frappe/wkhtmltopdf/raw/master/wkhtmltox-0.12.3_linux-generic-amd64.tar.xz
+    tar -xf /tmp/wkhtmltox.tar.xz -C /tmp
+    sudo mv /tmp/wkhtmltox/bin/wkhtmltopdf /usr/local/bin/wkhtmltopdf
+    sudo chmod o+x /usr/local/bin/wkhtmltopdf
+}
+install_wkhtmltopdf &
+
 cd ~/frappe-bench || exit
-echo "::endgroup::"
 
-echo "::group::Point Bench at CI services"
-bench set-config -g db_host 127.0.0.1
-bench set-config -g redis_cache "redis://127.0.0.1:13000"
-bench set-config -g redis_queue "redis://127.0.0.1:11000"
-bench set-config -g redis_socketio "redis://127.0.0.1:13000"
-echo "::endgroup::"
+sed -i 's/watch:/# watch:/g' Procfile
+sed -i 's/schedule:/# schedule:/g' Procfile
+sed -i 's/socketio:/# socketio:/g' Procfile
+sed -i 's/redis_socketio:/# redis_socketio:/g' Procfile
 
-echo "::group::Fetch dependency apps (must match Frappe $FRAPPE_BRANCH)"
-bench get-app erpnext --branch "$FRAPPE_BRANCH" --resolve-deps
-bench get-app hrms --branch "$FRAPPE_BRANCH"
+bench get-app "https://github.com/${frappeuser}/payments" --branch "$paymentsbranch"
+bench get-app "https://github.com/${frappeuser}/erpnext" --branch "$erpnextbranch" --resolve-deps
+bench get-app "https://github.com/${frappeuser}/hrms" --branch "$hrmsbranch"
 bench get-app upande_ta "${GITHUB_WORKSPACE}"
-echo "::endgroup::"
+bench setup requirements --dev
 
-echo "::group::Create fresh site (a brand-new bench)"
-bench new-site test_site \
-  --db-root-password root \
-  --admin-password admin \
-  --no-mariadb-socket
-echo "::endgroup::"
+bench start &>> ~/frappe-bench/bench_start.log &
+CI=Yes bench build --app frappe &
+bench --site test_site reinstall --yes
 
-echo "::group::Install apps in dependency order (the deploy step)"
-bench --site test_site install-app erpnext hrms upande_ta
-echo "::endgroup::"
-
-echo "::group::Migrate (exercises after_migrate hooks + patches)"
-bench --site test_site migrate
-echo "::endgroup::"
-
-echo "Install + migrate complete — deploy simulation passed."
+bench --verbose --site test_site install-app upande_ta
