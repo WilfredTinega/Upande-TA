@@ -1,7 +1,6 @@
 {
  "actions": [],
  "allow_import": 1,
- "allow_rename": 1,
  "autoname": "naming_series:",
  "creation": "2026-04-14 00:00:00",
  "doctype": "DocType",
@@ -9,10 +8,6 @@
  "engine": "InnoDB",
  "field_order": [
   "naming_series",
-  "column_break_wgqy",
-  "bulk_overtime_title",
-  "section_control",
-  "purpose",
   "company",
   "shift_approver",
   "column_break_control_1",
@@ -40,20 +35,6 @@
    "options": "HR-BOT-.YYYY.-",
    "reqd": 1,
    "set_only_once": 1
-  },
-  {
-   "fieldname": "section_control",
-   "fieldtype": "Section Break",
-   "label": "Control"
-  },
-  {
-   "default": "Request",
-   "fieldname": "purpose",
-   "fieldtype": "Select",
-   "in_standard_filter": 1,
-   "label": "Purpose",
-   "options": "\nRequest\nApproval\nVerification",
-   "reqd": 1
   },
   {
    "fieldname": "company",
@@ -93,12 +74,6 @@
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "grade",
-   "fieldtype": "Link",
-   "label": "Grade",
-   "options": "Employee Grade"
-  },
-  {
    "fieldname": "number_of_employees",
    "fieldtype": "Int",
    "label": "Number of Employees",
@@ -123,8 +98,14 @@
    "fieldname": "reason_for_overtime",
    "fieldtype": "Small Text",
    "label": "Reason for Overtime",
-   "mandatory_depends_on": "eval:doc.purpose === 'Request'",
    "reqd": 1
+  },
+  {
+   "description": "Set once to fill Hours Requested for fetched employees in request stage.",
+   "fieldname": "default_requested_hours",
+   "fieldtype": "Float",
+   "label": "Default Requested Hours",
+   "precision": "1"
   },
   {
    "fieldname": "section_entries",
@@ -158,7 +139,7 @@
    "read_only": 1
   },
   {
-   "fieldname": "column_break_wgqy",
+   "fieldname": "column_break_fbuf",
    "fieldtype": "Column Break"
   },
   {
@@ -231,11 +212,10 @@
   }
  ],
  "row_format": "Dynamic",
- "search_fields": "company,department,from_date,to_date,purpose",
- "show_title_field_in_link": 1,
+ "search_fields": "company,department,from_date,to_date",
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
- "title_field": "bulk_overtime_title",
+ "title_field": "department",
  "track_changes": 1
 }

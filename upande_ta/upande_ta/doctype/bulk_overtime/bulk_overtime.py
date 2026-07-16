@@ -81,6 +81,10 @@ class BulkOvertime(Document):
 					  "July", "August", "September", "October", "November", "December"]
 			self.bulk_overtime_title = "%s %s" % (months[dt.month - 1], dt.year)
 
+		for row in self.bulk_overtime_entries:
+			if row.overtime_date and not row.overtime_type:
+				row.overtime_type = self.get_overtime_type(row.employee, row.overtime_date)
+
 	def on_submit(self):
 		# Re-validate biometric rows against attendance across the whole period so the
 		# figures are current at submission; manual rows are left exactly as entered.
@@ -95,15 +99,11 @@ class BulkOvertime(Document):
 	def fill_employee_details(self):
 		self.bulk_overtime_entries = []
 
-		filters = {"company": self.company, "status": "Active"}
+		filters = {"status": "Active"}
 		if self.department:
 			filters["department"] = self.department
-		if self.get("branch"):
-			filters["branch"] = self.branch
 		if self.get("designation"):
 			filters["designation"] = self.designation
-		if self.get("grade"):
-			filters["grade"] = self.grade
 
 		employees = frappe.get_all(
 			"Employee",
@@ -116,23 +116,25 @@ class BulkOvertime(Document):
 			frappe.msgprint("No active employees found for the selected filters.")
 			return
 
-		emp_ids = [e.name for e in employees]
-		hours_map = self.get_overtime_hours(emp_ids)
+		# Rebuild the child table without auto-filling overtime dates
+		self.set("bulk_overtime_entries", [])
 
 		for emp in employees:
-			ot = hours_map.get(emp.name, {"normal": 0, "holiday": 0})
-			if ot["normal"] > 0 or ot["holiday"] > 0:
-				self.append("bulk_overtime_entries", {
+			self.append(
+				"bulk_overtime_entries",
+				{
 					"employee": emp.name,
 					"employee_name": emp.employee_name,
 					"department": emp.department,
-					"normal_hours": ot["normal"],
-					"holiday_hours": ot["holiday"],
+					"overtime_date": None,
+					"overtime_type": None,
+					"hours_requested": self.default_requested_hours or 0,
+					"hours_done": 0,
 					"row_status": "Pending",
-					"verification_type": "Biometric",
-				})
+				},
+			)
 
-		self.number_of_employees = len(self.bulk_overtime_entries)
+		self.number_of_employees = len(employees)
 
 	def revalidate_biometric_hours(self):
 		"""Recompute Normal/Holiday hours from attendance for Biometric rows only."""
@@ -212,20 +214,52 @@ class BulkOvertime(Document):
 			# hours are overtime at the holiday rate; otherwise only hours beyond shift.
 			is_rest_day = row.is_holiday or row.is_leave
 
-			if emp not in result:
-				result[emp] = {"normal": 0, "holiday": 0}
+			result[(emp, date_key)] = round(ot, 2)
 
 			if is_rest_day:
 				result[emp]["holiday"] = result[emp]["holiday"] + wh
 			else:
 				result[emp]["normal"] = result[emp]["normal"] + max(wh - shift_hrs, 0)
 
-		return {
-			emp: {
-				"normal": round(vals["normal"], 2),
-				"holiday": round(vals["holiday"], 2),
+	@frappe.whitelist()
+	def sync_attendance_data(self):
+		"""Refresh hours_done on every child row from Attendance records."""
+		entries = self.bulk_overtime_entries or []
+		if not entries:
+			frappe.msgprint("No overtime entries to sync. Please fetch employees first.")
+			return {
+				"updated_rows": []
 			}
-			for emp, vals in result.items()
+
+		emp_ids = list({row.employee for row in entries if row.employee})
+		hours_map = self.get_overtime_hours(emp_ids)
+
+		synced = 0
+		updated_rows = []
+		for idx, row in enumerate(entries):
+			if not row.employee or not row.overtime_date:
+				continue
+
+			date_key = str(getdate(row.overtime_date))
+			hours = flt(hours_map.get((row.employee, date_key), 0), 1)
+			row.hours_done = hours
+
+			# Auto-correct overtime type based on the date
+			row.overtime_type = self.get_overtime_type(row.employee, row.overtime_date)
+			synced += 1
+			updated_rows.append({
+				"idx": idx,
+				"hours_done": row.hours_done,
+				"overtime_type": row.overtime_type,
+			})
+
+		frappe.msgprint(
+			"%s entries synced with Attendance data." % synced,
+			indicator="green",
+		)
+
+		return {
+			"updated_rows": updated_rows
 		}
 
 	def create_overtime_slips(self):
@@ -244,6 +278,9 @@ class BulkOvertime(Document):
 			holiday_hours = flt(row.holiday_hours)
 			if normal_hours <= 0 and holiday_hours <= 0:
 				continue
+
+			if not row.overtime_type:
+				row.overtime_type = "Normal Overtime"
 
 			ssa = frappe.db.get_value(
 				"Salary Structure Assignment",
