@@ -1,6 +1,7 @@
 # This action:
 #   1. Generates release notes using the GitHub API.
-#   2. Strips housekeeping commits (chore/ci/test/docs/style) from the notes.
+#   2. Strips housekeeping commits (chore/ci/test/docs/style) and "by @mergify"
+#      attribution from the notes.
 #   3. Updates the release body with the cleaned notes.
 #
 # Runs automatically when a release is published, or on demand via
@@ -35,7 +36,8 @@ jobs:
           NEW_NOTES=$(gh api --method POST -H "Accept: application/vnd.github+json" \
             /repos/$REPO/releases/generate-notes -f tag_name="$RELEASE_TAG" \
             | jq -r '.body' \
-            | sed -E '/^\* (chore|ci|test|docs|style)/d')
+            | sed -E '/^\* (chore|ci|test|docs|style)/d' \
+            | sed -E 's/by @mergify //')
           RELEASE_ID=$(gh api -H "Accept: application/vnd.github+json" \
             /repos/$REPO/releases/tags/$RELEASE_TAG | jq -r '.id')
           gh api --method PATCH -H "Accept: application/vnd.github+json" \

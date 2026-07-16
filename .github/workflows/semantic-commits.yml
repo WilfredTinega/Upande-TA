@@ -1,13 +1,12 @@
-name: Semantic PR Title
+name: Semantic Commits
 
-# Lints the PULL REQUEST TITLE (not each commit) as a Conventional Commit.
-# Squash-merge the PR so its title becomes the commit on `main` that
-# semantic-release reads to compute the next version. Individual dev commits
-# on the branch can have any message.
+# Lints EVERY commit title in the PR as a Conventional Commit, exactly like
+# ERPNext's semantic-commits.yml. semantic-release reads these commit messages
+# on `main` to compute the next version, so each commit must be conventional
+# (fix:, feat:, chore:, ...). Prefer rebase-merging the PR to preserve them.
 
 on:
-  pull_request:
-    types: [opened, edited, reopened, synchronize]
+  pull_request: {}
 
 permissions:
   contents: read
@@ -18,22 +17,19 @@ concurrency:
 
 jobs:
   commitlint:
-    name: Check PR Title
+    name: Check Commit Titles
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 200
 
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           check-latest: true
 
-      - name: Check PR title is a Conventional Commit
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: >
-          echo "$PR_TITLE" |
-          npx --yes
-          -p @commitlint/cli
-          -p @commitlint/config-conventional
-          commitlint --verbose
+      - name: Check commit titles
+        run: |
+          npm install @commitlint/cli @commitlint/config-conventional
+          npx commitlint --verbose --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }}

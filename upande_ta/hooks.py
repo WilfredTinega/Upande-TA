@@ -7,8 +7,13 @@ app_description = "Upande Time and Attendance"
 app_email = "info@upande.com"
 app_license = "mit"
 
+required_apps = ["hrms"]
 
-doctype_js = {"Employee": "public/js/employee.js"}
+
+doctype_js = {
+	"Employee": "public/js/employee.js",
+	"Stock Entry": "public/js/stock_entry.js",
+}
 
 
 before_request = [
@@ -30,12 +35,12 @@ after_install = [
 	"upande_ta.install.ensure_desktop_icon",
 	"upande_ta.install.ensure_ta_dashboard_block",
 	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
-	"upande_ta.upande_ta.overrides.stock_entry.ensure_scp_stock_entry_fields",
+	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
 ]
 
 before_uninstall = [
 	"upande_ta.upande_ta.overrides.leave_type.remove_abbreviation_field",
-	"upande_ta.upande_ta.overrides.stock_entry.remove_scp_stock_entry_fields",
+	"upande_ta.upande_ta.overrides.stock_entry.remove_biometric_stock_entry_fields",
 ]
 
 
@@ -45,7 +50,7 @@ after_migrate = [
 	"upande_ta.install.ensure_desktop_icon",
 	"upande_ta.install.ensure_ta_dashboard_block",
 	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
-	"upande_ta.upande_ta.overrides.stock_entry.ensure_scp_stock_entry_fields",
+	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
 	"upande_ta.upande_ta.cleanup.remove_orphans",
 	"upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime.ensure_overtime_setup",
 ]
