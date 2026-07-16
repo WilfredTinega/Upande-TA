@@ -4,11 +4,11 @@ authors = [
     { name = "Upande LTD", email = "info@upande.com"}
 ]
 description = "Upande Time and Attendance"
-requires-python = ">=3.14"
+requires-python = ">=3.10"
 readme = "README.md"
 dynamic = ["version"]
 dependencies = [
-    # "frappe~=16.0.0" # Installed and managed by bench.
+    # "frappe~=16.0.0"
 ]
 
 [build-system]
@@ -21,7 +21,7 @@ build-backend = "flit_core.buildapi"
 
 [tool.ruff]
 line-length = 110
-target-version = "py314"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = [
