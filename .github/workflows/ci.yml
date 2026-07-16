@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "**.css"
+      - "**.svg"
+      - "**.png"
+      - "**.ico"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-upande_ta-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-sim:
+    name: Install + Migrate (Frappe v16 · ERPNext · HRMS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+      redis-cache:
+        image: redis:alpine
+        ports:
+          - 13000:6379
+
+      redis-queue:
+        image: redis:alpine
+        ports:
+          - 11000:6379
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check Python compiles & no merge conflicts
+        run: |
+          python -m compileall -q "${GITHUB_WORKSPACE}/upande_ta"
+          if grep -lr --exclude-dir=node_modules "^<<<<<<< " "${GITHUB_WORKSPACE}/upande_ta"; then
+            echo "Found merge conflict markers"; exit 1
+          fi
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcups2-dev mariadb-client
+
+      - name: Install & Migrate (deploy simulation)
+        run: bash ${GITHUB_WORKSPACE}/.github/helper/install.sh
+
+      - name: Run app tests
+        working-directory: /home/runner/frappe-bench
+        run: bench --site test_site run-tests --app upande_ta

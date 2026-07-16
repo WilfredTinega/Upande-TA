@@ -30,10 +30,12 @@ after_install = [
 	"upande_ta.install.ensure_desktop_icon",
 	"upande_ta.install.ensure_ta_dashboard_block",
 	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
+	"upande_ta.upande_ta.overrides.stock_entry.ensure_scp_stock_entry_fields",
 ]
 
 before_uninstall = [
 	"upande_ta.upande_ta.overrides.leave_type.remove_abbreviation_field",
+	"upande_ta.upande_ta.overrides.stock_entry.remove_scp_stock_entry_fields",
 ]
 
 
@@ -43,6 +45,7 @@ after_migrate = [
 	"upande_ta.install.ensure_desktop_icon",
 	"upande_ta.install.ensure_ta_dashboard_block",
 	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
+	"upande_ta.upande_ta.overrides.stock_entry.ensure_scp_stock_entry_fields",
 	"upande_ta.upande_ta.cleanup.remove_orphans",
 	"upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime.ensure_overtime_setup",
 ]

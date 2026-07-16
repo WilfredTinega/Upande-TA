@@ -313,13 +313,14 @@ All endpoints scope by company / farm / department / designation / employee. The
 ## App lifecycle & scheduled jobs
 
 **`after_install`** — desktop icon, TA Dashboard block, Leave Type abbreviation
-field.
+field, SCP Stock Entry custom fields.
 
 **`after_migrate`** (in order) — sanitize link filters, resync scheduled jobs,
-desktop icon, dashboard block, abbreviation field, `cleanup.remove_orphans`,
-`ensure_overtime_setup`.
+desktop icon, dashboard block, abbreviation field, SCP Stock Entry custom
+fields, `cleanup.remove_orphans`, `ensure_overtime_setup`.
 
-**`before_uninstall`** — remove the Leave Type abbreviation field.
+**`before_uninstall`** — remove the Leave Type abbreviation field and the SCP
+Stock Entry custom fields.
 
 **`cleanup.remove_orphans`** deletes standard records (Reports, Pages, Print
 Formats, Notifications, Dashboards/Charts/Number Cards, Custom HTML Blocks,
@@ -454,6 +455,44 @@ Optional:
 - **Baseline tag** — with no existing tag, the first release is **`v1.0.0`**. To
   keep the current `0.x` line instead, create a baseline tag once:
   `git tag v0.0.1 && git push origin v0.0.1`.
+
+## upande_scp integration
+
+`upande_ta` owns the biometric/employee-assignment DocTypes the **upande_scp**
+store-keeper transfer flow depends on, so `upande_scp` only needs `upande_ta`,
+`upande_core`, ERPNext, and Frappe.
+
+- **Biometric Logs** (already present) — SCP reads it read-only for live
+  finger-scan verification (`employee`, `employee_name`, `biometric_id`, `time`,
+  `log_type`).
+- **Employee Request** (child table) — used as `Stock Entry.employee_data`
+  (transfer employee assignment): `employee`, `employee_name`.
+- **Biometric Data** (child table) — used as `Stock Entry.biometric_data`
+  (written on biometric-authorized submit): `employee`, `employee_name`,
+  `biometric_id`.
+
+The three Stock Entry custom fields — `employee_data`
+(Table → Employee Request), `biometric_data` (Table → Biometric Data),
+and `biometric_verified` (Check) — are **created programmatically** on
+install/migrate and removed on uninstall (see
+`overrides/stock_entry.py`), **not** shipped as fixtures.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs a **deploy simulation** on every PR and every
+push to `main`, driven by `.github/helper/install.sh`. It reproduces what
+Frappe Cloud does on a new bench:
+
+1. Init a **Frappe `version-16`** bench.
+2. `get-app` **ERPNext** + **HRMS** (`version-16`) and this app.
+3. `new-site`, then `install-app erpnext hrms upande_ta`.
+4. `bench migrate` — exercises the `after_migrate` hooks and patches.
+5. `bench run-tests --app upande_ta`.
+
+If the app can't install/migrate on v16 (bad `frappe-dependencies`, a broken
+`after_migrate` hook, an import that doesn't exist on the target version, etc.)
+CI fails **before** it ever reaches Frappe Cloud — the same class of failures
+this repo hit manually.
 
 ## Installation
 
