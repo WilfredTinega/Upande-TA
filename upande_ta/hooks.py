@@ -7,6 +7,11 @@ app_description = "Upande Time and Attendance"
 app_email = "info@upande.com"
 app_license = "mit"
 
+# Shown in the About dialog's app list and the navbar (Frappe reads this hook
+# per app; without it the app falls back to a generic letter tile). Same Upande
+# logo used by the launcher Desktop Icon (see install.ensure_desktop_icon).
+app_logo_url = "/assets/upande_ta/images/upande_logo.ico"
+
 required_apps = ["hrms"]
 
 
