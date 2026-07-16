@@ -19,6 +19,12 @@ build-backend = "flit_core.buildapi"
 [tool.bench.dev-dependencies]
 # package_name = "~=1.1.0"
 
+# Frappe Cloud requires a bounded, comma-separated (no space) semver range,
+# declared the same way ERPNext declares it. v16 only: this app overrides
+# HRMS "Overtime Slip", which does not exist in v15.
+[tool.bench.frappe-dependencies]
+frappe = ">=16.0.0,<17.0.0"
+
 [tool.ruff]
 line-length = 110
 target-version = "py310"
