@@ -77,6 +77,12 @@ doc_events = {
 		"validate": "upande_ta.upande_ta.overrides.workspace.validate",
 		"on_trash": "upande_ta.upande_ta.overrides.workspace.on_trash",
 	},
+	"Stock Entry": {
+		"validate": "upande_ta.upande_ta.overrides.stock_entry.auto_verify_biometric",
+	},
+	"Biometric Logs": {
+		"after_insert": "upande_ta.upande_ta.overrides.stock_entry.verify_pending_stock_entries",
+	},
 }
 
 scheduler_events = {
