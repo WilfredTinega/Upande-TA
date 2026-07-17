@@ -49,6 +49,7 @@
   "section_break_biodata",
   "biometric_templates",
   "server_settings_tab",
+  "settings_section",
   "server_ip",
   "server_port",
   "end_point",
@@ -69,9 +70,18 @@
   "r_department",
   "column_break_zqrl",
   "r_designation",
-  "r_employee"
+  "r_employee",
+  "biometric_verificationse_column",
+  "stock_verification_window_minutes"
  ],
  "fields": [
+  {
+   "default": "1",
+   "fieldname": "stock_verification_window_minutes",
+   "fieldtype": "Int",
+   "label": "Verification Window (Minutes)",
+   "non_negative": 1
+  },
   {
    "fieldname": "server_settings_tab",
    "fieldtype": "Tab Break",
@@ -423,13 +433,24 @@
    "fieldtype": "Select",
    "label": "To",
    "options": "\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "settings_section",
+   "fieldtype": "Section Break",
+   "label": "Settings"
+  },
+  {
+   "fieldname": "biometric_verificationse_column",
+   "fieldtype": "Column Break",
+   "label": "Biometric Verification(SE)"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-15 18:42:11.445750",
+ "modified": "2026-07-17 09:49:49.471181",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

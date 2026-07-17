@@ -19,6 +19,7 @@ it reads ``Biometric Logs`` (also owned by this app) for the latest live scan.
 """
 
 import frappe
+from frappe import _
 
 
 MODULE = "Upande TA"
@@ -117,7 +118,8 @@ def _field_spec():
 				"label": "Verified At",
 				"fieldtype": "Datetime",
 				"read_only": 1,
-				"depends_on": depends,
+				# Only shown once actually verified (i.e. it holds a value).
+				"depends_on": "eval:doc.requires_biometric && doc.biometric_verified_at",
 				"insert_after": "biometric_status",
 				"module": MODULE,
 			},
@@ -127,7 +129,8 @@ def _field_spec():
 				"fieldtype": "Link",
 				"options": "Biometric Logs",
 				"read_only": 1,
-				"depends_on": depends,
+				# Only shown once a log has been matched (i.e. it holds a value).
+				"depends_on": "eval:doc.requires_biometric && doc.matched_biometric_log",
 				"insert_after": "biometric_verified_at",
 				"module": MODULE,
 			},
@@ -169,3 +172,194 @@ def remove_biometric_stock_entry_fields():
 			"Custom Field", filters={"dt": doctype, "module": MODULE}, pluck="name"
 		):
 			frappe.delete_doc("Custom Field", name, ignore_permissions=True, force=True)
+
+
+# ── Automatic biometric verification ─────────────────────────────────────────
+# No button: verification happens on its own from either direction, as long as
+# the employee's scan and the Stock Entry save land within the verification
+# window of each other.
+#   • Stock Entry ``validate``  → look BACK for a fresh scan (scan-then-save).
+#   • Biometric Logs ``after_insert`` → look FORWARD for a just-saved draft
+#     awaiting this employee (save-then-scan).
+# The window is configurable on Biometric Setting → Stock Verification tab
+# (``stock_verification_window_minutes``); falls back to 1 minute.
+
+DEFAULT_VERIFY_WINDOW_MINUTES = 1
+
+
+def _verify_window_minutes():
+	"""Verification window (minutes) from Biometric Setting, min 1."""
+	try:
+		value = frappe.db.get_single_value(
+			"Biometric Setting", "stock_verification_window_minutes"
+		)
+	except Exception:
+		value = None
+	return int(value) if value and int(value) > 0 else DEFAULT_VERIFY_WINDOW_MINUTES
+
+
+def _recent_log_for(employee):
+	"""Latest Biometric Log for ``employee`` if it scanned within the window."""
+	rows = frappe.get_all(
+		"Biometric Logs",
+		filters={"employee": employee},
+		fields=["name", "time"],
+		order_by="time desc",
+		limit=1,
+	)
+	if not rows:
+		return None
+	cutoff = frappe.utils.add_to_date(
+		frappe.utils.now_datetime(), minutes=-_verify_window_minutes()
+	)
+	if frappe.utils.get_datetime(rows[0].time) >= cutoff:
+		return rows[0]
+	return None
+
+
+def auto_verify_biometric(doc, method=None):
+	"""Stock Entry ``validate``: verify against the latest fresh scan, no button.
+
+	Silently leaves the status Pending when there is no recent scan — the
+	Biometric Logs ``after_insert`` hook completes it if the scan arrives shortly
+	after the save.
+	"""
+	if not getattr(doc, "requires_biometric", 0):
+		return
+
+	# A brand-new entry always lands as Pending — verification comes afterwards
+	# (a live scan, a re-save, or the manual "Check Biometric Log" button), so
+	# the store-keeper sees the status after the first save rather than having
+	# it silently verify on creation.
+	if doc.is_new():
+		if not doc.biometric_status:
+			doc.biometric_status = "Pending"
+		return
+
+	if not doc.bio_employee:
+		return
+	if doc.biometric_status == "Verified":
+		return
+
+	log = _recent_log_for(doc.bio_employee)
+	if not log:
+		return
+
+	doc.biometric_status = "Verified"
+	doc.biometric_verified_at = frappe.utils.now_datetime()
+	doc.matched_biometric_log = log.name
+
+
+def verify_pending_stock_entries(doc, method=None):
+	"""Biometric Logs ``after_insert``: verify AND submit any recently-saved
+	draft Stock Entry that is still awaiting this employee's biometric
+	verification.
+
+	Only drafts touched within the window are considered, so a fresh scan can't
+	resurrect a stale/abandoned draft. Runs the full verify → submit flow
+	server-side, so it works even when no one has the form open.
+	"""
+	if not doc.employee:
+		return
+
+	cutoff = frappe.utils.add_to_date(
+		frappe.utils.now_datetime(), minutes=-_verify_window_minutes()
+	)
+	pending = frappe.get_all(
+		"Stock Entry",
+		filters={
+			"docstatus": 0,
+			"requires_biometric": 1,
+			"bio_employee": doc.employee,
+			"biometric_status": ["!=", "Verified"],
+			"modified": [">=", cutoff],
+		},
+		pluck="name",
+	)
+	if not pending:
+		return
+
+	verified_at = frappe.utils.now_datetime()
+	for name in pending:
+		try:
+			se = frappe.get_doc("Stock Entry", name)
+			se.biometric_status = "Verified"
+			se.biometric_verified_at = verified_at
+			se.matched_biometric_log = doc.name
+			se.flags.ignore_permissions = True
+			se.save()
+			# Auto-submit now that it is verified. notify_update() from submit()
+			# refreshes any open form to the submitted state.
+			se.submit()
+		except Exception:
+			frappe.log_error(
+				title="Biometric auto-submit failed",
+				message=f"Stock Entry {name} for scan {doc.name}:\n{frappe.get_traceback()}",
+			)
+
+
+@frappe.whitelist()
+def check_biometric_log(stock_entry):
+	"""Manual fallback for the automatic verification.
+
+	Re-checks the latest scan for the receiving employee and, if it is within
+	the configured window, verifies and submits the entry — the same outcome as
+	the automatic path, on demand. Returns a small status dict the client uses
+	to message the store-keeper.
+	"""
+	se = frappe.get_doc("Stock Entry", stock_entry)
+
+	if not se.get("requires_biometric"):
+		return {"status": "not_required"}
+	if not se.bio_employee:
+		frappe.throw(_("Please select the Employee (Receiving) first."))
+
+	employee_label = se.bio_employee_name or se.bio_employee
+
+	# Already done (e.g. the save that preceded this click auto-verified it).
+	if se.biometric_status == "Verified":
+		return {"status": "verified", "employee": employee_label, "submitted": se.docstatus == 1}
+
+	rows = frappe.get_all(
+		"Biometric Logs",
+		filters={"employee": se.bio_employee},
+		fields=["name", "employee_name", "time"],
+		order_by="time desc",
+		limit=1,
+	)
+	if not rows:
+		return {"status": "no_log", "employee": employee_label}
+
+	log = rows[0]
+	window = _verify_window_minutes()
+	diff_seconds = frappe.utils.time_diff_in_seconds(
+		frappe.utils.now_datetime(), frappe.utils.get_datetime(log.time)
+	)
+
+	if diff_seconds > window * 60:
+		return {
+			"status": "too_old",
+			"employee": employee_label,
+			"log": log.name,
+			"time": str(log.time),
+			"minutes": round(diff_seconds / 60),
+			"window": window,
+		}
+
+	se.biometric_status = "Verified"
+	se.biometric_verified_at = frappe.utils.now_datetime()
+	se.matched_biometric_log = log.name
+	se.flags.ignore_permissions = True
+	se.save()
+	submitted = False
+	if se.docstatus == 0:
+		se.submit()
+		submitted = True
+
+	return {
+		"status": "verified",
+		"employee": log.employee_name or employee_label,
+		"seconds": round(diff_seconds),
+		"log": log.name,
+		"submitted": submitted,
+	}
