@@ -72,7 +72,8 @@
   "r_designation",
   "r_employee",
   "biometric_verificationse_column",
-  "stock_verification_window_minutes"
+  "stock_verification_window_minutes",
+  "enable_automatic_submission_on_stock_entry"
  ],
  "fields": [
   {
@@ -444,13 +445,19 @@
    "fieldname": "biometric_verificationse_column",
    "fieldtype": "Column Break",
    "label": "Biometric Verification(SE)"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_automatic_submission_on_stock_entry",
+   "fieldtype": "Check",
+   "label": "Enable Automatic Submission on Stock Entry"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-17 09:49:49.471181",
+ "modified": "2026-07-17 10:59:37.435981",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

@@ -82,6 +82,7 @@ doc_events = {
 	},
 	"Biometric Logs": {
 		"after_insert": "upande_ta.upande_ta.overrides.stock_entry.verify_pending_stock_entries",
+		"on_update": "upande_ta.upande_ta.overrides.stock_entry.verify_pending_stock_entries",
 	},
 }
 
