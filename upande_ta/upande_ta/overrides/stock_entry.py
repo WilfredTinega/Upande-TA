@@ -251,13 +251,15 @@ def auto_verify_biometric(doc, method=None):
 
 
 def verify_pending_stock_entries(doc, method=None):
-	"""Biometric Logs ``after_insert``: verify AND submit any recently-saved
+	"""Biometric Logs ``after_insert`` / ``on_update``: VERIFY any recently-saved
 	draft Stock Entry that is still awaiting this employee's biometric
-	verification.
+	verification. Never submits — submission is always confirmed by a human via
+	the modal on the open form (auto-shown when automatic submission is enabled,
+	or on button click otherwise).
 
 	Only drafts touched within the window are considered, so a fresh scan can't
-	resurrect a stale/abandoned draft. Runs the full verify → submit flow
-	server-side, so it works even when no one has the form open.
+	resurrect a stale/abandoned draft. ``notify_update()`` pushes the Verified
+	state to any open form so it can raise that modal.
 	"""
 	if not doc.employee:
 		return
@@ -288,24 +290,32 @@ def verify_pending_stock_entries(doc, method=None):
 			se.matched_biometric_log = doc.name
 			se.flags.ignore_permissions = True
 			se.save()
-			# Auto-submit now that it is verified. notify_update() from submit()
-			# refreshes any open form to the submitted state.
-			se.submit()
+			se.notify_update()
+			# Explicitly nudge any open form for this entry to reload (and then
+			# raise the submit modal). notify_update alone does not reliably
+			# refresh an already-open form.
+			frappe.publish_realtime(
+				"biometric_stock_entry_verified",
+				{"stock_entry": name},
+				doctype="Stock Entry",
+				docname=name,
+				after_commit=True,
+			)
 		except Exception:
 			frappe.log_error(
-				title="Biometric auto-submit failed",
+				title="Biometric verification failed",
 				message=f"Stock Entry {name} for scan {doc.name}:\n{frappe.get_traceback()}",
 			)
 
 
 @frappe.whitelist()
 def check_biometric_log(stock_entry):
-	"""Manual fallback for the automatic verification.
+	"""Manual verification trigger for the "Check Biometric Log" button.
 
 	Re-checks the latest scan for the receiving employee and, if it is within
-	the configured window, verifies and submits the entry — the same outcome as
-	the automatic path, on demand. Returns a small status dict the client uses
-	to message the store-keeper.
+	the configured window, marks the entry Verified (draft — it does NOT submit;
+	the client raises the Yes/No submit modal after a ``verified`` result).
+	Returns a small status dict the client uses to message the store-keeper.
 	"""
 	se = frappe.get_doc("Stock Entry", stock_entry)
 
@@ -318,7 +328,7 @@ def check_biometric_log(stock_entry):
 
 	# Already done (e.g. the save that preceded this click auto-verified it).
 	if se.biometric_status == "Verified":
-		return {"status": "verified", "employee": employee_label, "submitted": se.docstatus == 1}
+		return {"status": "verified", "employee": employee_label}
 
 	rows = frappe.get_all(
 		"Biometric Logs",
@@ -351,15 +361,25 @@ def check_biometric_log(stock_entry):
 	se.matched_biometric_log = log.name
 	se.flags.ignore_permissions = True
 	se.save()
-	submitted = False
-	if se.docstatus == 0:
-		se.submit()
-		submitted = True
 
 	return {
 		"status": "verified",
 		"employee": log.employee_name or employee_label,
 		"seconds": round(diff_seconds),
 		"log": log.name,
-		"submitted": submitted,
 	}
+
+
+@frappe.whitelist()
+def revert_biometric(stock_entry):
+	"""Send a verified draft back to Pending (declined submission), so no
+	"verified draft" limbo lingers. Uses ``db_set`` so it does NOT re-run
+	``validate`` (which would immediately re-verify from the still-fresh scan).
+	"""
+	se = frappe.get_doc("Stock Entry", stock_entry)
+	if se.docstatus != 0:
+		return
+	se.db_set("biometric_status", "Pending", update_modified=False)
+	se.db_set("biometric_verified_at", None, update_modified=False)
+	se.db_set("matched_biometric_log", None, update_modified=False)
+	se.notify_update()
