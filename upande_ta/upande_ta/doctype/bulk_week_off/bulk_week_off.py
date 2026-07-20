@@ -26,10 +26,10 @@ def create_linked_holiday_list_assignment(
     Returns the new (forward) Holiday List Assignment name, or None on failure
     (which is logged, not raised — a missing HLA must not fail the transfer).
     """
-    from hrms.hr.doctype.holiday_list_assignment.holiday_list_assignment import (
+    from upande_ta.upande_ta.doctype.holiday_list_assignment.holiday_list_assignment import (
         DuplicateAssignment,
     )
-    from hrms.utils.holiday_list import get_assigned_holiday_list
+    from upande_ta.upande_ta.holiday_list import get_assigned_holiday_list
 
     if not (employee and new_holiday_list):
         return None
@@ -95,6 +95,21 @@ def create_linked_holiday_list_assignment(
 
 
 class BulkWeekOff(Document):
+
+    @property
+    def holiday_list_start(self):
+        # Week Off Start tracks the Scheduled Transfer Date: the new week off
+        # takes effect from the transfer date, so the assignment starts there —
+        # not from the holiday list's own from_date.
+        return self.from_date
+
+    @property
+    def holiday_list_end(self):
+        return (
+            frappe.get_value("Holiday List", self.holiday_list, "to_date")
+            if self.holiday_list
+            else None
+        )
 
     def validate(self):
         if not self.employees:

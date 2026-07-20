@@ -23,11 +23,13 @@ doctype_js = {
 
 before_request = [
 	"upande_ta.upande_ta.overrides.monthly_attendance_sheet.apply_patch",
+	"upande_ta.upande_ta.overrides.shift_type.apply_patch",
 ]
 
 
 before_job = [
 	"upande_ta.upande_ta.overrides.monthly_attendance_sheet.apply_patch",
+	"upande_ta.upande_ta.overrides.shift_type.apply_patch",
 ]
 
 

@@ -377,6 +377,18 @@ class BulkOvertime(Document):
 def ensure_overtime_setup():
 	"""Idempotently create the custom fields and Overtime Types that link
 	Bulk Overtime -> Overtime Slip -> Additional Salary."""
+	# The overtime feature depends on hrms doctypes (Overtime Details / Slip /
+	# Type) that are absent on this bench — their sources were lost alongside the
+	# Holiday List Assignment backport. Skip setup instead of failing the whole
+	# migrate; this becomes a no-op until those doctypes are restored.
+	required_doctypes = ("Overtime Details", "Overtime Slip", "Overtime Type")
+	missing = [dt for dt in required_doctypes if not frappe.db.exists("DocType", dt)]
+	if missing:
+		frappe.logger().info(
+			"ensure_overtime_setup skipped; missing hrms doctypes: %s" % ", ".join(missing)
+		)
+		return
+
 	create_custom_fields(
 		{
 			"Overtime Details": [

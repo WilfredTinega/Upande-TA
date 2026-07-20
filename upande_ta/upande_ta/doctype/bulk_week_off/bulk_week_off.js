@@ -54,11 +54,15 @@ frappe.ui.form.on("Bulk Week Off", {
             frappe.db.get_value("Holiday List", frm.doc.holiday_list, ["from_date", "to_date"])
                 .then(function (r) {
                     if (r && r.message) {
-                        frm.set_value("holiday_list_start", r.message.from_date);
-                        frm.set_value("holiday_list_end", r.message.to_date);
+                        // Default the transfer date to the list start only when
+                        // unset; Week Off Start then follows the transfer date.
                         if (!frm.doc.from_date) {
                             frm.set_value("from_date", r.message.from_date);
                         }
+                        // Week Off End = the holiday list's end.
+                        frm.set_value("holiday_list_end", r.message.to_date);
+                        // Week Off Start = the (dynamic) transfer date.
+                        frm.set_value("holiday_list_start", frm.doc.from_date);
                     }
                 });
         } else {
@@ -72,6 +76,11 @@ frappe.ui.form.on("Bulk Week Off", {
             });
         }
         if (frm._fetch_employees_debounced) frm._fetch_employees_debounced();
+    },
+
+    from_date: function (frm) {
+        // Keep Week Off Start in sync with the Scheduled Transfer Date.
+        frm.set_value("holiday_list_start", frm.doc.from_date || "");
     },
 
     fetch_employees: function (frm) {

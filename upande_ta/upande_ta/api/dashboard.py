@@ -373,7 +373,9 @@ def get_ta_dashboard_checkins(date=None, company=None, farm=None,
 		shift_vals = [s.shift for s in emp_scans if s.get("shift")]
 		result_rows.append({
 			"employee": emp,
-			"employee_number": meta.get("attendance_device_id") or "",
+			# Fall back to the Employee id (the PK-code) when no biometric device
+			# PIN is set, so the "Employee #" column is never blank.
+			"employee_number": meta.get("attendance_device_id") or emp,
 			"employee_name": meta.get("employee_name") or emp,
 			"shift": max(shift_vals) if shift_vals else "",
 			"designation": meta.get("designation") or "",
@@ -432,7 +434,7 @@ def get_ta_dashboard_checkins(date=None, company=None, farm=None,
 	def _meta_row(m, status, leave_type=""):
 		return {
 			"employee": m["name"],
-			"employee_number": m.get("attendance_device_id") or "",
+			"employee_number": m.get("attendance_device_id") or m["name"],
 			"employee_name": m.get("employee_name") or m["name"],
 			"shift": leave_type or m.get("default_shift") or "",
 			"designation": m.get("designation") or "",

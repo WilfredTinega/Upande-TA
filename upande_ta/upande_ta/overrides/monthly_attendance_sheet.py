@@ -4,8 +4,12 @@ import re
 
 import frappe
 from frappe import _
-from frappe.utils import getdate
+from frappe.utils import cstr, getdate
 
+from upande_ta.upande_ta.holiday_list import (
+	fill_holiday_list_date_gaps,
+	get_assigned_holiday_lists_to_employee_and_company,
+)
 from upande_ta.upande_ta.overrides.leave_type import LEAVE_TYPE_ABBR_FIELD
 
 _DAY_RE = re.compile(r"^\d{2}-\d{2}-\d{4}$")
@@ -390,27 +394,184 @@ _hrms_execute = None
 _patched = False
 
 
+def get_date_range_from_filters(filters):
+	"""(start_date, end_date) as date objects for the report period.
+
+	Backfilled onto the hrms report module because v15 lacks it — the existing
+	shift resolver (build_shift_resolver) already calls
+	``_hrms.get_date_range_from_filters`` and would otherwise raise.
+	"""
+	filters = frappe._dict(filters or {})
+	if filters.get("filter_based_on") == "Month":
+		total_days = _hrms.get_total_days_in_month(filters)
+		start_date = getdate(f"{cstr(filters.year)}-{cstr(filters.month)}-01")
+		end_date = getdate(f"{cstr(filters.year)}-{cstr(filters.month)}-{total_days}")
+		return start_date, end_date
+	return getdate(filters.start_date), getdate(filters.end_date)
+
+
+def get_employee_holiday_map(employee_details, filters):
+	"""{employee: [holiday rows]} resolved per-date from Holiday List Assignments.
+
+	For any date not covered by an assignment we fall back to the company's
+	assignment and finally to the employee's static ``Employee.holiday_list``
+	(current v15 behaviour). So employees who never had a Bulk Week Off — hence
+	no assignments — render exactly as before, and those who did get the correct
+	*historical* week off per date instead of the latest one applied backwards.
+	"""
+	if not employee_details:
+		return {}
+
+	start_date, end_date = get_date_range_from_filters(filters)
+
+	employees = list(employee_details.keys())
+	companies = list({d.company for d in employee_details.values() if d.get("company")})
+
+	assigned = get_assigned_holiday_lists_to_employee_and_company(
+		employees + companies, start_date, end_date
+	)
+
+	company_default = {}
+
+	def default_for(company):
+		if company not in company_default:
+			company_default[company] = (
+				frappe.get_cached_value("Company", company, "default_holiday_list")
+				if company
+				else None
+			)
+		return company_default[company]
+
+	employee_hl_ranges = {}
+	for employee, details in employee_details.items():
+		employee_ranges = assigned.get(employee, [])
+		company_ranges = assigned.get(details.get("company"), [])
+		ranges = fill_holiday_list_date_gaps(employee_ranges, company_ranges, start_date, end_date)
+
+		static_hl = details.get("holiday_list") or default_for(details.get("company"))
+		if static_hl:
+			ranges = fill_holiday_list_date_gaps(
+				ranges,
+				[{"holiday_list": static_hl, "from_date": start_date, "to_date": end_date}],
+				start_date,
+				end_date,
+			)
+		if ranges:
+			employee_hl_ranges[employee] = ranges
+
+	if not employee_hl_ranges:
+		return {}
+
+	used_hl_names = {r["holiday_list"] for ranges in employee_hl_ranges.values() for r in ranges}
+
+	Holiday = frappe.qb.DocType("Holiday")
+	holiday_rows = (
+		frappe.qb.from_(Holiday)
+		.select(Holiday.parent, Holiday.holiday_date, Holiday.weekly_off)
+		.where(Holiday.parent.isin(list(used_hl_names)))
+		.where(Holiday.holiday_date.between(start_date, end_date))
+	).run(as_dict=True)
+
+	hl_holidays = {}
+	for h in holiday_rows:
+		hl_holidays.setdefault(h.parent, []).append(h)
+
+	employee_holiday_map = {}
+	for employee, ranges in employee_hl_ranges.items():
+		holidays = [
+			h
+			for r in ranges
+			for h in hl_holidays.get(r["holiday_list"], [])
+			if r["from_date"] <= getdate(h.holiday_date) <= r["to_date"]
+		]
+		if holidays:
+			employee_holiday_map[employee] = holidays
+
+	return employee_holiday_map
+
+
+def get_rows(employee_details, filters, holiday_map, attendance_map):
+	"""Drop-in for the hrms report's get_rows that resolves each employee's
+	holidays per-date (via Holiday List Assignments) instead of from the single
+	static ``Employee.holiday_list``. ``holiday_map`` (the old per-list map built
+	by the core report) is ignored on purpose.
+	"""
+	employee_holiday_map = get_employee_holiday_map(employee_details, filters)
+	records = []
+
+	for employee, details in employee_details.items():
+		holidays = employee_holiday_map.get(employee, [])
+
+		if filters.summarized_view:
+			attendance = _hrms.get_attendance_status_for_summarized_view(
+				employee, filters, holidays, details.joined_in_current_period, details.joined_date
+			)
+			if not attendance:
+				continue
+
+			leave_summary = _hrms.get_leave_summary(employee, filters)
+			entry_exits_summary = _hrms.get_entry_exits_summary(employee, filters)
+
+			row = {"employee": employee, "employee_name": details.employee_name}
+			_hrms.set_defaults_for_summarized_view(filters, row)
+			row.update(attendance)
+			row.update(leave_summary)
+			row.update(entry_exits_summary)
+
+			records.append(row)
+		else:
+			employee_attendance = attendance_map.get(employee)
+			if not employee_attendance:
+				continue
+
+			attendance_for_employee = _hrms.get_attendance_status_for_detailed_view(
+				employee, filters, employee_attendance, holidays
+			)
+			for record in attendance_for_employee:
+				record.update({"employee": employee, "employee_name": details.employee_name})
+
+			records.extend(attendance_for_employee)
+
+	return records
+
+
 def apply_patch(*args, **kwargs):
 	global _hrms, _hrms_execute, _patched
 
-	from hrms.hr.report.monthly_attendance_sheet import monthly_attendance_sheet as mod
+	# Runs on before_request AND before_job (before every background job, payroll
+	# included). It must NEVER raise — a failure would abort the job. Degrade to a
+	# logged no-op; the report simply keeps hrms' default behaviour if this fails.
+	try:
+		from hrms.hr.report.monthly_attendance_sheet import monthly_attendance_sheet as mod
 
-	_hrms = mod
+		_hrms = mod
 
-	if not getattr(getattr(mod, "execute", None), "_upande_ta_patched", False):
-		mod._upande_ta_original_execute = mod.execute
-	_hrms_execute = getattr(mod, "_upande_ta_original_execute", None)
+		if not getattr(getattr(mod, "execute", None), "_upande_ta_patched", False):
+			mod._upande_ta_original_execute = mod.execute
+		_hrms_execute = getattr(mod, "_upande_ta_original_execute", None)
 
-	if _patched and getattr(mod.execute, "_upande_ta_patched", False):
-		return
+		if _patched and getattr(mod.execute, "_upande_ta_patched", False):
+			return
 
-	mod.get_attendance_records = get_attendance_records
-	mod.get_attendance_map = get_attendance_map
-	mod.get_attendance_status_for_detailed_view = get_attendance_status_for_detailed_view
-	mod.get_chart_data = get_chart_data
-	mod.get_message = get_message
-	mod.execute = execute
-	_patched = True
+		mod.get_attendance_records = get_attendance_records
+		mod.get_attendance_map = get_attendance_map
+		mod.get_attendance_status_for_detailed_view = get_attendance_status_for_detailed_view
+		mod.get_chart_data = get_chart_data
+		mod.get_message = get_message
+		# Date-effective holiday resolution: get_rows now pulls each employee's
+		# holidays per-date from Holiday List Assignments (with static fallback), and
+		# get_date_range_from_filters is backfilled for the existing shift resolver.
+		if not hasattr(mod, "get_date_range_from_filters"):
+			mod.get_date_range_from_filters = get_date_range_from_filters
+		mod.get_employee_holiday_map = get_employee_holiday_map
+		mod.get_rows = get_rows
+		mod.execute = execute
+		_patched = True
+	except Exception:
+		frappe.log_error(
+			title="upande_ta monthly_attendance_sheet.apply_patch failed (patch skipped)",
+			message=frappe.get_traceback(),
+		)
 
 
 def disable_prepared_report():
