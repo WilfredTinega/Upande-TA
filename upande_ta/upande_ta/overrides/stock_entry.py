@@ -404,6 +404,12 @@ def material_request_employee_query(doctype, txt, searchfield, start, page_lengt
 	"""
 	filters = frappe.parse_json(filters) if isinstance(filters, str) else (filters or {})
 	material_request = filters.get("material_request")
+	if material_request and not frappe.has_permission("Material Request", "read", material_request):
+		# Caller can't read this Material Request -- degrade gracefully to the
+		# same unrestricted Employee search used when there's no Material
+		# Request context at all, rather than leaking which employees are
+		# tied to a Material Request the user isn't allowed to see.
+		material_request = None
 	offset = cint(start) or 0
 	limit = cint(page_length) or 20
 	txt_lower = (txt or "").lower()
@@ -412,14 +418,17 @@ def material_request_employee_query(doctype, txt, searchfield, start, page_lengt
 		# list(...): frappe.get_all(..., as_list=True) returns a tuple of tuples
 		# on this Frappe version -- normalize to the documented list[tuple] return
 		# type (also what the standard Link-field query contract expects).
+		# No status filter here: before this feature existed, bio_employee had
+		# no custom query at all -- Frappe's generic, fully unrestricted link
+		# search. This fallback must match that exactly, including Suspended/
+		# Inactive/Left employees.
 		return list(
 			frappe.get_all(
 				"Employee",
-				filters={"status": "Active"},
 				or_filters={"name": ["like", f"%{txt}%"], "employee_name": ["like", f"%{txt}%"]},
 				fields=["name", "employee_name"],
 				limit_start=offset,
-				limit_page_length=limit,
+				limit=limit,
 				as_list=True,
 			)
 		)

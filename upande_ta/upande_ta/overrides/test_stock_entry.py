@@ -69,6 +69,16 @@ class IntegrationTestMaterialRequestEmployeeQuery(IntegrationTestCase):
 		self.assertIsInstance(results, list)
 		self.assertGreater(len(results), 0)
 
+	def test_fallback_does_not_filter_by_status(self):
+		non_active = frappe.get_all("Employee", filters={"status": ["!=", "Active"]}, limit=1, pluck="name")
+		if not non_active:
+			self.skipTest("No non-Active Employee record on this site to verify the status filter is gone.")
+		results = material_request_employee_query(
+			"Employee", "", "name", 0, 1000, {"material_request": ""}
+		)
+		names = [r[0] for r in results]
+		self.assertIn(non_active[0], names)
+
 	def test_honors_pagination_offset(self):
 		employees = frappe.get_all("Employee", filters={"status": "Active"}, limit=3, pluck="name")
 		if len(employees) < 3:
