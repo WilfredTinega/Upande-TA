@@ -25,6 +25,17 @@ frappe.ui.form.on("Stock Entry", {
 	},
 
 	refresh(frm) {
+		if (frm.is_new() && frm.doc.stock_entry_type) {
+			// Documents mapped from another doctype (e.g. Material Request's
+			// "Create" button) set stock_entry_type directly on the payload,
+			// bypassing the field's own change/fetch_from trigger -- so
+			// requires_biometric (fetch_from: stock_entry_type.require_biometric)
+			// stays stale on a freshly-mapped draft until something re-fires that
+			// trigger (e.g. manually re-selecting the Stock Entry Type). Fetch it
+			// explicitly so the Biometric Verification section shows up immediately.
+			sync_requires_biometric_for_new_doc(frm);
+		}
+
 		if (!frm.doc.requires_biometric) return;
 
 		if (frm.is_new()) {
@@ -93,6 +104,22 @@ frappe.ui.form.on("Stock Entry", {
 		);
 	},
 });
+
+// See the refresh() call site above for why this is needed.
+function sync_requires_biometric_for_new_doc(frm) {
+	frappe.db
+		.get_value("Stock Entry Type", frm.doc.stock_entry_type, "require_biometric")
+		.then((r) => {
+			const value = Number((r && r.message && r.message.require_biometric) || 0);
+			if (!value) return;
+			if (Number(frm.doc.requires_biometric) !== value) {
+				frm.set_value("requires_biometric", value);
+			}
+			if (frm.doc.biometric_status !== "Pending") {
+				frm.set_value("biometric_status", "Pending");
+			}
+		});
+}
 
 // "Verified" is only real once it is recorded (biometric_verified_at set);
 // a bare biometric_status === "Verified" with no timestamp is stale/unsaved.
