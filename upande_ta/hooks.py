@@ -60,6 +60,7 @@ after_migrate = [
 	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
 	"upande_ta.upande_ta.cleanup.remove_orphans",
 	"upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime.ensure_overtime_setup",
+	"upande_ta.upande_ta.overrides.leave_application.ensure_rejected_by_field",
 ]
 
 override_doctype_class = {
@@ -86,6 +87,14 @@ doc_events = {
 		"after_insert": "upande_ta.upande_ta.overrides.stock_entry.verify_pending_stock_entries",
 		"on_update": "upande_ta.upande_ta.overrides.stock_entry.verify_pending_stock_entries",
 	},
+	"Leave Application": {
+		"before_submit": "upande_ta.upande_ta.overrides.leave_application.capture_rejecter",
+		"on_update_after_submit": "upande_ta.upande_ta.overrides.leave_application.capture_rejecter",
+		"before_cancel": "upande_ta.upande_ta.overrides.leave_application.enforce_cancel_by_rejecter",
+		# only at creation of the amended doc -- NOT on every later save, or it
+		# would block the next approver from acting on the amended application.
+		"before_insert": "upande_ta.upande_ta.overrides.leave_application.enforce_amend_by_rejecter",
+	},
 }
 
 scheduler_events = {
@@ -95,6 +104,9 @@ scheduler_events = {
 		],
 		"* * * * *": [
 			"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.mark_stale_devices_offline_scheduled"
+		],
+		"*/5 * * * *": [
+			"upande_ta.upande_ta.attendance_cleanup.cancel_absent_attendance_with_checkin"
 		],
 	},
 }
