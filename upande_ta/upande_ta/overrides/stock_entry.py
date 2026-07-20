@@ -404,6 +404,7 @@ def material_request_employee_query(doctype, txt, searchfield, start, page_lengt
 	"""
 	filters = frappe.parse_json(filters) if isinstance(filters, str) else (filters or {})
 	material_request = filters.get("material_request")
+	offset = cint(start) or 0
 	limit = cint(page_length) or 20
 	txt_lower = (txt or "").lower()
 
@@ -417,7 +418,8 @@ def material_request_employee_query(doctype, txt, searchfield, start, page_lengt
 				filters={"status": "Active"},
 				or_filters={"name": ["like", f"%{txt}%"], "employee_name": ["like", f"%{txt}%"]},
 				fields=["name", "employee_name"],
-				limit=limit,
+				limit_start=offset,
+				limit_page_length=limit,
 				as_list=True,
 			)
 		)
@@ -433,4 +435,4 @@ def material_request_employee_query(doctype, txt, searchfield, start, page_lengt
 		if not row.issued_via_stock_entry
 		and (txt_lower in (row.employee or "").lower() or txt_lower in (row.employee_name or "").lower())
 	]
-	return results[:limit]
+	return results[offset : offset + limit]

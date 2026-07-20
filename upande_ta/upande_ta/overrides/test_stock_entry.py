@@ -68,3 +68,14 @@ class IntegrationTestMaterialRequestEmployeeQuery(IntegrationTestCase):
 		results = material_request_employee_query("Employee", "", "name", 0, 20, {"material_request": ""})
 		self.assertIsInstance(results, list)
 		self.assertGreater(len(results), 0)
+
+	def test_honors_pagination_offset(self):
+		employees = frappe.get_all("Employee", filters={"status": "Active"}, limit=3, pluck="name")
+		if len(employees) < 3:
+			self.skipTest("Need at least 3 Active Employee records on this site.")
+		mr = _make_material_request_with_employees([(e, None) for e in employees])
+		page1 = material_request_employee_query("Employee", "", "name", 0, 2, {"material_request": mr.name})
+		page2 = material_request_employee_query("Employee", "", "name", 2, 2, {"material_request": mr.name})
+		self.assertEqual(len(page1), 2)
+		self.assertGreaterEqual(len(page2), 1)
+		self.assertEqual(set(r[0] for r in page1) & set(r[0] for r in page2), set())
