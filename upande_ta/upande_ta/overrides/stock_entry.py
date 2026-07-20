@@ -20,6 +20,7 @@ it reads ``Biometric Logs`` (also owned by this app) for the latest live scan.
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 
 MODULE = "Upande TA"
@@ -383,3 +384,53 @@ def revert_biometric(stock_entry):
 	se.db_set("biometric_verified_at", None, update_modified=False)
 	se.db_set("matched_biometric_log", None, update_modified=False)
 	se.notify_update()
+
+
+@frappe.whitelist()
+def material_request_employee_query(doctype, txt, searchfield, start, page_length, filters):
+	"""Link query for Stock Entry's bio_employee field.
+
+	filters["material_request"] is resolved client-side (see stock_entry.js)
+	from the current form's item rows -- not re-derived server-side from a
+	saved Stock Entry, so this works for unsaved drafts too. Scoped to that
+	Material Request's Employee Data rows that haven't been issued via
+	another Stock Entry yet (Employee Request.issued_via_stock_entry empty).
+	Falls back to a plain Employee search when there's no Material Request
+	context, matching bio_employee's existing unrestricted behavior -- also
+	used when the Employee Request doctype doesn't exist at all (this app is
+	installed on other sites that don't have upande_stores, where
+	material_request can still be set on a Stock Entry Detail row for
+	reasons unrelated to this feature).
+	"""
+	filters = frappe.parse_json(filters) if isinstance(filters, str) else (filters or {})
+	material_request = filters.get("material_request")
+	limit = cint(page_length) or 20
+	txt_lower = (txt or "").lower()
+
+	if not material_request or not frappe.db.table_exists("Employee Request"):
+		# list(...): frappe.get_all(..., as_list=True) returns a tuple of tuples
+		# on this Frappe version -- normalize to the documented list[tuple] return
+		# type (also what the standard Link-field query contract expects).
+		return list(
+			frappe.get_all(
+				"Employee",
+				filters={"status": "Active"},
+				or_filters={"name": ["like", f"%{txt}%"], "employee_name": ["like", f"%{txt}%"]},
+				fields=["name", "employee_name"],
+				limit=limit,
+				as_list=True,
+			)
+		)
+
+	rows = frappe.get_all(
+		"Employee Request",
+		filters={"parent": material_request, "parenttype": "Material Request"},
+		fields=["employee", "employee_name", "issued_via_stock_entry"],
+	)
+	results = [
+		(row.employee, row.employee_name)
+		for row in rows
+		if not row.issued_via_stock_entry
+		and (txt_lower in (row.employee or "").lower() or txt_lower in (row.employee_name or "").lower())
+	]
+	return results[:limit]

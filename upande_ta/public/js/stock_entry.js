@@ -13,6 +13,17 @@
 // Clicking Yes submits; No leaves it as a verified draft.
 
 frappe.ui.form.on("Stock Entry", {
+	setup(frm) {
+		frm.set_query("bio_employee", () => {
+			const material_request = (frm.doc.items || []).find((row) => row.material_request)
+				?.material_request;
+			return {
+				query: "upande_ta.upande_ta.overrides.stock_entry.material_request_employee_query",
+				filters: { material_request: material_request || "" },
+			};
+		});
+	},
+
 	refresh(frm) {
 		if (!frm.doc.requires_biometric) return;
 
