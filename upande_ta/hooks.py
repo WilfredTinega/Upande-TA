@@ -61,6 +61,10 @@ after_migrate = [
 	"upande_ta.upande_ta.cleanup.remove_orphans",
 	"upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime.ensure_overtime_setup",
 	"upande_ta.upande_ta.overrides.leave_application.ensure_rejected_by_field",
+	# HRMS ships Monthly Attendance Sheet with prepared_report=1, which re-enables
+	# the background/cached "click Rebuild" mode on every migrate. Force it back off
+	# so the report always renders live (our override does the heavy lifting anyway).
+	"upande_ta.upande_ta.overrides.monthly_attendance_sheet.disable_prepared_report",
 ]
 
 override_doctype_class = {

@@ -510,6 +510,65 @@ def _default_payroll_range():
 	return _month_day(py, pm, 23), _month_day(today.year, today.month, 22)
 
 
+def _weekly_off_dates(employee, company, static_hl, start, end):
+	"""Set of 'YYYY-MM-DD' weekly-off dates for ``employee`` in [start, end],
+	resolved *per date* from Holiday List Assignments — so a change of week off
+	(e.g. Sundays -> Tuesdays mid-range) shows the historical off day for earlier
+	dates and the new one going forward, instead of applying the current list to
+	the whole range. Falls back to the company's assignment and finally the static
+	``Employee.holiday_list`` (current behaviour) for any date not covered, so
+	employees who never had a Bulk Week Off are unchanged. Mirrors the Monthly
+	Attendance Sheet override's get_employee_holiday_map."""
+	from upande_ta.upande_ta.holiday_list import (
+		fill_holiday_list_date_gaps,
+		get_assigned_holiday_lists_to_employee_and_company,
+	)
+
+	assigned = get_assigned_holiday_lists_to_employee_and_company(
+		[employee] + ([company] if company else []), start, end
+	)
+	ranges = fill_holiday_list_date_gaps(
+		assigned.get(employee, []),
+		assigned.get(company, []) if company else [],
+		start,
+		end,
+	)
+
+	fallback_hl = static_hl or (
+		frappe.get_cached_value("Company", company, "default_holiday_list")
+		if company
+		else None
+	)
+	if fallback_hl:
+		ranges = fill_holiday_list_date_gaps(
+			ranges,
+			[{"holiday_list": fallback_hl, "from_date": start, "to_date": end}],
+			start,
+			end,
+		)
+
+	wo = set()
+	if not ranges:
+		return wo
+
+	used = tuple({r["holiday_list"] for r in ranges})
+	by_list = {}
+	for h in frappe.db.sql(
+		"SELECT parent, holiday_date FROM `tabHoliday` "
+		"WHERE parent IN %(l)s AND weekly_off = 1 "
+		"AND holiday_date BETWEEN %(s)s AND %(t)s",
+		{"l": used, "s": start, "t": end}, as_dict=True,
+	):
+		by_list.setdefault(h["parent"], []).append(getdate(h["holiday_date"]))
+
+	for r in ranges:
+		for hd in by_list.get(r["holiday_list"], []):
+			if r["from_date"] <= hd <= r["to_date"]:
+				wo.add(str(hd))
+
+	return wo
+
+
 @frappe.whitelist()
 def get_ta_dashboard_employee_grid(employee, from_date=None, to_date=None):
 	"""Per-day attendance grid for one employee over a date range (defaults to the
@@ -517,7 +576,7 @@ def get_ta_dashboard_employee_grid(employee, from_date=None, to_date=None):
 	emp = frappe.db.get_value(
 		"Employee", employee,
 		["name", "employee_name", "attendance_device_id", "designation",
-		 "default_shift", "holiday_list"],
+		 "default_shift", "holiday_list", "company"],
 		as_dict=True,
 	)
 	if not emp:
@@ -559,15 +618,7 @@ def get_ta_dashboard_employee_grid(employee, from_date=None, to_date=None):
 			code = ""
 		att[str(r["attendance_date"])] = code
 
-	wo = set()
-	if emp.holiday_list:
-		for r in frappe.db.sql(
-			"SELECT holiday_date FROM `tabHoliday` "
-			"WHERE parent = %(p)s AND weekly_off = 1 "
-			"AND holiday_date BETWEEN %(s)s AND %(t)s",
-			{"p": emp.holiday_list, "s": start, "t": end}, as_dict=True,
-		):
-			wo.add(str(r["holiday_date"]))
+	wo = _weekly_off_dates(emp.name, emp.company, emp.holiday_list, start, end)
 
 	codes = []
 	counts = {"present": 0, "absent": 0, "weekly_off": 0, "leave": 0, "wfh": 0}

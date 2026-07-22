@@ -96,13 +96,18 @@ def build_shift_resolver(employees, filters):
 			ShiftAssignment.end_date,
 		)
 		.where(
+			# NOT filtered on status == "Active": an assignment goes "Inactive" the
+			# moment it is superseded, but its date range is still the authoritative
+			# shift for those *historical* dates. Filtering to Active-only dropped the
+			# old shift, so days before a mid-period shift change resolved to "" and
+			# rendered as a mystery blank-Shift row. docstatus == 1 still excludes
+			# cancelled assignments.
 			(ShiftAssignment.docstatus == 1)
-			& (ShiftAssignment.status == "Active")
 			& (ShiftAssignment.employee.isin(employees))
 			& (ShiftAssignment.start_date <= end_date)
 			& (ShiftAssignment.end_date.isnull() | (ShiftAssignment.end_date >= start_date))
 		)
-		.orderby(ShiftAssignment.start_date)
+		.orderby(ShiftAssignment.start_date, order=frappe.qb.desc)
 	).run(as_dict=1)
 
 	assignments = {}
@@ -119,6 +124,9 @@ def build_shift_resolver(employees, filters):
 	)
 
 	def resolve(employee, attendance_date):
+		# assignments are ordered by start_date DESC, so the first one whose range
+		# contains the day is the most recently effective — this wins when an older
+		# assignment was left open-ended (end_date NULL) and overlaps a newer one.
 		day = getdate(attendance_date)
 		for a in assignments.get(employee, []):
 			if a.start_date and getdate(a.start_date) > day:
@@ -155,31 +163,44 @@ def get_attendance_map(filters):
 
 
 def get_attendance_status_for_detailed_view(employee, filters, employee_attendance, holidays):
+	"""One row per employee for the whole period, even when they alternated shifts.
+
+	The attendance map buckets an employee's days by resolved shift; here we collapse
+	those buckets into a single per-date status map (each date resolves to exactly one
+	shift, so the merge never collides) and render it as a SINGLE row. The Shift column
+	is labelled with the shift the employee worked the most days in over the period,
+	ties broken by shift name for determinism.
+	"""
 	total_days = _hrms.get_dates_in_period(filters)
-	attendance_values = []
 
 	shift_attendance = employee_attendance or {"": {}}
 
-	for shift, status_dict in shift_attendance.items():
-		row = {"shift": shift}
-		for d in total_days:
-			d = getdate(d)
-			status = status_dict.get(d)
+	merged = {}
+	for status_dict in shift_attendance.values():
+		merged.update(status_dict)
 
-			if status is None and holidays:
-				status = _hrms.get_holiday_status(d, holidays)
+	label_shift = max(
+		shift_attendance.items(),
+		key=lambda item: (len(item[1]), item[0] or ""),
+	)[0]
 
-			if status and status.startswith("On Leave" + _LEAVE_SEP):
-				leave_type = status.split(_LEAVE_SEP, 1)[1]
-				abbr = get_leave_abbr(leave_type)
-			else:
-				abbr = _hrms.status_map.get(status, "")
+	row = {"shift": label_shift}
+	for d in total_days:
+		d = getdate(d)
+		status = merged.get(d)
 
-			row[d.strftime("%d-%m-%Y")] = abbr
+		if status is None and holidays:
+			status = _hrms.get_holiday_status(d, holidays)
 
-		attendance_values.append(row)
+		if status and status.startswith("On Leave" + _LEAVE_SEP):
+			leave_type = status.split(_LEAVE_SEP, 1)[1]
+			abbr = get_leave_abbr(leave_type)
+		else:
+			abbr = _hrms.status_map.get(status, "")
 
-	return attendance_values
+		row[d.strftime("%d-%m-%Y")] = abbr
+
+	return [row]
 
 
 def get_chart_data(attendance_map, filters):
@@ -575,6 +596,22 @@ def apply_patch(*args, **kwargs):
 
 
 def disable_prepared_report():
-	if frappe.db.exists("Report", "Monthly Attendance Sheet"):
+	"""Force ``prepared_report`` off on the Monthly Attendance Sheet.
+
+	Wired into ``after_migrate``: HRMS syncs this Report from its JSON with
+	``prepared_report = 1`` on every migrate, which brings back the cached
+	"generated N minutes ago — click Rebuild" mode. We want the report to always
+	render live (our execute() override already does the per-date resolution), so
+	we clear the flag after the standard sync has run. Must never raise — a failure
+	here should not abort the migrate.
+	"""
+	try:
+		if not frappe.db.exists("Report", "Monthly Attendance Sheet"):
+			return
 		if frappe.db.get_value("Report", "Monthly Attendance Sheet", "prepared_report"):
 			frappe.db.set_value("Report", "Monthly Attendance Sheet", "prepared_report", 0)
+	except Exception:
+		frappe.log_error(
+			title="upande_ta disable_prepared_report failed",
+			message=frappe.get_traceback(),
+		)
