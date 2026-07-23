@@ -60,7 +60,6 @@ after_migrate = [
 	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
 	"upande_ta.upande_ta.cleanup.remove_orphans",
 	"upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime.ensure_overtime_setup",
-	"upande_ta.upande_ta.overrides.leave_application.ensure_rejected_by_field",
 	# HRMS ships Monthly Attendance Sheet with prepared_report=1, which re-enables
 	# the background/cached "click Rebuild" mode on every migrate. Force it back off
 	# so the report always renders live (our override does the heavy lifting anyway).
@@ -90,14 +89,6 @@ doc_events = {
 	"Biometric Logs": {
 		"after_insert": "upande_ta.upande_ta.overrides.stock_entry.verify_pending_stock_entries",
 		"on_update": "upande_ta.upande_ta.overrides.stock_entry.verify_pending_stock_entries",
-	},
-	"Leave Application": {
-		"before_submit": "upande_ta.upande_ta.overrides.leave_application.capture_rejecter",
-		"on_update_after_submit": "upande_ta.upande_ta.overrides.leave_application.capture_rejecter",
-		"before_cancel": "upande_ta.upande_ta.overrides.leave_application.enforce_cancel_by_rejecter",
-		# only at creation of the amended doc -- NOT on every later save, or it
-		# would block the next approver from acting on the amended application.
-		"before_insert": "upande_ta.upande_ta.overrides.leave_application.enforce_amend_by_rejecter",
 	},
 }
 
