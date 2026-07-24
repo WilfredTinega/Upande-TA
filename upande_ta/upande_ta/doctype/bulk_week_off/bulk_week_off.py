@@ -94,6 +94,75 @@ def create_linked_holiday_list_assignment(
         return None
 
 
+def cancel_absents_on_effective_offdays(employee, since=None):
+    """Cancel submitted ``Absent`` Attendance on any date that the employee's
+    *date-effective* Holiday List Assignment marks as a holiday / weekly off —
+    covering BOTH the historical (previous week off) and the new period.
+
+    Reassigning a week off is otherwise not retroactive: auto-attendance had
+    already marked those days Absent under whatever schedule was in force when
+    it ran, and it never revisits a date that already has an Attendance record —
+    so the stale Absent persists on what is now a rest day and still feeds the
+    Monthly Attendance Sheet and payroll. Because Bulk Week Off also backfills
+    the *prior* assignment, resolving the list in force on each Absent's own date
+    lets us clean up the previous week-off days as well as the new ones.
+
+    For each Absent we look up ``get_assigned_holiday_list(as_on=date)`` and drop
+    the record when that date is an off/holiday there (``is_holiday``). Genuine
+    absences on real working days are never touched. ``since`` bounds the scan
+    (defaults to the employee's earliest assignment). Idempotent; failures are
+    logged, never raised — clean-up must not fail the transfer. Returns count.
+    """
+    if not employee:
+        return 0
+
+    from erpnext.setup.doctype.holiday_list.holiday_list import is_holiday
+    from upande_ta.upande_ta.holiday_list import get_assigned_holiday_list
+
+    today = getdate()
+    if since is None:
+        since = frappe.db.get_value(
+            "Holiday List Assignment",
+            {"assigned_to": employee, "applicable_for": "Employee", "docstatus": 1},
+            "from_date",
+            order_by="from_date asc",
+        )
+    since = getdate(since) if since else None
+
+    cancelled = 0
+    try:
+        filters = {"employee": employee, "status": "Absent", "docstatus": 1}
+        filters["attendance_date"] = (
+            ["between", [since, today]] if since else ["<=", today]
+        )
+        att_rows = frappe.get_all(
+            "Attendance", filters=filters, fields=["name", "attendance_date"]
+        )
+        for a in att_rows:
+            try:
+                eff = get_assigned_holiday_list(employee, as_on=a.attendance_date)
+            except Exception:
+                eff = None
+            if not eff or not is_holiday(eff, a.attendance_date):
+                continue
+            try:
+                doc = frappe.get_doc("Attendance", a.name)
+                doc.flags.ignore_permissions = True
+                doc.cancel()
+                cancelled += 1
+            except Exception:
+                frappe.log_error(
+                    title="Bulk Week Off: stale Absent cancel failed",
+                    message="Attendance: %s\n%s" % (a.name, frappe.get_traceback()),
+                )
+    except Exception:
+        frappe.log_error(
+            title="Bulk Week Off: cancel_absents_on_effective_offdays failed",
+            message=frappe.get_traceback(),
+        )
+    return cancelled
+
+
 class BulkWeekOff(Document):
 
     @property
@@ -183,6 +252,7 @@ class BulkWeekOff(Document):
         deferred = []
         failed = []
         skipped = []
+        absents_fixed = 0
         today = getdate()
         transfer_date = getdate(self.from_date)
 
@@ -222,6 +292,9 @@ class BulkWeekOff(Document):
                         hla_name,
                         update_modified=False,
                     )
+                    # Self-repair: drop any stale Absent that now falls on a
+                    # rest day under the (historical or new) assignment.
+                    absents_fixed += cancel_absents_on_effective_offdays(row.employee)
 
                 if transfer_date <= today:
                     transfer.submit()
@@ -239,6 +312,14 @@ class BulkWeekOff(Document):
             frappe.msgprint(
                 _("Created {0} Employee Transfer(s); submitted {1}.").format(
                     created, submitted
+                ),
+                alert=True,
+                indicator="green",
+            )
+        if absents_fixed:
+            frappe.msgprint(
+                _("Cancelled {0} stale Absent record(s) that now fall on a rest day.").format(
+                    absents_fixed
                 ),
                 alert=True,
                 indicator="green",
@@ -455,6 +536,10 @@ def submit_due_employee_transfers():
                         update_modified=False,
                     )
                     linked += 1
+
+            # Now that the transfer/assignment is effective, clear any stale
+            # Absent that lands on a rest day (historical or new period).
+            cancel_absents_on_effective_offdays(r.employee)
 
             frappe.db.commit()
         except Exception:
