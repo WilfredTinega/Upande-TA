@@ -103,5 +103,8 @@ scheduler_events = {
 		"*/5 * * * *": [
 			"upande_ta.upande_ta.attendance_cleanup.cancel_absent_attendance_with_checkin"
 		],
+		"*/15 * * * *": [
+			"upande_ta.upande_ta.attendance_cleanup.cancel_absent_attendance_on_weekoff"
+		],
 	},
 }
