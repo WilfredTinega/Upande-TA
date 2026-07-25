@@ -7,9 +7,11 @@
  "field_order": [
   "filters_section",
   "company",
+  "column_break_lovh",
   "department",
   "column_break_vfte",
   "designation",
+  "column_break_tvxi",
   "employee",
   "column_break_filters",
   "clear_filters",
@@ -17,7 +19,9 @@
   "holiday_list",
   "column_break_assignment",
   "from_date",
+  "column_break_qbae",
   "holiday_list_start",
+  "column_break_ktkr",
   "holiday_list_end",
   "section_break_employees",
   "employees",
@@ -97,8 +101,7 @@
    "depends_on": "eval:doc.docstatus==0",
    "fieldname": "clear_filters",
    "fieldtype": "Button",
-   "label": "Clear Filters",
-   "primary": 1
+   "label": "Clear Filters"
   },
   {
    "fieldname": "employee",
@@ -128,11 +131,27 @@
   {
    "fieldname": "column_break_vfte",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_lovh",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_tvxi",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_qbae",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_ktkr",
+   "fieldtype": "Column Break"
   }
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2026-05-09 01:54:33.369520",
+ "modified": "2026-07-25 11:33:12.223305",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Week Off",
