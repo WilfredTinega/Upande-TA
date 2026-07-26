@@ -64,6 +64,9 @@ after_migrate = [
 	# the background/cached "click Rebuild" mode on every migrate. Force it back off
 	# so the report always renders live (our override does the heavy lifting anyway).
 	"upande_ta.upande_ta.overrides.monthly_attendance_sheet.disable_prepared_report",
+	# Keep Employee.custom_cost_center optional on every migrate/deploy so a stray
+	# reqd flag or Property Setter can never block saving/submitting Employees.
+	"upande_ta.upande_ta.overrides.employee.ensure_custom_cost_center_optional",
 ]
 
 override_doctype_class = {

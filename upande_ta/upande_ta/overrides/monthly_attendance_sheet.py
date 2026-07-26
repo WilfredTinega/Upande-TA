@@ -412,7 +412,44 @@ execute._upande_ta_patched = True
 
 _hrms = None
 _hrms_execute = None
+_hrms_gerd = None
 _patched = False
+
+
+def get_employee_related_details(filters):
+	"""hrms' ``get_employee_related_details`` plus a "Category" (Employee Grade)
+	filter, mirroring the custom Monthly Attendance Report's Category filter
+	(``WHERE e.grade = %(category)s``).
+
+	Implemented as a post-filter over the original result so we never fork hrms'
+	query logic. Handles both result shapes: the flat ``{name: emp}`` map and the
+	grouped ``{group_value: {name: emp}}`` map produced when a Group By is set.
+	"""
+	original = _hrms_gerd or getattr(_hrms, "_upande_ta_original_gerd", None)
+	emp_map, group_by_param_values = original(filters)
+
+	f = frappe._dict(filters or {})
+	category = f.get("category")
+	if not category:
+		return emp_map, group_by_param_values
+
+	if f.get("group_by"):
+		filtered_map = {}
+		filtered_values = []
+		for parameter, employees in emp_map.items():
+			kept = frappe._dict(
+				{name: emp for name, emp in employees.items() if emp.get("grade") == category}
+			)
+			if kept:
+				filtered_map[parameter] = kept
+				filtered_values.append(parameter)
+		return filtered_map, filtered_values
+
+	kept = {name: emp for name, emp in emp_map.items() if emp.get("grade") == category}
+	return kept, group_by_param_values
+
+
+get_employee_related_details._upande_ta_patched = True
 
 
 def get_date_range_from_filters(filters):
@@ -557,7 +594,7 @@ def get_rows(employee_details, filters, holiday_map, attendance_map):
 
 
 def apply_patch(*args, **kwargs):
-	global _hrms, _hrms_execute, _patched
+	global _hrms, _hrms_execute, _hrms_gerd, _patched
 
 	# Runs on before_request AND before_job (before every background job, payroll
 	# included). It must NEVER raise — a failure would abort the job. Degrade to a
@@ -571,9 +608,16 @@ def apply_patch(*args, **kwargs):
 			mod._upande_ta_original_execute = mod.execute
 		_hrms_execute = getattr(mod, "_upande_ta_original_execute", None)
 
+		# Stash the original employee fetch so the "Category" (Employee Grade)
+		# filter can post-filter its result without forking hrms' query logic.
+		if not getattr(mod.get_employee_related_details, "_upande_ta_patched", False):
+			mod._upande_ta_original_gerd = mod.get_employee_related_details
+		_hrms_gerd = getattr(mod, "_upande_ta_original_gerd", None)
+
 		if _patched and getattr(mod.execute, "_upande_ta_patched", False):
 			return
 
+		mod.get_employee_related_details = get_employee_related_details
 		mod.get_attendance_records = get_attendance_records
 		mod.get_attendance_map = get_attendance_map
 		mod.get_attendance_status_for_detailed_view = get_attendance_status_for_detailed_view
@@ -598,18 +642,26 @@ def apply_patch(*args, **kwargs):
 def disable_prepared_report():
 	"""Force ``prepared_report`` off on the Monthly Attendance Sheet.
 
-	Wired into ``after_migrate``: HRMS syncs this Report from its JSON with
+	Wired into ``after_migrate`` (which runs on every ``bench migrate`` — and so
+	on every Frappe Cloud deploy): HRMS syncs this Report from its JSON with
 	``prepared_report = 1`` on every migrate, which brings back the cached
 	"generated N minutes ago — click Rebuild" mode. We want the report to always
 	render live (our execute() override already does the per-date resolution), so
-	we clear the flag after the standard sync has run. Must never raise — a failure
-	here should not abort the migrate.
+	we clear the flag after the standard sync has run. This is the single, migrate/
+	deploy-time enforcement point — it is deliberately NOT wired into
+	before_request/before_job, so it never runs as a live per-request write.
+
+	Uses a raw ``db.set_value`` (not ``doc.save``) so it bypasses the "Only
+	Administrator can save a standard report" guard, and clears the document cache
+	so the flag takes effect immediately for the next report load. Must never raise
+	— a failure here should not abort the migrate.
 	"""
 	try:
 		if not frappe.db.exists("Report", "Monthly Attendance Sheet"):
 			return
 		if frappe.db.get_value("Report", "Monthly Attendance Sheet", "prepared_report"):
 			frappe.db.set_value("Report", "Monthly Attendance Sheet", "prepared_report", 0)
+			frappe.clear_document_cache("Report", "Monthly Attendance Sheet")
 	except Exception:
 		frappe.log_error(
 			title="upande_ta disable_prepared_report failed",

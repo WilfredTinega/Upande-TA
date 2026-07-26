@@ -175,10 +175,47 @@ frappe.provide("frappe.views");
 		}
 	}
 
+	// Add a "Category" filter (Link → Employee Grade) to the standard sheet,
+	// matching the custom Monthly Attendance Report. The server override reads
+	// filters.category and applies WHERE e.grade = category. The sheet's filter
+	// list lives in a file-based standard report JS, so we splice ours in at
+	// runtime once report_settings is loaded (before setup_filters reads it).
+	function injectCategoryFilter(settings) {
+		try {
+			if (!settings || !Array.isArray(settings.filters)) return;
+			if (settings.filters.some((f) => f && f.fieldname === "category")) return;
+			const filter = {
+				fieldname: "category",
+				label: __("Category"),
+				fieldtype: "Link",
+				options: "Employee Grade",
+			};
+			// Place it right after Company (fallback: before Group By, else end).
+			let idx = settings.filters.findIndex((f) => f && f.fieldname === "company");
+			if (idx === -1) {
+				const gb = settings.filters.findIndex((f) => f && f.fieldname === "group_by");
+				idx = gb === -1 ? settings.filters.length - 1 : gb - 1;
+			}
+			settings.filters.splice(idx + 1, 0, filter);
+		} catch (e) {
+			console.warn("[MAS category filter]", e);
+		}
+	}
+
 	function patchPrototype() {
 		const QR = frappe.views && frappe.views.QueryReport;
 		if (!QR || !QR.prototype) return false;
 		if (QR.prototype.__ta_mas_patched) return true;
+
+		const origGetReportSettings = QR.prototype.get_report_settings;
+		QR.prototype.get_report_settings = function () {
+			const self = this;
+			const out = origGetReportSettings.apply(this, arguments);
+			return Promise.resolve(out).then((r) => {
+				if (self.report_name === REPORT) injectCategoryFilter(self.report_settings);
+				return r;
+			});
+		};
 
 		const origPrepareColumns = QR.prototype.prepare_columns;
 		QR.prototype.prepare_columns = function (columns) {
