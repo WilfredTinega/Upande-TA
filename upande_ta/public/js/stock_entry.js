@@ -17,9 +17,13 @@ frappe.ui.form.on("Stock Entry", {
 		frm.set_query("bio_employee", () => {
 			const material_request = (frm.doc.items || []).find((row) => row.material_request)
 				?.material_request;
+			const item_codes = (frm.doc.items || [])
+				.filter((row) => row.material_request === material_request)
+				.map((row) => row.item_code)
+				.filter(Boolean);
 			return {
 				query: "upande_ta.upande_ta.overrides.stock_entry.material_request_employee_query",
-				filters: { material_request: material_request || "" },
+				filters: { material_request: material_request || "", item_codes },
 			};
 		});
 	},

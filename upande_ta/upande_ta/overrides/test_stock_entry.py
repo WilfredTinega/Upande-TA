@@ -40,6 +40,45 @@ def _make_material_request_with_employees(employee_status_pairs):
 	return mr
 
 
+def _make_material_request_with_employee_rows(employee_rows):
+	"""employee_rows: list of dicts appended to custom_employee_data as-is
+	(e.g. {"employee": ..., "item_code": ..., "qty": ...} or
+	{"employee": ..., "issued_via_stock_entry": ...}). Separate from
+	_make_material_request_with_employees (which only supports the item-less
+	shape) because upande_stores' own Material Request validate hooks --
+	which also run here, since this is a real insert on a site with
+	upande_stores installed -- require qty whenever item_code is set, and
+	rebuild the Items table from any item_code-bearing rows.
+	"""
+	farm = frappe.get_all("Farm", limit=1, pluck="name")
+	business_unit = frappe.get_all("Business Unit", limit=1, pluck="name")
+	mr = frappe.get_doc(
+		{
+			"doctype": "Material Request",
+			"material_request_type": "Material Issue",
+			"transaction_date": today(),
+			"company": "_Test Company",
+			"custom_farm": farm[0] if farm else None,
+			"custom_business_unit": business_unit[0] if business_unit else None,
+			"items": [
+				{
+					"item_code": "_Test Item",
+					"qty": 1,
+					"uom": "_Test UOM",
+					"stock_uom": "_Test UOM",
+					"conversion_factor": 1,
+					"schedule_date": today(),
+					"warehouse": "_Test Warehouse - _TC",
+				}
+			],
+		}
+	)
+	for row in employee_rows:
+		mr.append("custom_employee_data", row)
+	mr.insert(ignore_permissions=True, ignore_links=True)
+	return mr
+
+
 class IntegrationTestMaterialRequestEmployeeQuery(IntegrationTestCase):
 	def setUp(self):
 		if not frappe.get_all("Farm", limit=1) or not frappe.get_all("Business Unit", limit=1):
@@ -89,3 +128,46 @@ class IntegrationTestMaterialRequestEmployeeQuery(IntegrationTestCase):
 		self.assertEqual(len(page1), 2)
 		self.assertGreaterEqual(len(page2), 1)
 		self.assertEqual(set(r[0] for r in page1) & set(r[0] for r in page2), set())
+
+	def test_filters_by_item_codes_when_provided(self):
+		emp1, emp2 = self.employees
+		mr = _make_material_request_with_employee_rows(
+			[
+				{"employee": emp1, "item_code": "_Test Item", "qty": 10},
+				{"employee": emp2, "item_code": "_Test Item 2", "qty": 5},
+			]
+		)
+		results = material_request_employee_query(
+			"Employee", "", "name", 0, 20, {"material_request": mr.name, "item_codes": ["_Test Item"]}
+		)
+		names = [r[0] for r in results]
+		self.assertIn(emp1, names)
+		self.assertNotIn(emp2, names)
+
+	def test_blank_item_code_rows_are_not_filtered_by_item_codes(self):
+		emp1, emp2 = self.employees
+		mr = _make_material_request_with_employee_rows(
+			[
+				{"employee": emp1, "item_code": "_Test Item", "qty": 10},
+				{"employee": emp2},
+			]
+		)
+		results = material_request_employee_query(
+			"Employee", "", "name", 0, 20, {"material_request": mr.name, "item_codes": ["_Test Item"]}
+		)
+		names = [r[0] for r in results]
+		self.assertIn(emp1, names)
+		self.assertIn(emp2, names)
+
+	def test_no_item_codes_filter_returns_all_unissued_regardless_of_item_code(self):
+		emp1, emp2 = self.employees
+		mr = _make_material_request_with_employee_rows(
+			[
+				{"employee": emp1, "item_code": "_Test Item", "qty": 10},
+				{"employee": emp2, "item_code": "_Test Item 2", "qty": 5},
+			]
+		)
+		results = material_request_employee_query("Employee", "", "name", 0, 20, {"material_request": mr.name})
+		names = [r[0] for r in results]
+		self.assertIn(emp1, names)
+		self.assertIn(emp2, names)

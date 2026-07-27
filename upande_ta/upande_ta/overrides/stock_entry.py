@@ -395,6 +395,17 @@ def material_request_employee_query(doctype, txt, searchfield, start, page_lengt
 	saved Stock Entry, so this works for unsaved drafts too. Scoped to that
 	Material Request's Employee Data rows that haven't been issued via
 	another Stock Entry yet (Employee Request.issued_via_stock_entry empty).
+
+	filters["item_codes"] (also resolved client-side, from the item_code of
+	every item row sharing that same material_request) further narrows this
+	to employees allocated one of those specific items -- e.g. a Material
+	Request allocating Amisil to James and MPK to Timothy will only offer
+	James when the Stock Entry is issuing Amisil. An Employee Request row
+	with no item_code (the pre-existing, item-agnostic PPE-workflow shape) is
+	never filtered out by this, and if no item_codes are passed at all
+	(nothing to filter by) every row is kept, preserving today's behavior
+	exactly.
+
 	Falls back to a plain Employee search when there's no Material Request
 	context, matching bio_employee's existing unrestricted behavior -- also
 	used when the Employee Request doctype doesn't exist at all (this app is
@@ -404,6 +415,7 @@ def material_request_employee_query(doctype, txt, searchfield, start, page_lengt
 	"""
 	filters = frappe.parse_json(filters) if isinstance(filters, str) else (filters or {})
 	material_request = filters.get("material_request")
+	item_codes = set(filter(None, filters.get("item_codes") or []))
 	if material_request and not frappe.has_permission("Material Request", "read", material_request):
 		# Caller can't read this Material Request -- degrade gracefully to the
 		# same unrestricted Employee search used when there's no Material
@@ -436,12 +448,13 @@ def material_request_employee_query(doctype, txt, searchfield, start, page_lengt
 	rows = frappe.get_all(
 		"Employee Request",
 		filters={"parent": material_request, "parenttype": "Material Request"},
-		fields=["employee", "employee_name", "issued_via_stock_entry"],
+		fields=["employee", "employee_name", "issued_via_stock_entry", "item_code"],
 	)
 	results = [
 		(row.employee, row.employee_name)
 		for row in rows
 		if not row.issued_via_stock_entry
+		and (not row.item_code or not item_codes or row.item_code in item_codes)
 		and (txt_lower in (row.employee or "").lower() or txt_lower in (row.employee_name or "").lower())
 	]
 	return results[offset : offset + limit]
