@@ -8,7 +8,6 @@
  "field_order": [
   "device_location",
   "device_sn",
-  "farms",
   "last_seen",
   "status"
  ],
@@ -46,17 +45,6 @@
    "label": "Last Seen",
    "read_only": 1,
    "width": "140px"
-  },
-  {
-   "columns": 3,
-   "fieldname": "farms",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Farms",
-   "read_only": 1,
-   "reqd": 1,
-   "width": "250px"
   }
  ],
  "grid_page_length": 50,

@@ -35,63 +35,6 @@ def _employee_has_custom_farm():
     return "custom_farm" in frappe.db.get_table_columns("Employee")
 
 
-def _parse_farms(value):
-    """Split the comma-separated `farms` field of a Biometric Device row into a
-    clean list of Farm docnames."""
-    if not value:
-        return []
-    if isinstance(value, (list, tuple)):
-        items = value
-    else:
-        items = str(value).split(",")
-    return [f.strip() for f in items if f and f.strip()]
-
-
-def _coerce_farms_arg(value):
-    """Normalise the `farms` argument received over HTTP into a list of farm
-    docnames. The frontend may send a JSON array string (``["A", "B"]``), a
-    plain comma-separated string, an empty/blank string (null form arg), or an
-    already-decoded list. Falls back to comma-splitting when the string isn't
-    valid JSON so we never raise on unexpected input."""
-    if isinstance(value, str):
-        value = value.strip()
-        if not value:
-            return []
-        try:
-            value = json.loads(value)
-        except (ValueError, TypeError):
-            pass  # not JSON — let _parse_farms comma-split the raw string
-    return _parse_farms(value)
-
-
-def _device_farms(device_sn):
-    """Return the list of Farm docnames a device is linked to, read from the
-    single Biometric Setting's devices table. Empty list = no restriction."""
-    if not device_sn:
-        return []
-    farms = frappe.db.get_value(
-        "Biometric Device",
-        {"parent": "Biometric Setting", "device_sn": device_sn},
-        "farms",
-    )
-    return _parse_farms(farms)
-
-
-def _employee_farms_by_pin(user_ids):
-    """Map device PIN (Employee.attendance_device_id) -> custom_farm for the
-    given PINs, in a single query. Returns {} when the custom_farm field is
-    absent."""
-    user_ids = [u for u in {str(u).strip() for u in (user_ids or [])} if u]
-    if not user_ids or not _employee_has_custom_farm():
-        return {}
-    rows = frappe.get_all(
-        "Employee",
-        filters={"attendance_device_id": ["in", user_ids]},
-        fields=["attendance_device_id", "custom_farm"],
-    )
-    return {r.attendance_device_id: r.custom_farm for r in rows}
-
-
 def _ensure_biometric_user_parent(device_sn):
     if not device_sn:
         frappe.throw("device_sn is required to resolve a Biometric User parent")
@@ -325,7 +268,6 @@ def get_devices():
             "name":            d.device_sn,
             "device_sn":       d.device_sn,
             "device_location": d.device_location or d.device_sn,
-            "farms":           _parse_farms(d.farms),
         }
         for d in (settings.devices or [])
     ]
@@ -358,7 +300,7 @@ def get_device_users(device_sn):
 
 @frappe.whitelist()
 def get_employees(status="Active", employee=None, designation=None, department=None,
-                  company=None, farm=None, farms=None):
+                  company=None, farm=None):
     filters = {"attendance_device_id": ["!=", ""]}
     if status == "Active":
         filters["status"] = "Active"
@@ -375,12 +317,7 @@ def get_employees(status="Active", employee=None, designation=None, department=N
         filters["company"] = company
 
     has_farm = _employee_has_custom_farm()
-    farms = _coerce_farms_arg(farms)
-    if farms and has_farm:
-        # A single explicit `farm` pick narrows within the device scope.
-        scoped = [farm] if (farm and farm in farms) else farms
-        filters["custom_farm"] = ["in", scoped]
-    elif farm and has_farm:
+    if farm and has_farm:
         filters["custom_farm"] = farm
 
     fields = [
@@ -412,18 +349,12 @@ def get_employees(status="Active", employee=None, designation=None, department=N
 
 
 @frappe.whitelist()
-def get_active_filter_options(department=None, designation=None, company=None, farm=None, farms=None):
+def get_active_filter_options(department=None, designation=None, company=None, farm=None):
     has_farm = _employee_has_custom_farm()
-    device_farms = _coerce_farms_arg(farms)
     fields = ["designation", "department", "company"]
     if has_farm:
         fields.append("custom_farm")
     all_employees = frappe.get_all("Employee", fields=fields)
-
-    # When the selected device(s) restrict farms, only consider employees of
-    # those farms everywhere below.
-    if device_farms and has_farm:
-        all_employees = [e for e in all_employees if e.get("custom_farm") in device_farms]
 
     companies = sorted({e.company for e in all_employees if e.company})
     farms     = sorted({e.custom_farm for e in all_employees if e.get("custom_farm")}) if has_farm else []
@@ -448,11 +379,8 @@ def get_active_filter_options(department=None, designation=None, company=None, f
         employee_filters["designation"] = designation
     if company:
         employee_filters["company"] = company
-    if has_farm:
-        if farm:
-            employee_filters["custom_farm"] = farm
-        elif device_farms:
-            employee_filters["custom_farm"] = ["in", device_farms]
+    if has_farm and farm:
+        employee_filters["custom_farm"] = farm
     employee_count = frappe.db.count("Employee", employee_filters)
 
     return {
@@ -485,19 +413,6 @@ def bulk_command(device_sn, users, command_type):
     failed = []
     post_queue = []
 
-    # Farm scoping: when a device is linked to one or more farms, only employees
-    # of those farms may be ADDED or UPDATED on it. Delete is exempt — deletion
-    # is cleanup (removing stale/foreign/old-PIN enrollments is exactly what an
-    # operator needs on a farm-scoped device), so gating it would trap orphans.
-    # Devices with no farm assigned are unrestricted. This is the authoritative
-    # guard for every entry point (bulk_command_per_device / _multi call here).
-    farm_gated = command_type in ("Add User", "Update User")
-    allowed_farms = _device_farms(device_sn) if farm_gated else []
-    farm_by_pin = (
-        _employee_farms_by_pin([u.get("user_id") for u in users])
-        if allowed_farms else {}
-    )
-
     for user in users:
         try:
             user_id       = str(user.get("user_id") or "").strip()
@@ -508,16 +423,6 @@ def bulk_command(device_sn, users, command_type):
             if not user_id:
                 failed.append({"user_id": user_id, "reason": "Missing PIN"})
                 continue
-
-            if allowed_farms:
-                emp_farm = farm_by_pin.get(user_id)
-                if emp_farm not in allowed_farms:
-                    failed.append({
-                        "user_id": user_id,
-                        "reason": "Employee not assigned to this device's farm(s): "
-                                  + ", ".join(allowed_farms),
-                    })
-                    continue
 
             cmd_id = frappe.generate_hash(length=10)
 

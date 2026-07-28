@@ -70,19 +70,9 @@
   "r_department",
   "column_break_zqrl",
   "r_designation",
-  "r_employee",
-  "biometric_verificationse_column",
-  "stock_verification_window_minutes",
-  "enable_automatic_submission_on_stock_entry"
+  "r_employee"
  ],
  "fields": [
-  {
-   "default": "1",
-   "fieldname": "stock_verification_window_minutes",
-   "fieldtype": "Int",
-   "label": "Verification Window (Minutes)",
-   "non_negative": 1
-  },
   {
    "fieldname": "server_settings_tab",
    "fieldtype": "Tab Break",
@@ -440,17 +430,6 @@
    "fieldname": "settings_section",
    "fieldtype": "Section Break",
    "label": "Settings"
-  },
-  {
-   "fieldname": "biometric_verificationse_column",
-   "fieldtype": "Column Break",
-   "label": "Biometric Verification(SE)"
-  },
-  {
-   "default": "0",
-   "fieldname": "enable_automatic_submission_on_stock_entry",
-   "fieldtype": "Check",
-   "label": "Enable Automatic Submission on Stock Entry"
   }
  ],
  "grid_page_length": 50,

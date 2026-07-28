@@ -639,31 +639,67 @@ def apply_patch(*args, **kwargs):
 		)
 
 
+#: Both reports run this same patched implementation, so they must also share the
+#: same prepared-report behaviour. "Monthly Attendance Report" is upande_ta's
+#: standard clone (upande_ta/upande_ta/report/monthly_attendance_report/), whose
+#: execute() delegates straight back to execute() above.
+SHARED_REPORTS = ("Monthly Attendance Sheet", "Monthly Attendance Report")
+
+
 def disable_prepared_report():
-	"""Force ``prepared_report`` off on the Monthly Attendance Sheet.
+	"""Force ``prepared_report`` off on both monthly attendance reports.
 
-	Wired into ``after_migrate`` (which runs on every ``bench migrate`` — and so
-	on every Frappe Cloud deploy): HRMS syncs this Report from its JSON with
-	``prepared_report = 1`` on every migrate, which brings back the cached
-	"generated N minutes ago — click Rebuild" mode. We want the report to always
-	render live (our execute() override already does the per-date resolution), so
-	we clear the flag after the standard sync has run. This is the single, migrate/
-	deploy-time enforcement point — it is deliberately NOT wired into
-	before_request/before_job, so it never runs as a live per-request write.
+	Wired into ``after_migrate`` (which runs on every ``bench migrate`` — and so on
+	every Frappe Cloud deploy). We want these reports to always render live (our
+	execute() override already does the per-date resolution) rather than dropping
+	into the cached "generated N minutes ago — click Rebuild" mode.
 
-	Uses a raw ``db.set_value`` (not ``doc.save``) so it bypasses the "Only
+	Two separate flags are involved:
+
+	* ``prepared_report`` — frappe flips this to 1 *by itself* whenever a script
+	  report takes longer than 15s to run (see ``Report.execute_script_report``,
+	  which arms an ``enable_prepared_report`` timer). Note this flag is listed in
+	  ``frappe.modules.import_file.ignore_values["Report"]``, so it is carried over
+	  from the existing record on every migrate and can never be reset by shipping
+	  a value in the report's JSON — it has to be cleared here.
+	* ``disable_prepared_report_automation`` — disarms that timer in the first
+	  place, so the flag stops coming back mid-month between deploys. It is *not*
+	  in ``ignore_values``, so upande_ta's own report pins it via its JSON; we set
+	  it here for HRMS' sheet, whose JSON does not carry the field and therefore
+	  resets it to 0 on every migrate.
+
+	This is the single migrate/deploy-time enforcement point — deliberately NOT
+	wired into before_request/before_job, so it never runs as a live per-request
+	write.
+
+	Uses raw ``db.set_value`` (not ``doc.save``) so it bypasses the "Only
 	Administrator can save a standard report" guard, and clears the document cache
-	so the flag takes effect immediately for the next report load. Must never raise
+	so the flags take effect immediately for the next report load. Must never raise
 	— a failure here should not abort the migrate.
 	"""
-	try:
-		if not frappe.db.exists("Report", "Monthly Attendance Sheet"):
-			return
-		if frappe.db.get_value("Report", "Monthly Attendance Sheet", "prepared_report"):
-			frappe.db.set_value("Report", "Monthly Attendance Sheet", "prepared_report", 0)
-			frappe.clear_document_cache("Report", "Monthly Attendance Sheet")
-	except Exception:
-		frappe.log_error(
-			title="upande_ta disable_prepared_report failed",
-			message=frappe.get_traceback(),
-		)
+	for report in SHARED_REPORTS:
+		try:
+			if not frappe.db.exists("Report", report):
+				continue
+
+			current = frappe.db.get_value(
+				"Report",
+				report,
+				["prepared_report", "disable_prepared_report_automation"],
+				as_dict=True,
+			)
+
+			updates = {}
+			if current.prepared_report:
+				updates["prepared_report"] = 0
+			if not current.disable_prepared_report_automation:
+				updates["disable_prepared_report_automation"] = 1
+
+			if updates:
+				frappe.db.set_value("Report", report, updates)
+				frappe.clear_document_cache("Report", report)
+		except Exception:
+			frappe.log_error(
+				title=f"upande_ta disable_prepared_report failed ({report})",
+				message=frappe.get_traceback(),
+			)
