@@ -442,6 +442,9 @@ function run_multi_device_command(frm, command_type, pin, per_device, dialog) {
 					+ ` (${queued_total} command(s)${failed_total ? `, ${failed_total} failed` : ""})`,
 				indicator: failed_total ? "orange" : "green",
 			}, 6);
+			// The server returns a reason for every failure — surface it instead of
+			// leaving the operator with a bare "1 failed" count and no way to act.
+			if (failed_total) show_command_failures(m);
 			frm.__upande_ta_addable_devices = null;
 			frm.__upande_ta_on_devices      = null;
 			render_device_buttons(frm);
@@ -452,6 +455,39 @@ function run_multi_device_command(frm, command_type, pin, per_device, dialog) {
 				indicator: "red",
 			}, 6);
 		},
+	});
+}
+
+// `bulk_command_per_device` reports failures in two places: per-device errors
+// (the whole device call raised) and per-user errors inside each device's result
+// (that PIN was rejected). Show both, keyed by device.
+function show_command_failures(m) {
+	const rows = [];
+
+	(m.errors || []).forEach(e => {
+		rows.push([e.device_sn || __("(unknown device)"), e.reason || __("Unknown error")]);
+	});
+
+	(m.by_device || []).forEach(d => {
+		(d.errors || []).forEach(e => {
+			const who = e.user_id ? `PIN ${e.user_id}` : __("(no PIN)");
+			rows.push([d.device_sn || __("(unknown device)"), `${who}: ${e.reason || __("Unknown error")}`]);
+		});
+	});
+
+	if (!rows.length) return;
+
+	const body = rows
+		.map(([dev, reason]) =>
+			`<tr><td style="padding:2px 8px 2px 0"><b>${frappe.utils.escape_html(dev)}</b></td>` +
+			`<td style="padding:2px 0">${frappe.utils.escape_html(reason)}</td></tr>`
+		)
+		.join("");
+
+	frappe.msgprint({
+		title: __("Device command failed"),
+		indicator: "red",
+		message: `<table>${body}</table>`,
 	});
 }
 
