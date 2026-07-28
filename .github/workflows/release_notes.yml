@@ -7,7 +7,7 @@
 # Runs automatically when a release is published, or on demand via
 # "Run workflow" (workflow_dispatch) for a given tag.
 
-name: "Release Notes"
+name: "upande_ta Release Notes"
 
 on:
   workflow_dispatch:

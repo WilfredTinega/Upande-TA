@@ -1,4 +1,4 @@
-name: Generate Semantic Release
+name: upande_ta Semantic Release
 
 on:
   push:
