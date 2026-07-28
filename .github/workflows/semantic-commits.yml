@@ -1,4 +1,4 @@
-name: Semantic Commits
+name: upande_ta Semantic Commits
 
 # Lints the PULL REQUEST TITLE as a Conventional Commit (feat:, fix:, chore:, ...).
 # semantic-release (see .releaserc.json) computes the next version from commit

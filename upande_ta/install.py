@@ -67,8 +67,12 @@ def ensure_desktop_icon():
         "icon_type": "App",
         "link_type": "External",
         "link": "/app/t%26a",
+        # link_to is a Dynamic Link driven by link_type. With link_type
+        # "External" there is no such doctype, so any leftover value (e.g. the
+        # "Workspace Sidebar" target shipped in desktop_icon/t&a.json) makes
+        # _validate_links look up 'DocType External' and raise. Keep it empty.
+        "link_to": "",
         "logo_url": "/assets/upande_ta/images/upande_logo.ico",
-        "force_show": 1,
         "hidden": 0,
         "standard": 1,
     }

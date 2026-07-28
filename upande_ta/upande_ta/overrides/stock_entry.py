@@ -129,7 +129,7 @@ def _field_spec():
 				"fieldtype": "Link",
 				"options": "Biometric Logs",
 				"read_only": 1,
-				# Only shown once a log has been matched (i.e. it holds a value).
+				"hidden": 1,
 				"depends_on": "eval:doc.requires_biometric && doc.matched_biometric_log",
 				"insert_after": "biometric_verified_at",
 				"module": MODULE,
