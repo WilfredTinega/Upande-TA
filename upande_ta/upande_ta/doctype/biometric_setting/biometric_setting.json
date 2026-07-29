@@ -23,6 +23,7 @@
   "enable_flip",
   "flip_event_frequency",
   "flip_cron_format",
+  "checkins_column",
   "date",
   "update",
   "users_tab",
@@ -38,7 +39,9 @@
   "biodata_tab",
   "section_break_axpd",
   "enable_bio_templates",
+  "column_break_oxed",
   "biodata_event_frequency",
+  "column_break_tajv",
   "biodata_cron_format",
   "column_break_biodata",
   "get_bio",
@@ -51,28 +54,40 @@
   "server_settings_tab",
   "settings_section",
   "server_ip",
+  "column_break_womo",
   "server_port",
+  "column_break_qung",
   "end_point",
-  "column_break_xkjy",
-  "scope_company",
-  "farm",
-  "department",
-  "designation",
-  "employee",
+  "payroll_dates_section",
   "payroll_dates_column",
   "from",
+  "column_break_slzp",
   "to",
+  "filters_section",
+  "scope_company",
+  "column_break_nnys",
+  "farm",
+  "column_break_avvr",
+  "department",
+  "column_break_tavi",
+  "designation",
+  "column_break_jajh",
+  "employee",
   "section_break_asec",
   "devices",
   "checkin_review_filters_section",
   "r_company",
+  "column_break_httu",
   "r_farm",
+  "column_break_nuvw",
   "r_department",
-  "column_break_zqrl",
+  "column_break_kybi",
   "r_designation",
+  "column_break_pyxz",
   "r_employee",
-  "biometric_verificationse_column",
+  "biometric_verificationse_section",
   "stock_verification_window_minutes",
+  "biometric_verificationse_column",
   "enable_automatic_submission_on_stock_entry"
  ],
  "fields": [
@@ -302,11 +317,6 @@
    "mandatory_depends_on": "eval:doc.enable_bio_templates && doc.biodata_event_frequency=='Cron'"
   },
   {
-   "fieldname": "column_break_xkjy",
-   "fieldtype": "Column Break",
-   "label": "Filters"
-  },
-  {
    "fieldname": "biometric_templates",
    "fieldtype": "HTML",
    "label": "Biometric Templates"
@@ -392,10 +402,6 @@
    "label": "Department"
   },
   {
-   "fieldname": "column_break_zqrl",
-   "fieldtype": "Column Break"
-  },
-  {
    "default": "0",
    "fieldname": "r_designation",
    "fieldtype": "Check",
@@ -420,8 +426,7 @@
   },
   {
    "fieldname": "payroll_dates_column",
-   "fieldtype": "Column Break",
-   "label": "Payroll Dates"
+   "fieldtype": "Column Break"
   },
   {
    "fieldname": "from",
@@ -443,21 +448,95 @@
   },
   {
    "fieldname": "biometric_verificationse_column",
-   "fieldtype": "Column Break",
-   "label": "Biometric Verification(SE)"
+   "fieldtype": "Column Break"
   },
   {
    "default": "0",
    "fieldname": "enable_automatic_submission_on_stock_entry",
    "fieldtype": "Check",
    "label": "Enable Automatic Submission on Stock Entry"
+  },
+  {
+   "fieldname": "checkins_column",
+   "fieldtype": "Column Break",
+   "label": "Checkins"
+  },
+  {
+   "fieldname": "column_break_oxed",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_tajv",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_womo",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_qung",
+   "fieldtype": "Column Break"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "payroll_dates_section",
+   "fieldtype": "Section Break",
+   "label": "Payroll Dates"
+  },
+  {
+   "fieldname": "column_break_slzp",
+   "fieldtype": "Column Break"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "filters_section",
+   "fieldtype": "Section Break",
+   "label": "Filters"
+  },
+  {
+   "fieldname": "column_break_nnys",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_avvr",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_tavi",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_jajh",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_httu",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_nuvw",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_kybi",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_pyxz",
+   "fieldtype": "Column Break"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "biometric_verificationse_section",
+   "fieldtype": "Section Break",
+   "label": "Biometric Verification(SE)"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-17 10:59:37.435981",
+ "modified": "2026-07-29 17:40:20.581297",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",
