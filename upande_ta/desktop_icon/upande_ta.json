@@ -1,0 +1,23 @@
+{
+ "app": "upande_ta",
+ "bg_color": "gray",
+ "creation": "2026-08-13 11:07:13.375641",
+ "docstatus": 0,
+ "doctype": "Desktop Icon",
+ "hidden": 0,
+ "icon_type": "App",
+ "idx": 0,
+ "label": "Upande TA",
+ "link_to": "Upande T&A",
+ "link_type": "Workspace Sidebar",
+ "logo_url": "/assets/upande_ta/images/upande_logo.ico",
+ "modified": "2026-08-13 11:12:06.305056",
+ "modified_by": "Administrator",
+ "name": "Upande TA",
+ "owner": "Administrator",
+ "parent_icon": "Frappe HR",
+ "restrict_removal": 1,
+ "roles": [],
+ "sidebar": "Upande T&A",
+ "standard": 1
+}

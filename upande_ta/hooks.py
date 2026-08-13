@@ -8,8 +8,9 @@ app_email = "info@upande.com"
 app_license = "mit"
 
 # Shown in the About dialog's app list and the navbar (Frappe reads this hook
-# per app; without it the app falls back to a generic letter tile). Same Upande
-# logo used by the launcher Desktop Icon (see install.ensure_desktop_icon).
+# per app; without it the app falls back to a generic letter tile). The nav
+# records themselves (Desktop Icon / Workspace Sidebar / Workspace) are site
+# data -- the app does not ship or re-create them on install/migrate.
 app_logo_url = "/assets/upande_ta/images/upande_logo.ico"
 
 required_apps = ["hrms"]
@@ -37,7 +38,6 @@ app_include_js = [
 ]
 
 after_install = [
-	"upande_ta.install.ensure_desktop_icon",
 	"upande_ta.install.ensure_ta_dashboard_block",
 	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
 	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
@@ -52,7 +52,6 @@ before_uninstall = [
 after_migrate = [
 	"upande_ta.patches.v1.sanitize_link_filters.after_migrate_drop_check",
 	"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.resync_scheduled_jobs",
-	"upande_ta.install.ensure_desktop_icon",
 	"upande_ta.install.ensure_ta_dashboard_block",
 	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
 	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
@@ -83,6 +82,9 @@ doc_events = {
 	"Biometric Logs": {
 		"after_insert": "upande_ta.upande_ta.overrides.stock_entry.verify_pending_stock_entries",
 		"on_update": "upande_ta.upande_ta.overrides.stock_entry.verify_pending_stock_entries",
+	},
+	"Meal Checkin": {
+		"after_insert": "upande_ta.upande_ta.meal_checkin_receipt.attach_receipt",
 	},
 }
 

@@ -1,27 +1,15 @@
 # Copyright (c) 2026, Upande LTD and contributors
+"""Retired.
 
-import frappe
+This patch used to delete every Upande-TA-owned Workspace and re-create it
+from a shipped JSON on disk. The app no longer owns the nav records (Desktop
+Icon / Workspace Sidebar / Workspace) -- they are site data, maintained in the
+Desk UI -- so re-importing them on migrate would clobber local edits.
 
-
-MODULE = "Upande TA"
+Kept as a no-op because the name is already recorded in patches.txt on
+existing sites; removing the entry would not un-run it there.
+"""
 
 
 def execute():
-	if not frappe.db.table_exists("Workspace"):
-		return
-
-	# Delete every Upande-TA-owned workspace. The protective on_trash in
-	# overrides/workspace.py allows deletion when in_migrate is set; force it on
-	# so this also works under `bench run-patch` (outside a full migrate).
-	prev_in_migrate = frappe.flags.in_migrate
-	frappe.flags.in_migrate = True
-	try:
-		for name in frappe.get_all("Workspace", filters={"module": MODULE}, pluck="name"):
-			frappe.delete_doc("Workspace", name, ignore_permissions=True, force=True)
-	finally:
-		frappe.flags.in_migrate = prev_in_migrate
-
-	# Re-create the workspace afresh from the current card definition on disk.
-	frappe.reload_doc("upande_ta", "workspace", "t&a", force=True)
-
-	frappe.db.commit()
+	pass

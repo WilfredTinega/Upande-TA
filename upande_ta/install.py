@@ -6,13 +6,11 @@ import frappe
 
 def after_install():
     """Run after the app is installed on a site."""
-    ensure_desktop_icon()
     ensure_ta_dashboard_block()
 
 
 def after_migrate():
     """Run after every `bench migrate` for a site that has this app installed."""
-    ensure_desktop_icon()
     ensure_ta_dashboard_block()
 
 
@@ -54,37 +52,3 @@ def ensure_ta_dashboard_block():
         }).insert(ignore_permissions=True, ignore_if_duplicate=True)
 
     frappe.db.commit()
-
-
-def ensure_desktop_icon():
-    """Create / refresh the launcher Desktop Icon for the T&A workspace."""
-    name = "T&A"
-    payload = {
-        "doctype": "Desktop Icon",
-        "name": name,
-        "label": name,
-        "app": "upande_ta",
-        "icon_type": "App",
-        "link_type": "External",
-        "link": "/app/t%26a",
-        # link_to is a Dynamic Link driven by link_type. With link_type
-        # "External" there is no such doctype, so any leftover value (e.g. the
-        # "Workspace Sidebar" target shipped in desktop_icon/t&a.json) makes
-        # _validate_links look up 'DocType External' and raise. Keep it empty.
-        "link_to": "",
-        "logo_url": "/assets/upande_ta/images/upande_logo.ico",
-        "hidden": 0,
-        "standard": 1,
-    }
-
-    if frappe.db.exists("Desktop Icon", name):
-        doc = frappe.get_doc("Desktop Icon", name)
-        for k, v in payload.items():
-            if k in ("doctype", "name"):
-                continue
-            doc.set(k, v)
-        doc.save(ignore_permissions=True)
-    else:
-        frappe.get_doc(payload).insert(ignore_permissions=True, ignore_if_duplicate=True)
-
-    frappe.clear_cache()

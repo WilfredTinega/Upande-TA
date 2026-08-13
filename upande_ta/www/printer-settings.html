@@ -1,0 +1,90 @@
+{% block page_content %}
+<div id="prn-app" style="max-width:600px;margin:30px auto;padding:0 16px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1f272e;">
+  <h2 style="color:#0D2B5E;margin-bottom:4px;">Printer Settings</h2>
+  <p style="color:#6b7480;margin-top:0;">Silent receipt printing for this computer via QZ Tray.</p>
+  <div id="prn-status" style="padding:12px 14px;border-radius:8px;background:#f4f5f6;margin:14px 0;font-size:14px;">Checking QZ Tray&hellip;</div>
+  <label style="font-size:13px;color:#333;font-weight:600;">Receipt printer</label>
+  <select id="prn-select" style="width:100%;padding:9px;margin:6px 0 14px;border:1px solid #d8dce0;border-radius:8px;font-size:14px;"></select>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <button id="prn-connect" type="button" style="padding:9px 16px;border:1px solid #0D2B5E;background:#fff;color:#0D2B5E;border-radius:8px;cursor:pointer;font-weight:600;">Reconnect</button>
+    <button id="prn-save" type="button" style="padding:9px 16px;border:none;background:#0D2B5E;color:#fff;border-radius:8px;cursor:pointer;font-weight:600;">Save printer</button>
+    <button id="prn-test" type="button" style="padding:9px 16px;border:1px solid #C8A24A;background:#fff;color:#8a6d1f;border-radius:8px;cursor:pointer;font-weight:600;">Test print</button>
+  </div>
+  <div id="prn-saved" style="margin-top:14px;color:#1E7A46;font-size:14px;font-weight:600;"></div>
+  <div style="margin-top:20px;padding:12px 14px;background:#fff8e6;border:1px solid #f0e0b0;border-radius:8px;font-size:13px;color:#6b5a20;line-height:1.5;">
+    <b>Setup:</b> install the free <b>QZ Tray</b> app (qz.io) on this computer and keep it running. On first connect QZ Tray asks to allow this site &mdash; choose <b>Allow</b> and tick <b>Remember</b> so printing stays silent. The selected printer is saved for <b>this computer only</b>.
+  </div>
+</div>
+
+<script>
+(function(){
+  var STORAGE_KEY = 'meal_receipt_printer';
+  var root = document.getElementById('prn-app');
+  if(!root) return;
+
+  function status(t, kind){
+    var e=document.getElementById('prn-status'); if(!e) return;
+    e.textContent = 'QZ Tray: ' + t;
+    e.style.background = kind==='ok' ? '#e7f5ec' : (kind==='err' ? '#fdeeee' : '#f4f5f6');
+  }
+  function showSaved(msg){ var e=document.getElementById('prn-saved'); if(e) e.textContent = msg || ''; }
+
+  function loadQz(cb){
+    if(window.qz) return cb();
+    var s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js';
+    s.onload=function(){ cb(); };
+    s.onerror=function(){ status('could not load qz-tray.js (check internet / site CSP)', 'err'); };
+    document.head.appendChild(s);
+  }
+
+  function onConnected(){
+    status('connected', 'ok');
+    qz.printers.find().then(function(printers){
+      var sel=document.getElementById('prn-select'); sel.innerHTML='';
+      (printers||[]).forEach(function(p){ var o=document.createElement('option'); o.value=p; o.textContent=p; sel.appendChild(o); });
+      var saved=localStorage.getItem(STORAGE_KEY);
+      if(saved){ sel.value=saved; }
+      showSaved(saved ? ('Current: ' + saved) : 'No printer saved yet');
+    }).catch(function(e){ status('list printers failed: ' + e, 'err'); });
+  }
+
+  function connect(){
+    status('connecting…');
+    loadQz(function(){
+      if(!window.qz){ return; }
+      if(qz.websocket.isActive()){ onConnected(); return; }
+      qz.websocket.connect().then(onConnected).catch(function(err){
+        status('connect failed — is QZ Tray running? (' + err + ')', 'err');
+      });
+    });
+  }
+
+  function save(){
+    var sel=document.getElementById('prn-select');
+    if(sel && sel.value){ localStorage.setItem(STORAGE_KEY, sel.value); showSaved('Saved: ' + sel.value); }
+    else { showSaved('Pick a printer first'); }
+  }
+
+  function testPrint(){
+    var sel=document.getElementById('prn-select');
+    if(!sel || !sel.value){ showSaved('Pick a printer first'); return; }
+    if(!window.qz || !qz.websocket.isActive()){ showSaved('Connect first'); return; }
+    var html='<div style="width:72mm;padding:3mm;font-family:Arial,sans-serif;text-align:center;color:#000;">'
+      + '<div style="font-size:15px;font-weight:800;letter-spacing:1px;">KENTROUT FARM</div>'
+      + '<div style="font-size:10px;">Printer test</div>'
+      + '<hr style="border:none;border-top:1px dashed #000;margin:6px 0;">'
+      + '<div style="font-size:12px;">If you can read this and it cut, silent printing works.</div>'
+      + '</div>';
+    var config=qz.configs.create(sel.value, { units:'mm', size:{ width:72, height:null }, margins:0 });
+    var data=[{ type:'html', format:'plain', data: html }];
+    qz.print(config, data).then(function(){ showSaved('Test sent to ' + sel.value); }).catch(function(e){ showSaved('Print failed: ' + e); });
+  }
+
+  document.getElementById('prn-connect').addEventListener('click', connect);
+  document.getElementById('prn-save').addEventListener('click', save);
+  document.getElementById('prn-test').addEventListener('click', testPrint);
+  connect();
+})();
+</script>
+{% endblock %}
