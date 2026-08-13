@@ -4,7 +4,7 @@ import frappe
 from frappe import _
 
 
-PROTECTED = {"T&A"}
+PROTECTED = {"Upande TA"}
 
 
 def _is_protected(doc):

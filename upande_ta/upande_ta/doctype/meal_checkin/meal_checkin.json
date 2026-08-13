@@ -1,0 +1,76 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "MEAL-.######",
+ "creation": "2026-08-13 07:05:57.207960",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "payroll_number",
+  "column_break_smpj",
+  "log_type",
+  "time"
+ ],
+ "fields": [
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "link_filters": "[[\"Employee\",\"status\",\"=\",\"Active\"]]",
+   "options": "Employee"
+  },
+  {
+   "fetch_from": "employee.employee_number",
+   "fetch_if_empty": 1,
+   "fieldname": "payroll_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Payroll Number",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_smpj",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "log_type",
+   "fieldtype": "Select",
+   "label": "Log Type",
+   "options": "\nBreakfast\nLunch\nSupper"
+  },
+  {
+   "fieldname": "time",
+   "fieldtype": "Datetime",
+   "label": "Timestamp"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-13 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Meal Checkin",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
