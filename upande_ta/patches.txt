@@ -1,3 +1,4 @@
+[pre_model_sync]
 upande_ta.patches.v1.sanitize_link_filters
 upande_ta.patches.v1.migrate_biometric_user_to_child
 upande_ta.patches.v1.restore_biometric_setting
@@ -9,3 +10,7 @@ upande_ta.patches.v1.migrate_device_farm_to_farms
 upande_ta.patches.v1.drop_scp_child_table_fields
 upande_ta.patches.v1.consolidate_ta_workspace
 upande_ta.patches.v1.rename_ta_to_upande_ta
+
+[post_model_sync]
+upande_ta.patches.v1.create_gate_pass_department_field
+upande_ta.patches.v1.create_gate_pass_workflow

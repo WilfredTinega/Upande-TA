@@ -88,6 +88,14 @@ doc_events = {
 	},
 }
 
+permission_query_conditions = {
+	"Gate Pass": "upande_ta.upande_ta.doctype.gate_pass.gate_pass.get_permission_query_conditions",
+}
+
+has_permission = {
+	"Gate Pass": "upande_ta.upande_ta.doctype.gate_pass.gate_pass.has_permission",
+}
+
 scheduler_events = {
 	"cron": {
 		"0 0 * * *": [
