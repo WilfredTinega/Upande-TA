@@ -1,0 +1,457 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-08-15 09:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "employee_details_section",
+  "employee",
+  "employee_name",
+  "payroll_no",
+  "column_break_emp",
+  "company",
+  "department",
+  "designation",
+  "pass_details_section",
+  "date",
+  "pass_type",
+  "time_out",
+  "column_break_pass",
+  "returning_same_day",
+  "expected_time_in",
+  "expected_hours_out",
+  "reason_section",
+  "reason",
+  "approvals_section",
+  "supervisor",
+  "supervisor_name",
+  "supervisor_action_on",
+  "column_break_appr",
+  "hod",
+  "hod_name",
+  "hod_action_on",
+  "column_break_appr2",
+  "hr_approver",
+  "hr_approver_name",
+  "hr_action_on",
+  "gate_record_section",
+  "actual_time_out",
+  "actual_time_in",
+  "returned",
+  "column_break_gate",
+  "actual_hours_out",
+  "gate_officer",
+  "workflow_state",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "default": "HR-GP-.YYYY.-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "no_copy": 1,
+   "options": "HR-GP-.YYYY.-.#####",
+   "print_hide": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "employee_details_section",
+   "fieldtype": "Section Break",
+   "label": "Employee Details"
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "employee.employee_number",
+   "fieldname": "payroll_no",
+   "fieldtype": "Data",
+   "label": "Payroll No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_emp",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "employee.company",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "employee.department",
+   "fieldname": "department",
+   "fieldtype": "Link",
+   "label": "Department",
+   "options": "Department",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "employee.designation",
+   "fieldname": "designation",
+   "fieldtype": "Link",
+   "label": "Designation",
+   "options": "Designation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "pass_details_section",
+   "fieldtype": "Section Break",
+   "label": "Pass Details"
+  },
+  {
+   "default": "Today",
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Date",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Personal",
+   "fieldname": "pass_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Pass Type",
+   "options": "Official\nPersonal\nMedical\nEmergency",
+   "reqd": 1
+  },
+  {
+   "fieldname": "time_out",
+   "fieldtype": "Time",
+   "in_list_view": 1,
+   "label": "Time Out",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_pass",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "returning_same_day",
+   "fieldtype": "Check",
+   "label": "Returning Same Day"
+  },
+  {
+   "depends_on": "returning_same_day",
+   "fieldname": "expected_time_in",
+   "fieldtype": "Time",
+   "label": "Time Back In"
+  },
+  {
+   "fieldname": "expected_hours_out",
+   "fieldtype": "Float",
+   "label": "Expected Hours Out",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reason_section",
+   "fieldtype": "Section Break",
+   "label": "Reason"
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason for Leaving",
+   "reqd": 1
+  },
+  {
+   "fieldname": "approvals_section",
+   "fieldtype": "Section Break",
+   "label": "Approvals"
+  },
+  {
+   "fieldname": "supervisor",
+   "fieldtype": "Link",
+   "label": "Immediate Supervisor",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "supervisor.full_name",
+   "fieldname": "supervisor_name",
+   "fieldtype": "Data",
+   "label": "Supervisor Name",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "supervisor_action_on",
+   "fieldtype": "Datetime",
+   "label": "Supervisor Approved On",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_appr",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "hod",
+   "fieldtype": "Link",
+   "label": "Head of Department",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "hod.full_name",
+   "fieldname": "hod_name",
+   "fieldtype": "Data",
+   "label": "HOD Name",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "hod_action_on",
+   "fieldtype": "Datetime",
+   "label": "HOD Approved On",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_appr2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "hr_approver",
+   "fieldtype": "Link",
+   "label": "HR Approver",
+   "no_copy": 1,
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "hr_approver.full_name",
+   "fieldname": "hr_approver_name",
+   "fieldtype": "Data",
+   "label": "HR Approver Name",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "hr_action_on",
+   "fieldtype": "Datetime",
+   "label": "HR Approved On",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "depends_on": "eval:doc.docstatus===1",
+   "fieldname": "gate_record_section",
+   "fieldtype": "Section Break",
+   "label": "Gate Record"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "actual_time_out",
+   "fieldtype": "Time",
+   "label": "Actual Time Out",
+   "no_copy": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "actual_time_in",
+   "fieldtype": "Time",
+   "label": "Actual Time In",
+   "no_copy": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "default": "0",
+   "fieldname": "returned",
+   "fieldtype": "Check",
+   "label": "Returned",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_gate",
+   "fieldtype": "Column Break"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "actual_hours_out",
+   "fieldtype": "Float",
+   "label": "Actual Hours Out",
+   "no_copy": 1,
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "gate_officer",
+   "fieldtype": "Link",
+   "label": "Gate Officer",
+   "no_copy": 1,
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "workflow_state",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Workflow State",
+   "no_copy": 1,
+   "options": "Workflow State",
+   "print_hide": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Gate Pass",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-08-15 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Gate Pass",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "if_owner": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Employee",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Supervisor",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HOD",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR User",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Group HR Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Gate Security",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "employee_name",
+ "track_changes": 1
+}
