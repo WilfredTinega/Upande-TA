@@ -411,10 +411,14 @@ def material_request_employee_query(doctype, txt, searchfield, start, page_lengt
 
 	Falls back to a plain Employee search when there's no Material Request
 	context, matching bio_employee's existing unrestricted behavior -- also
-	used when the Material Request Item doctype doesn't exist at all (this
-	app is installed on other sites that don't have upande_stores, where
-	material_request can still be set on a Stock Entry Detail row for
-	reasons unrelated to this feature).
+	used when upande_stores' own ``employee`` Custom Field isn't present on
+	Material Request Item (this app is installed on other sites that don't
+	have upande_stores, where material_request can still be set on a Stock
+	Entry Detail row for reasons unrelated to this feature). Material
+	Request Item itself is a core ERPNext doctype -- its table always
+	exists regardless of whether upande_stores is installed -- so the real
+	"is this feature available" check is whether upande_stores' employee
+	column is actually present, not whether the table is.
 	"""
 	filters = frappe.parse_json(filters) if isinstance(filters, str) else (filters or {})
 	material_request = filters.get("material_request")
@@ -429,7 +433,7 @@ def material_request_employee_query(doctype, txt, searchfield, start, page_lengt
 	limit = cint(page_length) or 20
 	txt_lower = (txt or "").lower()
 
-	if not material_request or not frappe.db.table_exists("Material Request Item"):
+	if not material_request or not frappe.db.has_column("Material Request Item", "employee"):
 		# list(...): frappe.get_all(..., as_list=True) returns a tuple of tuples
 		# on this Frappe version -- normalize to the documented list[tuple] return
 		# type (also what the standard Link-field query contract expects).

@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import today
@@ -79,6 +81,32 @@ class IntegrationTestMaterialRequestEmployeeQuery(IntegrationTestCase):
 		results = material_request_employee_query("Employee", "", "name", 0, 20, {"material_request": ""})
 		self.assertIsInstance(results, list)
 		self.assertGreater(len(results), 0)
+
+	def test_falls_back_when_employee_field_not_queryable(self):
+		# Material Request Item is a core ERPNext doctype -- its table always
+		# exists whether or not upande_stores is installed, so the guard must
+		# key off upande_stores' own `employee` column, not table existence.
+		# Can't actually uninstall upande_stores on this shared dev site, so
+		# monkeypatch the guard's own check to simulate a site without it and
+		# confirm the query degrades to the unrestricted Employee search
+		# instead of raising.
+		emp1, emp2 = self.employees
+		mr = _make_material_request_with_items(
+			[
+				{"item_code": "_Test Item", "qty": 1, "employee": emp1},
+				{"item_code": "_Test Item 2", "qty": 1, "employee": emp2, "issued_via_stock_entry": "STE-0001"},
+			]
+		)
+		with patch("upande_ta.upande_ta.overrides.stock_entry.frappe.db.has_column", return_value=False):
+			results = material_request_employee_query(
+				"Employee", "", "name", 0, 20, {"material_request": mr.name}
+			)
+		names = [r[0] for r in results]
+		self.assertIsInstance(results, list)
+		self.assertGreater(len(results), 0)
+		# Unrestricted fallback: emp2 (already issued) is no longer excluded.
+		self.assertIn(emp1, names)
+		self.assertIn(emp2, names)
 
 	def test_fallback_does_not_filter_by_status(self):
 		non_active = frappe.get_all("Employee", filters={"status": ["!=", "Active"]}, limit=1, pluck="name")
