@@ -9,8 +9,9 @@ app_license = "mit"
 
 # Shown in the About dialog's app list and the navbar (Frappe reads this hook
 # per app; without it the app falls back to a generic letter tile). The nav
-# records themselves (Desktop Icon / Workspace Sidebar / Workspace) are site
-# data -- the app does not ship or re-create them on install/migrate.
+# records (Desktop Icon / Workspace Sidebar / Workspace) ship as files and are
+# re-synced on every migrate -- migrate's orphan sweep deletes any of them that
+# has no matching JSON in an installed app, so they cannot live in the DB alone.
 app_logo_url = "/assets/upande_ta/images/upande_logo.ico"
 
 required_apps = ["hrms"]
