@@ -9,8 +9,8 @@ app_license = "mit"
 
 # Shown in the About dialog's app list and the navbar (Frappe reads this hook
 # per app; without it the app falls back to a generic letter tile). The nav
-# records themselves (Desktop Icon / Workspace Sidebar / Workspace) are site
-# data -- the app does not ship or re-create them on install/migrate.
+# records themselves (Desktop Icon / Workspace Sidebar / Workspace) ARE shipped
+# by the app and force-resynced on every migrate -- see upande_ta/migrate.py.
 app_logo_url = "/assets/upande_ta/images/upande_logo.ico"
 
 required_apps = ["hrms"]
@@ -37,11 +37,17 @@ app_include_js = [
 	"monthly_attendance_sheet_colors.bundle.js",
 ]
 
-after_install = [
-	"upande_ta.install.ensure_ta_dashboard_block",
-	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
-	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
-]
+# One entry point each, so install and migrate apply the exact same set of steps
+# and a failure in any one of them is logged instead of aborting the rest. See
+# upande_ta/migrate.py for the ordered list, which covers:
+#   * force-reloading the module-level JSON resources the app ships (doctypes,
+#     reports, print formats) past Frappe's timestamp/hash skip;
+#   * the Scheduled Job Type rows configured per Biometric Setting, which the
+#     scheduler sync prunes on every migrate;
+#   * the Custom HTML Block and the custom fields added to HRMS/ERPNext doctypes;
+#   * the Desk nav the app ships (Workspace + Workspace Sidebar + Desktop Icon),
+#     normalising the workspace identity and collapsing duplicate tiles.
+after_install = "upande_ta.migrate.after_install"
 
 before_uninstall = [
 	"upande_ta.upande_ta.overrides.leave_type.remove_abbreviation_field",
@@ -49,15 +55,7 @@ before_uninstall = [
 ]
 
 
-after_migrate = [
-	"upande_ta.patches.v1.sanitize_link_filters.after_migrate_drop_check",
-	"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.resync_scheduled_jobs",
-	"upande_ta.install.ensure_ta_dashboard_block",
-	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
-	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
-	"upande_ta.upande_ta.cleanup.remove_orphans",
-	"upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime.ensure_overtime_setup",
-]
+after_migrate = "upande_ta.migrate.after_migrate"
 
 override_doctype_class = {
 	"Overtime Slip": "upande_ta.upande_ta.overrides.overtime_slip.UpandeOvertimeSlip",
