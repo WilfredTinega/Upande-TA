@@ -20,6 +20,7 @@ it reads ``Biometric Logs`` (also owned by this app) for the latest live scan.
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 
 MODULE = "Upande TA"
@@ -383,3 +384,77 @@ def revert_biometric(stock_entry):
 	se.db_set("biometric_verified_at", None, update_modified=False)
 	se.db_set("matched_biometric_log", None, update_modified=False)
 	se.notify_update()
+
+
+@frappe.whitelist()
+def material_request_employee_query(doctype, txt, searchfield, start, page_length, filters):
+	"""Link query for Stock Entry's bio_employee field.
+
+	filters["material_request"] is resolved client-side (see stock_entry.js)
+	from the current form's item rows -- not re-derived server-side from a
+	saved Stock Entry, so this works for unsaved drafts too. Scoped to that
+	Material Request's Employee Data rows that haven't been issued via
+	another Stock Entry yet (Employee Request.issued_via_stock_entry empty).
+
+	filters["item_codes"] (also resolved client-side, from the item_code of
+	every item row sharing that same material_request) further narrows this
+	to employees allocated one of those specific items -- e.g. a Material
+	Request allocating Amisil to James and MPK to Timothy will only offer
+	James when the Stock Entry is issuing Amisil. An Employee Request row
+	with no item_code (the pre-existing, item-agnostic PPE-workflow shape) is
+	never filtered out by this, and if no item_codes are passed at all
+	(nothing to filter by) every row is kept, preserving today's behavior
+	exactly.
+
+	Falls back to a plain Employee search when there's no Material Request
+	context, matching bio_employee's existing unrestricted behavior -- also
+	used when the Employee Request doctype doesn't exist at all (this app is
+	installed on other sites that don't have upande_stores, where
+	material_request can still be set on a Stock Entry Detail row for
+	reasons unrelated to this feature).
+	"""
+	filters = frappe.parse_json(filters) if isinstance(filters, str) else (filters or {})
+	material_request = filters.get("material_request")
+	item_codes = set(filter(None, filters.get("item_codes") or []))
+	if material_request and not frappe.has_permission("Material Request", "read", material_request):
+		# Caller can't read this Material Request -- degrade gracefully to the
+		# same unrestricted Employee search used when there's no Material
+		# Request context at all, rather than leaking which employees are
+		# tied to a Material Request the user isn't allowed to see.
+		material_request = None
+	offset = cint(start) or 0
+	limit = cint(page_length) or 20
+	txt_lower = (txt or "").lower()
+
+	if not material_request or not frappe.db.table_exists("Employee Request"):
+		# list(...): frappe.get_all(..., as_list=True) returns a tuple of tuples
+		# on this Frappe version -- normalize to the documented list[tuple] return
+		# type (also what the standard Link-field query contract expects).
+		# No status filter here: before this feature existed, bio_employee had
+		# no custom query at all -- Frappe's generic, fully unrestricted link
+		# search. This fallback must match that exactly, including Suspended/
+		# Inactive/Left employees.
+		return list(
+			frappe.get_all(
+				"Employee",
+				or_filters={"name": ["like", f"%{txt}%"], "employee_name": ["like", f"%{txt}%"]},
+				fields=["name", "employee_name"],
+				limit_start=offset,
+				limit=limit,
+				as_list=True,
+			)
+		)
+
+	rows = frappe.get_all(
+		"Employee Request",
+		filters={"parent": material_request, "parenttype": "Material Request"},
+		fields=["employee", "employee_name", "issued_via_stock_entry", "item_code"],
+	)
+	results = [
+		(row.employee, row.employee_name)
+		for row in rows
+		if not row.issued_via_stock_entry
+		and (not row.item_code or not item_codes or row.item_code in item_codes)
+		and (txt_lower in (row.employee or "").lower() or txt_lower in (row.employee_name or "").lower())
+	]
+	return results[offset : offset + limit]
