@@ -57,6 +57,7 @@ def _steps():
 		#    have re-stamped or re-created a record.
 		("normalize_ta_workspace", normalize_ta_workspace),
 		("enforce_single_desktop_icon", enforce_single_desktop_icon),
+		("enforce_single_workspace_sidebar", enforce_single_workspace_sidebar),
 	)
 
 
@@ -275,4 +276,77 @@ def enforce_single_desktop_icon():
 			)
 
 	frappe.cache.delete_key("desktop_icons")
+	frappe.cache.delete_key("bootinfo")
+
+
+# --------------------------------------------------------------------------- #
+# workspace sidebar
+# --------------------------------------------------------------------------- #
+
+# `create_workspace_sidebar_for_workspaces()` (bench install-app, some upgrades)
+# makes one Workspace Sidebar per public Workspace, titled after it. Delete the
+# workspace later and the sidebar is left behind — and because those auto-created
+# records carry no `app` and `standard=0`, frappe.model.sync.remove_orphan_entities()
+# can never see them. The result is a second, dead sidebar in the Desk switcher
+# alongside the one this app ships.
+#
+# Only genuine orphans are removed: a sidebar still backing a live Workspace
+# belongs to the site, even when Frappe has stamped it with this app's module.
+_CANONICAL_SIDEBAR = "Upande TA"
+
+
+def _orphan_workspace_sidebars():
+	"""Sidebars stamped with this module whose Workspace no longer exists."""
+	orphans = []
+	rows = frappe.get_all(
+		"Workspace Sidebar",
+		filters={"module": MODULE_NAME, "for_user": ["in", ["", None]]},
+		pluck="name",
+	)
+	for name in rows:
+		if name == _CANONICAL_SIDEBAR:
+			continue
+		# Auto-created sidebars are titled after their workspace, so a matching
+		# Workspace means it is still live.
+		if frappe.db.exists("Workspace", name):
+			continue
+		# ...and honour a renamed one whose Home item still resolves.
+		targets = frappe.get_all(
+			"Workspace Sidebar Item",
+			filters={"parent": name, "link_type": "Workspace"},
+			pluck="link_to",
+		)
+		if any(t and frappe.db.exists("Workspace", t) for t in targets):
+			continue
+		orphans.append(name)
+	return orphans
+
+
+def enforce_single_workspace_sidebar():
+	"""Drop Workspace Sidebars left behind by deleted workspaces."""
+	orphans = _orphan_workspace_sidebars()
+	if not orphans:
+		return
+
+	for name in orphans:
+		try:
+			# Clear app first: Workspace Sidebar.on_trash deletes the app's shipped
+			# JSON when developer_mode is on and `app` is set.
+			frappe.db.set_value(
+				"Workspace Sidebar", name, {"standard": 0, "app": None}, update_modified=False
+			)
+			frappe.delete_doc(
+				"Workspace Sidebar",
+				name,
+				ignore_permissions=True,
+				force=True,
+				ignore_missing=True,
+			)
+			print(f"{APP_NAME}: removed orphan Workspace Sidebar '{name}'")
+		except Exception:
+			frappe.log_error(
+				title=f"{APP_NAME} enforce_single_workspace_sidebar: {name}",
+				message=frappe.get_traceback(),
+			)
+
 	frappe.cache.delete_key("bootinfo")
