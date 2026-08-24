@@ -9,8 +9,9 @@ app_license = "mit"
 
 # Shown in the About dialog's app list and the navbar (Frappe reads this hook
 # per app; without it the app falls back to a generic letter tile). The nav
-# records themselves (Desktop Icon / Workspace Sidebar / Workspace) ARE shipped
-# by the app and force-resynced on every migrate -- see upande_ta/migrate.py.
+# records (Desktop Icon / Workspace Sidebar / Workspace) ship as files and are
+# re-synced on every migrate -- migrate's orphan sweep deletes any of them that
+# has no matching JSON in an installed app, so they cannot live in the DB alone.
 app_logo_url = "/assets/upande_ta/images/upande_logo.ico"
 
 required_apps = ["hrms"]
@@ -48,6 +49,11 @@ app_include_js = [
 #   * the Desk nav the app ships (Workspace + Workspace Sidebar + Desktop Icon),
 #     normalising the workspace identity and collapsing duplicate tiles.
 after_install = "upande_ta.migrate.after_install"
+after_install = [
+	"upande_ta.install.ensure_ta_dashboard_block",
+	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
+	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
+]
 
 before_uninstall = [
 	"upande_ta.upande_ta.overrides.leave_type.remove_abbreviation_field",
@@ -56,6 +62,15 @@ before_uninstall = [
 
 
 after_migrate = "upande_ta.migrate.after_migrate"
+after_migrate = [
+	"upande_ta.patches.v1.sanitize_link_filters.after_migrate_drop_check",
+	"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.resync_scheduled_jobs",
+	"upande_ta.install.ensure_ta_dashboard_block",
+	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
+	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
+	"upande_ta.upande_ta.cleanup.remove_orphans",
+	"upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime.ensure_overtime_setup",
+]
 
 override_doctype_class = {
 	"Overtime Slip": "upande_ta.upande_ta.overrides.overtime_slip.UpandeOvertimeSlip",
@@ -84,6 +99,14 @@ doc_events = {
 	"Meal Checkin": {
 		"after_insert": "upande_ta.upande_ta.meal_checkin_receipt.attach_receipt",
 	},
+}
+
+permission_query_conditions = {
+	"Gate Pass": "upande_ta.upande_ta.doctype.gate_pass.gate_pass.get_permission_query_conditions",
+}
+
+has_permission = {
+	"Gate Pass": "upande_ta.upande_ta.doctype.gate_pass.gate_pass.has_permission",
 }
 
 scheduler_events = {
