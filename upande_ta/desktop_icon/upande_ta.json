@@ -15,7 +15,7 @@
  "name": "Upande TA",
  "owner": "Administrator",
  "parent_icon": "Frappe HR",
- "restrict_removal": 0,
+ "restrict_removal": 1,
  "roles": [],
  "sidebar": "Upande TA",
  "standard": 1
