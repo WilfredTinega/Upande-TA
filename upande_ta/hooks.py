@@ -38,6 +38,17 @@ app_include_js = [
 	"monthly_attendance_sheet_colors.bundle.js",
 ]
 
+# One entry point each, so install and migrate apply the exact same set of steps
+# and a failure in any one of them is logged instead of aborting the rest. See
+# upande_ta/migrate.py for the ordered list, which covers:
+#   * force-reloading the module-level JSON resources the app ships (doctypes,
+#     reports, print formats) past Frappe's timestamp/hash skip;
+#   * the Scheduled Job Type rows configured per Biometric Setting, which the
+#     scheduler sync prunes on every migrate;
+#   * the Custom HTML Block and the custom fields added to HRMS/ERPNext doctypes;
+#   * the Desk nav the app ships (Workspace + Workspace Sidebar + Desktop Icon),
+#     normalising the workspace identity and collapsing duplicate tiles.
+after_install = "upande_ta.migrate.after_install"
 after_install = [
 	"upande_ta.install.ensure_ta_dashboard_block",
 	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
@@ -50,6 +61,7 @@ before_uninstall = [
 ]
 
 
+after_migrate = "upande_ta.migrate.after_migrate"
 after_migrate = [
 	"upande_ta.patches.v1.sanitize_link_filters.after_migrate_drop_check",
 	"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.resync_scheduled_jobs",
