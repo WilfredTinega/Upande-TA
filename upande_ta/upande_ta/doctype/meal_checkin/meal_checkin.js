@@ -2,9 +2,13 @@
 // For license information, please see license.txt
 
 // Auto-print a centered 72mm thermal meal receipt on save, on the kitchen
-// terminal that has the TM-T20III. For SILENT printing launch Chrome with
-// --kiosk-printing (or use the QZ Tray Printer Settings page) and set the
-// TM-T20III as the default printer.
+// terminal that has the TM-T20III.
+//
+// Preferred path is QZ Tray: save the printer once on /printer-settings and the
+// receipt prints silently, with the site signing every request (see
+// upande_ta/upande_ta/api/qz.py). Where QZ Tray is not installed this falls back
+// to the browser print dialog, which is only silent under Chrome
+// --kiosk-printing with the TM-T20III as the default printer.
 frappe.ui.form.on("Meal Checkin", {
 	after_save: function (frm) {
 		var meals = ["Breakfast", "Lunch", "Supper", "Dinner"];
@@ -12,13 +16,18 @@ frappe.ui.form.on("Meal Checkin", {
 		if (!d.log_type || meals.indexOf(d.log_type) === -1) return;
 
 		frappe.db.get_value("Employee", d.employee, "employee_name").then(function (r) {
-			var emp = r && r.message && r.message.employee_name ? r.message.employee_name : d.employee || "-";
+			var emp =
+				r && r.message && r.message.employee_name
+					? r.message.employee_name
+					: d.employee || "-";
 			var payroll = d.payroll_number || d.employee || "-";
 			var ts = d.time ? frappe.datetime.str_to_user(d.time) : "-";
 			var tqr = (d.time || "").replace(/[^0-9]/g, "").slice(0, 12);
 			var qr =
 				"https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=0&data=" +
-				encodeURIComponent("KENTROUT_" + d.name + "_" + payroll + "_" + d.log_type + "_" + tqr);
+				encodeURIComponent(
+					"KENTROUT_" + d.name + "_" + payroll + "_" + d.log_type + "_" + tqr
+				);
 
 			var css =
 				"<style>" +
@@ -43,54 +52,86 @@ frappe.ui.form.on("Meal Checkin", {
 				'<div class="hdr">KENTROUT FARM</div>' +
 				'<div class="sub">Meal Receipt</div>' +
 				"<hr>" +
-				'<div class="meal">' + String(d.log_type).toUpperCase() + "</div>" +
+				'<div class="meal">' +
+				String(d.log_type).toUpperCase() +
+				"</div>" +
 				"<table>" +
-				'<tr><td class="k">Employee</td><td class="v">' + emp + "</td></tr>" +
-				'<tr><td class="k">Payroll No</td><td class="v">' + payroll + "</td></tr>" +
-				'<tr><td class="k">Time</td><td class="v">' + ts + "</td></tr>" +
+				'<tr><td class="k">Employee</td><td class="v">' +
+				emp +
+				"</td></tr>" +
+				'<tr><td class="k">Payroll No</td><td class="v">' +
+				payroll +
+				"</td></tr>" +
+				'<tr><td class="k">Time</td><td class="v">' +
+				ts +
+				"</td></tr>" +
 				"</table>" +
-				'<img src="' + qr + '" width="128" height="128">' +
+				'<img src="' +
+				qr +
+				'" width="128" height="128">' +
 				"<hr>" +
-				'<div class="foot">Receipt ' + d.name + "</div>" +
+				'<div class="foot">Receipt ' +
+				d.name +
+				"</div>" +
 				"</div>";
 
-			var html = "<!doctype html><html><head><meta charset=\"utf-8\">" + css + "</head><body>" + body + "</body></html>";
+			var html =
+				'<!doctype html><html><head><meta charset="utf-8">' +
+				css +
+				"</head><body>" +
+				body +
+				"</body></html>";
 
-			var ifr = document.createElement("iframe");
-			ifr.style.position = "fixed";
-			ifr.style.right = "0";
-			ifr.style.bottom = "0";
-			ifr.style.width = "0";
-			ifr.style.height = "0";
-			ifr.style.border = "0";
-			document.body.appendChild(ifr);
-
-			var idoc = ifr.contentWindow.document;
-			idoc.open();
-			idoc.write(html);
-			idoc.close();
-
-			var done = false;
-			var doPrint = function () {
-				if (done) return;
-				done = true;
-				try {
-					ifr.contentWindow.focus();
-					ifr.contentWindow.print();
-				} catch (e) {
-					console.error("Meal receipt print failed", e);
-				}
-				setTimeout(function () {
-					if (ifr && ifr.parentNode) ifr.parentNode.removeChild(ifr);
-				}, 2000);
-			};
-
-			var img = idoc.images && idoc.images[0];
-			if (img) {
-				img.onload = doPrint;
-				img.onerror = doPrint;
+			var bridge = window.upande_ta && window.upande_ta.qz;
+			if (bridge && bridge.isTerminal()) {
+				bridge.printHtml(html).catch(function (err) {
+					console.warn("QZ Tray receipt failed, falling back to the print dialog", err);
+					dialogPrint(html);
+				});
+				return;
 			}
-			setTimeout(doPrint, 1500);
+
+			dialogPrint(html);
 		});
 	},
 });
+
+// Browser print dialog fallback: render the receipt in a hidden iframe and print
+// it, once the QR image has settled.
+function dialogPrint(html) {
+	var ifr = document.createElement("iframe");
+	ifr.style.position = "fixed";
+	ifr.style.right = "0";
+	ifr.style.bottom = "0";
+	ifr.style.width = "0";
+	ifr.style.height = "0";
+	ifr.style.border = "0";
+	document.body.appendChild(ifr);
+
+	var idoc = ifr.contentWindow.document;
+	idoc.open();
+	idoc.write(html);
+	idoc.close();
+
+	var done = false;
+	var doPrint = function () {
+		if (done) return;
+		done = true;
+		try {
+			ifr.contentWindow.focus();
+			ifr.contentWindow.print();
+		} catch (e) {
+			console.error("Meal receipt print failed", e);
+		}
+		setTimeout(function () {
+			if (ifr && ifr.parentNode) ifr.parentNode.removeChild(ifr);
+		}, 2000);
+	};
+
+	var img = idoc.images && idoc.images[0];
+	if (img) {
+		img.onload = doPrint;
+		img.onerror = doPrint;
+	}
+	setTimeout(doPrint, 1500);
+}

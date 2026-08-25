@@ -34,8 +34,16 @@ before_job = [
 
 
 app_include_js = [
-	
 	"monthly_attendance_sheet_colors.bundle.js",
+	# Signed QZ Tray printing. Loaded on every page so any form can print to the
+	# local receipt printer; qz-tray.js itself is fetched only on terminals that
+	# have a printer saved. See upande_ta/upande_ta/api/qz.py.
+	"/assets/upande_ta/js/qz_bridge.js",
+]
+
+# The Printer Settings page lives on the website, not the desk.
+web_include_js = [
+	"/assets/upande_ta/js/qz_bridge.js",
 ]
 
 # One entry point each, so install and migrate apply the exact same set of steps
