@@ -1,0 +1,21 @@
+{
+ "action": "Create Entry",
+ "action_label": "Assign the shift",
+ "creation": "2026-08-30 00:00:00.000000",
+ "description": "<b>What this is.</b> A shift on its own does nothing. Each employee has to be put on one, from a date.<br><br><b>What to do.</b> Assign the shift you just created to the people who work it. Until an employee is assigned a shift, their scans have nothing to be measured against.<br><br><b>Where to find it.</b> <b>Shift Assignment</b>, under HR.",
+ "docstatus": 0,
+ "doctype": "Onboarding Step",
+ "idx": 0,
+ "is_complete": 0,
+ "is_single": 0,
+ "is_skipped": 0,
+ "modified": "2026-08-30 00:00:00.000000",
+ "modified_by": "Administrator",
+ "name": "Assign the Shift",
+ "owner": "Administrator",
+ "reference_document": "Shift Assignment",
+ "show_form_tour": 0,
+ "show_full_form": 1,
+ "title": "Shift Assignment \u2014 who works which shift",
+ "validate_action": 1
+}
