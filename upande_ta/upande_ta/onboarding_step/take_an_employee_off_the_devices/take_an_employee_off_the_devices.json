@@ -1,0 +1,21 @@
+{
+ "action": "Go to Page",
+ "action_label": "Remove the employee from the device",
+ "creation": "2026-08-30 00:00:00.000000",
+ "description": "<b>What this is.</b> An employee who has left should not still be able to clock in, and should not keep appearing in your headcount.<br><br><b>What to do.</b> Change their <b>Status</b> to <b>Left</b>, <b>Suspended</b> or <b>Inactive</b> and save. You are asked which machines to remove them from. If they come back and you set them Active again, you are offered the reverse \u2014 putting them back on.<br><br><b>Where to find it.</b> <b>Employee</b>, under HR.",
+ "docstatus": 0,
+ "doctype": "Onboarding Step",
+ "idx": 0,
+ "is_complete": 0,
+ "is_single": 0,
+ "is_skipped": 0,
+ "modified": "2026-08-30 00:00:00.000000",
+ "modified_by": "Administrator",
+ "name": "Take an Employee off the Devices",
+ "owner": "Administrator",
+ "path": "List/Employee",
+ "show_form_tour": 0,
+ "show_full_form": 0,
+ "title": "Employee \u2014 remove them from the device",
+ "validate_action": 1
+}
