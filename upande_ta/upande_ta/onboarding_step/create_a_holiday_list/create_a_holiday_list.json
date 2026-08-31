@@ -1,0 +1,21 @@
+{
+ "action": "Create Entry",
+ "action_label": "Create a holiday list",
+ "creation": "2026-08-30 00:00:00.000000",
+ "description": "<b>What this is.</b> Holds the public holidays for the year and which day of the week is the rest day. It is what stops an employee being marked absent on a day they were never meant to work.<br><br><b>What to do.</b> Make one per year, set the weekly rest day, and add the public holidays.<br><br><b>Where to find it.</b> <b>Holiday List</b>, under HR.",
+ "docstatus": 0,
+ "doctype": "Onboarding Step",
+ "idx": 0,
+ "is_complete": 0,
+ "is_single": 0,
+ "is_skipped": 0,
+ "modified": "2026-08-30 00:00:00.000000",
+ "modified_by": "Administrator",
+ "name": "Create a Holiday List",
+ "owner": "Administrator",
+ "reference_document": "Holiday List",
+ "show_form_tour": 0,
+ "show_full_form": 1,
+ "title": "Holiday List \u2014 days nobody is expected",
+ "validate_action": 1
+}
