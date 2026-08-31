@@ -12,76 +12,6 @@ _DAY_RE = re.compile(r"^\d{2}-\d{2}-\d{4}$")
 
 _LEAVE_SEP = "|"
 
-# Extra report filters this override adds on top of HRMS'. Each maps the report
-# filter's fieldname to the Employee field it restricts on. The Unit/Division
-# field is a custom field shipped by the site apps (upande_hr / upande_kaitet),
-# so it is only offered where it actually exists -- upande_ta itself runs on
-# sites without it.
-EXTRA_FILTER_FIELDS = {
-	"employment_type": "employment_type",
-	"unit_division": "custom_farm",
-}
-
-
-def get_extra_filter_config() -> list[dict]:
-	"""Describe the extra filters the client should render, in display order.
-
-	Returns one entry per Employee field that exists on this site; the client
-	turns each into a Link filter. Driven off the Employee meta so the label and
-	link target follow whatever the site's custom field says.
-	"""
-	meta = frappe.get_meta("Employee")
-	config = []
-
-	for filter_field, employee_field in EXTRA_FILTER_FIELDS.items():
-		df = meta.get_field(employee_field)
-		if not df or df.fieldtype != "Link" or not df.options:
-			continue
-		config.append(
-			{
-				"fieldname": filter_field,
-				"label": _(df.label or employee_field),
-				"options": df.options,
-			}
-		)
-
-	return config
-
-
-def extend_bootinfo(bootinfo=None):
-	"""Publish the extra filters to the desk so the client patch can render them
-	without an extra round trip when the report opens."""
-	try:
-		bootinfo.upande_ta_attendance_filters = get_extra_filter_config()
-	except Exception:
-		frappe.log_error(frappe.get_traceback(), "Monthly Attendance Sheet filters bootinfo")
-
-
-def get_extra_employee_conditions(filters) -> dict:
-	"""Applied filter value per Employee field; empty when none are set."""
-	meta = frappe.get_meta("Employee")
-	conditions = {}
-
-	for filter_field, employee_field in EXTRA_FILTER_FIELDS.items():
-		value = filters.get(filter_field)
-		if not value or not meta.has_field(employee_field):
-			continue
-		conditions[employee_field] = value
-
-	return conditions
-
-
-def get_allowed_employees(filters):
-	"""Employees passing the extra filters, or None when none are set."""
-	conditions = get_extra_employee_conditions(filters)
-	if not conditions:
-		return None
-
-	if filters.get("companies"):
-		conditions["company"] = ("in", filters.companies)
-
-	return set(frappe.get_all("Employee", filters=conditions, pluck="name"))
-
 
 def get_leave_abbr(leave_type: str) -> str:
 	if not leave_type:
@@ -130,64 +60,9 @@ def get_attendance_records(filters):
 
 	if filters.employee:
 		query = query.where(Attendance.employee == filters.employee)
-
-	# The rows come from the Employee query, but the chart is built straight off
-	# these records -- so the same employee restrictions have to be applied here
-	# or the chart counts people the filters excluded.
-	employee_conditions = get_extra_employee_conditions(filters)
-	if filters.department or filters.branch or employee_conditions:
-		Employee = frappe.qb.DocType("Employee")
-		query = query.join(Employee).on(Attendance.employee == Employee.name)
-		if filters.department and filters.department != "All Departments":
-			query = query.where(Employee.department == filters.department)
-		if filters.branch:
-			query = query.where(Employee.branch == filters.branch)
-		for employee_field, value in employee_conditions.items():
-			query = query.where(Employee[employee_field] == value)
-
 	query = query.orderby(Attendance.employee, Attendance.attendance_date)
 
 	return query.run(as_dict=1)
-
-
-def get_employee_related_details(filters):
-	"""HRMS' employee query plus the Employment Type / Unit/Division filters.
-
-	Wraps rather than reimplements the original so it keeps following HRMS'
-	selected fields and group-by handling; the extra filters are applied by
-	pruning the employees it returned.
-	"""
-	original = _hrms_get_employee_related_details
-	if original is None or original is get_employee_related_details:
-		apply_patch()
-		original = _hrms_get_employee_related_details
-	if original is None or original is get_employee_related_details:
-		frappe.throw(_("Monthly Attendance Sheet override is not correctly patched."))
-
-	emp_map, group_by_param_values = original(filters)
-
-	allowed = get_allowed_employees(filters)
-	if allowed is None:
-		return emp_map, group_by_param_values
-
-	if not filters.group_by:
-		return {name: emp for name, emp in emp_map.items() if name in allowed}, group_by_param_values
-
-	# Grouped: emp_map is {group value: {employee: details}}. Drop the employees
-	# that were filtered out, then the groups left empty -- get_data iterates
-	# group_by_param_values and would KeyError on a group we removed.
-	pruned = {}
-	for parameter, employees in emp_map.items():
-		kept = frappe._dict(
-			{name: emp for name, emp in employees.items() if name in allowed}
-		)
-		if kept:
-			pruned[parameter] = kept
-
-	return pruned, [value for value in group_by_param_values if value in pruned]
-
-
-get_employee_related_details._upande_ta_patched = True
 
 
 def build_shift_resolver(employees, filters):
@@ -512,12 +387,11 @@ execute._upande_ta_patched = True
 
 _hrms = None
 _hrms_execute = None
-_hrms_get_employee_related_details = None
 _patched = False
 
 
 def apply_patch(*args, **kwargs):
-	global _hrms, _hrms_execute, _hrms_get_employee_related_details, _patched
+	global _hrms, _hrms_execute, _patched
 
 	from hrms.hr.report.monthly_attendance_sheet import monthly_attendance_sheet as mod
 
@@ -527,19 +401,10 @@ def apply_patch(*args, **kwargs):
 		mod._upande_ta_original_execute = mod.execute
 	_hrms_execute = getattr(mod, "_upande_ta_original_execute", None)
 
-	if not getattr(
-		getattr(mod, "get_employee_related_details", None), "_upande_ta_patched", False
-	):
-		mod._upande_ta_original_get_employee_related_details = mod.get_employee_related_details
-	_hrms_get_employee_related_details = getattr(
-		mod, "_upande_ta_original_get_employee_related_details", None
-	)
-
 	if _patched and getattr(mod.execute, "_upande_ta_patched", False):
 		return
 
 	mod.get_attendance_records = get_attendance_records
-	mod.get_employee_related_details = get_employee_related_details
 	mod.get_attendance_map = get_attendance_map
 	mod.get_attendance_status_for_detailed_view = get_attendance_status_for_detailed_view
 	mod.get_chart_data = get_chart_data
