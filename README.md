@@ -20,6 +20,7 @@ dashboard, and an enhanced Monthly Attendance Sheet.
 - [4. Bulk Week Off](#4-bulk-week-off)
 - [5. TA Dashboard](#5-ta-dashboard)
 - [6. upande_scp integration](#6-upande_scp-integration)
+- [7. Receipt printing via QZ Tray](#7-receipt-printing-via-qz-tray)
 - [App lifecycle & scheduled jobs](#app-lifecycle--scheduled-jobs)
 - [Compatibility](#compatibility)
 - [Known limitations](#known-limitations)
@@ -343,6 +344,79 @@ like `employee.js`): a **Check Biometric Log** button matches the latest
 Biometric Logs scan for `bio_employee` within a 1-minute window, flips
 `biometric_status` to Verified/Failed with a styled badge, auto-submits on
 success, and soft-blocks submit (escalation warning) when unverified.
+
+---
+
+## 7. Receipt printing via QZ Tray
+
+Thermal receipts (meal checkins today) print on the operator's own computer even
+though the site is hosted elsewhere. **QZ Tray** listens on
+`wss://localhost:8181` and only accepts calls from the browser, never from a
+server, so the chain is **site page → QZ Tray on that computer → printer**.
+Nothing has to reach into the site's network: no tunnel, no inbound port, no
+per-branch VPN.
+
+```
+   ┌──────────────┐   signed call over wss://localhost:8181   ┌──────────┐   ┌──────────┐
+   │ browser tab  │  ─────────────────────────────────────►   │ QZ Tray  │──►│ receipt  │
+   │ (site page)  │                                           │ (local)  │   │ printer  │
+   └──────┬───────┘                                           └──────────┘   └──────────┘
+          │  certificate() / sign()  ▲   publish_realtime (server-raised jobs)
+          ▼                          │
+   ┌──────────────────────────────────────────┐
+   │ site: upande_ta/upande_ta/api/qz.py      │
+   └──────────────────────────────────────────┘
+```
+
+**Signing.** QZ Tray will not print unattended unless every call is signed, and
+the browser must not hold the key. `qz-tray.js` hands the SHA-256 digest of
+`{call, params, timestamp}` to the site; `api/qz.py` returns an **RSA-SHA512**
+signature over it (`SHA512` here must stay in step with
+`qz.security.setSignatureAlgorithm("SHA512")` in the bridge). The browser only
+ever sees the public certificate.
+
+Configure the key pair per site — either inline PEM (Frappe Cloud: Site Config)
+or an absolute path to the PEM file:
+
+```json
+"qz_certificate": "-----BEGIN CERTIFICATE-----\n…",
+"qz_private_key": "-----BEGIN PRIVATE KEY-----\n…"
+```
+
+**Trust.** A signed request from an unknown certificate still raises QZ Tray's
+allow/deny dialog. Install the *same* certificate as **`override.crt`** in QZ
+Tray's install directory (`/opt/qz-tray` on Linux) — QZ Tray reads it as an extra
+trusted root at startup — and printing goes silent. Restart QZ Tray afterwards.
+Per-computer alternative: click **Allow** once with **Remember**.
+
+**Client API** (`public/js/qz_bridge.js`, loaded on desk and website;
+`qz-tray.js` itself is vendored in `public/js/lib/` and fetched only on
+terminals that have a printer saved):
+
+| Call | Purpose |
+|---|---|
+| `upande_ta.qz.printHtml(html, printer?, widthMm?)` | 72mm HTML receipt |
+| `upande_ta.qz.printRaw(commands, printer?)` | raw ESC/POS command strings |
+| `upande_ta.qz.printers()` | printers QZ Tray can see |
+| `upande_ta.qz.printer()` / `setPrinter(name)` | the per-computer printer choice |
+| `upande_ta.qz.isTerminal()` | is a printer saved on this computer |
+
+**Choosing the printer.** A computer becomes a print terminal by saving a printer
+on **`/printer-settings`**; the choice lives in that browser's `localStorage`
+(key `meal_receipt_printer`), never on the server, so one site serves branches
+with different printers.
+
+**Server-raised jobs.** `qz.send_to_terminal(data, printer=None, user=None)`
+publishes a realtime job that only armed terminals act on — for receipts raised
+by server code (a device sync, a scheduled job) rather than by the person at the
+keyboard. It defaults to `after_commit=True`, so a rolled back transaction cannot
+print paper.
+
+**Meal receipts** (`doctype/meal_checkin/meal_checkin.js`) take this path when a
+printer is saved, and fall back to the browser print dialog (silent only under
+Chrome `--kiosk-printing`) otherwise. The receipt's QR code is fetched from
+`api.qrserver.com`, so the *printing computer* needs internet for the QR to
+render.
 
 ---
 
