@@ -11,6 +11,7 @@ in isolation: a failure is logged and the remaining steps still run, so one
 broken piece can never abort the migrate or silently skip the rest of the app.
 """
 
+import json
 import os
 
 import frappe
@@ -33,6 +34,7 @@ def _steps():
 		resync_scheduled_jobs,
 	)
 	from upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime import ensure_overtime_setup
+	from upande_ta.upande_ta.api.attendance_insights import ensure_attendance_insights_fields
 	from upande_ta.upande_ta.overrides.leave_type import ensure_abbreviation_field
 	from upande_ta.upande_ta.overrides.stock_entry import ensure_biometric_stock_entry_fields
 
@@ -47,6 +49,7 @@ def _steps():
 		# 3. Records Frappe cannot sync from the app folder at all, and the custom
 		#    fields this app adds to HRMS/ERPNext doctypes.
 		("ensure_ta_dashboard_block", ensure_ta_dashboard_block),
+		("ensure_attendance_insights_fields", ensure_attendance_insights_fields),
 		("ensure_abbreviation_field", ensure_abbreviation_field),
 		("ensure_biometric_stock_entry_fields", ensure_biometric_stock_entry_fields),
 		("ensure_overtime_setup", ensure_overtime_setup),
@@ -118,7 +121,10 @@ def _app_resource_paths():
 	for module in get_module_list(APP_NAME) or []:
 		module_root = frappe.get_app_path(APP_NAME, frappe.scrub(module))
 		if os.path.isdir(module_root):
-			get_doc_files(files=paths, start_path=module_root)
+			# Take the return value: get_doc_files() starts with `files = files or []`,
+			# so an empty list argument is rebound to a new list and everything it
+			# collected for the first module is dropped on the floor.
+			paths = get_doc_files(files=paths, start_path=module_root)
 
 	app_root = frappe.get_app_path(APP_NAME)
 	for folder in _APP_LEVEL_DIRS:
@@ -132,6 +138,36 @@ def _app_resource_paths():
 	return paths
 
 
+def _site_owns(path: str) -> bool:
+	"""Has the site taken ownership of the record this file would overwrite?
+
+	Nav records (Workspace Sidebar, Workspace, Desktop Icon) ship as standard
+	records, and a standard record is read-only in the desk — you cannot remove
+	an item somebody should not see. Clearing `standard` hands the record to the
+	site, and from then on the app must stop overwriting it, or the next migrate
+	quietly restores every item that was deleted.
+
+	So: `standard = 1` means the app owns it and resync applies; `standard = 0`
+	means the site owns it and the file stays on disk as the default for new
+	installs only.
+	"""
+	try:
+		with open(path) as fh:
+			doc = json.load(fh)
+	except Exception:
+		return False
+
+	doctype, name = doc.get("doctype"), doc.get("name")
+	if not doctype or not name:
+		return False
+	if not frappe.db.has_column(doctype, "standard"):
+		return False
+	if not frappe.db.exists(doctype, name):
+		return False
+
+	return not frappe.db.get_value(doctype, name, "standard")
+
+
 def resync_app_resources():
 	"""Force-reload every JSON resource this app ships, ignoring DB-vs-file
 	timestamps and hashes. Safe to run repeatedly."""
@@ -143,6 +179,10 @@ def resync_app_resources():
 	_patch_mode(True)
 	try:
 		for path in _app_resource_paths():
+			# A record the site has taken ownership of is never overwritten —
+			# see _site_owns().
+			if _site_owns(path):
+				continue
 			try:
 				import_file_by_path(path, force=True, ignore_version=True)
 				frappe.db.commit()  # nosemgrep - keep each resource independent
