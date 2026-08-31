@@ -1,0 +1,23 @@
+{
+ "action": "Update Settings",
+ "action_label": "Connect the machines",
+ "creation": "2026-08-28 15:24:43.135894",
+ "description": "<b>What this is.</b> Frappe never speaks to the fingerprint machines directly. It sends its instructions to a small piece of software sitting between them, and the machines send their scans back the same way. This page is where you say how to reach that middle piece.<br><br><b>What to do.</b> Fill in the address and port it runs on. Nothing else in the app works until this is right \u2014 no fingerprints go down to the machines and no scans come back.<br><br><b>Where to find it.</b> <b>Biometric Setting</b> in the menu on the left.",
+ "docstatus": 0,
+ "doctype": "Onboarding Step",
+ "field": "server_ip",
+ "idx": 0,
+ "is_complete": 0,
+ "is_single": 1,
+ "is_skipped": 0,
+ "modified": "2026-08-28 16:21:21.878853",
+ "modified_by": "Administrator",
+ "name": "Configure the Biometric Relay",
+ "owner": "Administrator",
+ "reference_document": "Biometric Setting",
+ "show_form_tour": 0,
+ "show_full_form": 0,
+ "title": "Biometric Setting \u2014 connect the fingerprint machines",
+ "validate_action": 1,
+ "value_to_validate": "%"
+}

@@ -1,0 +1,542 @@
+{% extends "templates/web.html" %}
+
+{% block title %}{{ _("Attendance Insights") }}{% endblock %}
+
+{# Ported from the Web Page record of the same route on the live site
+   (modified 2026-08-27). Styles and script live in the colocated
+   attendance-insights.css / attendance-insights.js, which frappe picks up
+   by filename. The markup carries no Jinja of its own, so it is wrapped in
+   {% raw %} — a stray brace in the inline SVG or a JS-ish attribute would
+   otherwise be read as a template tag. #}
+{% block page_content %}
+{% raw %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Poppins only: Fraunces and DM Mono are no longer used anywhere on the page. -->
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+
+
+
+
+
+  <button id="att-sb-toggle" class="att-sb-toggle" title="Companies & Units">&#9776; UNITS</button>
+  <aside id="att-sidebar" class="att-sidebar" aria-label="Companies and units">
+    <div class="att-sb-head"><div class="att-sb-brand"><img class="att-logo" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAO0AAADVCAMAAACMuod9AAAAk1BMVEX///9FQz9EQz9iXVlFQz5ZVVAaGRf8/PxiXVgsKyY8OjZfWlY2NC8uLSkyMCre3t0mJSB5dXLCwsFlZGIAAAAlIyEbGhMkIx2cm5oVFBIVEwpUTkofHhhYV1RBPjpsaWXt7e25t7bo6OfS0tGXl5VKSUaop6aOjYuGhYPHx8atrKt/e3jr6+qAf33X19e8vLsNCgDP6XvaAAATkElEQVR4nO2diWLauhJAsaIWxEXGhNTmOSYQCFuapf//dU/bSCNbZklSbFLmtgk2QtbxjGaRTG+nc5WrXOUq31Pmo9fX198VGX1WZkim+6V7PtqX+//+ivxwcv+wVwZnpb25uend+NLzD3r++V6lffVDHi0REpFICBW/qPijXlKizvXPSLu4D43804Jpf0g4X0ik6eWvb0YrdUsJCDWaNocN6VbaZ8+32Z57GXrh23PPO1uiVUqUhJE2ZfWS0Kgp2h76EZiWZUDvRaC9R2tIJar+oRVr4Buy5F7I+dTQhMTekV6Nl6Jan9RMWaqgz00bhumVX3t23Qu0qtMteCmjV/PDeqpv6KUwY2RmsDHsb0b7w0YbM3P1JDa+68JoeyF79mgVn1areWn4Ffll0ZbIq7T3kXVLXn5h5Py0VeWEk8T9gQedqPhkSpXxUpi18qU6d8G6raE1BqzyKB2IYBpftCVb6fnzFmfG2IrPbckv9bRHJhXB9iXdmrTJgeqkSh22hPYzUvHJkDBqP6yO6fnjraTdW94e9cZ+WmS2tGzHF6pb/04E4i1U9DaXasBLOdr9igvqP5hYhGkjKGiJrX/Mr3PSzs+ROQbEqblR2h5OHWo01/N/HMocqVu6oJ6G5WETtOX6rrQOhyu8XuC030evYsmQNRK1Dge6pWf3UiFLtmgBzekFnV7PZ+3p1u5EqQYKilnBaJr2C6SiWxx5dOEHx22iPToW76M1iZNdjUMpVbtoPyh+nuytzGB/3IBug6tvbtwfoq3G2xKpO/gGui1bcp2POreXoj++RMpG4OsWVi306iqBV0S+c07a7uNJ8lwjj6sHP1fCu3i2/on0moWxbLOQcU7aL5LN3f9q5RelJpvSyzVUMVNYfLw82u3dz3r5RWFB2ZYHUvu0gXn7JbIX9uevak2Ljy+Ndj+spNUeSi/AaUuOtHovj3azH1bQ2noWrccRyCcvi/YQrKRVgBRmrKqElIalvi+K9iDsz182jSKwZW3n74V5qcOwP2UEoibumNhDzCl59oJoN3e/NBIOsBVatB2v9Emh5jt3LvU5eYrNEoRMmfr9/kAI55wlv3798mhlLkGBk9pFG3pJ2YWAJQahGkkHoONf2i15WwXUFgUXQ/sUQz4EG7NKg2YfxNGqLJG6x2rUaxuMLoRWaNZEEqUs+Z/cpFTPCAk35OkWHqAxBm38sQpBl0Er56x57kntU8ITM9QsK/YRrcLXNQ/VCZXDvghaOWdtiq/TfYp1SPrYkr1FKX17IMO6BFoFSyKlMWo374xxKq0h3dplRup2+CC7uARaE3rsk23I5VLjmh0twYCR3bg107f9tNYb68zIPEhB9WO46gSlmFbmTTRC+yJW1RfgkycxNbPPlHB65NSkDFS9i+at2yywN0k5t4ugVaFHjVfpUqnNpA0q/5W/PJ9MKbX5hZnY6oka+Zu2nPYpNoZon5UxT1XYkKqQkG4J8Sa4v9LabtpJrCdnpCajm7dwUhl0RMpeytmyXYUj7ffJwkFRePgpgimrYq3dplUGTnF2geasNn2TYZx7//ZUmXB4aMI+jUpghSmye3eqbsW5lI47ugLSVk+hMmgx7YQrz2LmIIVoYklhW0CgPCCfHGmNR+DFIygeWp0nizlrDFaVAHaznVIIt1qv8uQD1q0KStJVE+OOKdhze2mFGas5qgtzO3mNl7K5lf7xgCOQfSwM5V+69mutJU9i5W51uDS4kCyb5NgkUtJQLe1PUwIpc9CNaARVbmsteRJDKIkg/TOLTJAJOhLiaO/GD/AsmA25JrdQXq6dtBMVeqxHgi+mRW4xHIoDLYb2brOIiVszdxsF+utALZ23yozNYF0i5EKo9jv2Fej2btsZxl4qbSawLerbSCtCTwThBi2Cu6UK0Jtdb1K0AlbQ6hoCVqYoPNtJzv7k35EikwqoS+22js4VrZJMrgGLTpL27rUjaSFxdDWfTUzaSCtg7QI45E02UbCO2AYjzfE/DatpYcbCOo5Wdyt1O4kJBA8amWrPbWSRyKYYbolK/DWwRreR3cREZtDGCKQ0q1wwoVD6gJOKoNqLIO+HNajobqQ/Lr0UAXWCgUCu3bo8WTqoSO1S2U0BSs2ihcoIVfg03krV+KpdbGCll1INI3gbOfLWWbI0Y9CHTSlAidTFoSgC3anjeAMdDGHhGX2UgpJbRivXoGCx31qpOqIoOTL7WUCFYZUl61kOaRbkGlHbaOWcjZwzhWBqE3zrgAhuEA0crKQt3yW3oNyqvYI1pyjDhQgEdu1tzJrkQr2HNGssGSVh3kZQm/LkNcelulGxXn4wSoIMA3yQ+uPBWt2abrw53KbV8zUnblExQnMNbJjgU9CGDDxYHG9dzeA6bAvtmrsqB2eHMFDHQEDr8lcJVunWOSbXo3FxLaGVZhxhSFutRzY/pBRWIyxRXILVlqzTMJ11mUmvi/6W0K6ZWfXWOrPRg1orhoUpcFsKogKrvRTReYX1AMbx0ZbsFWjNuikWRf6XoyNafku9WzbjjqaFlrTUVUt0K0OP+U8tJtohegcmYZBN9HFVs4YWevP6UZ9qAe06ttoqCfV0XGoRglXVPG5M/Q81T6th90jgXRo0447Rbd2nWkC7jpHZ1QwywB6GVbotd0HdTG+a1jmoIzEN7DbcndQtDX2gFboFM1a+B89RGlm3ZI7xhKzRLKJFqO6DDUcgoVlE5AZnXKjvY7TLlplDLayq5uF2YR2bCzRKu2aO0gYgSl2oUcCUgurN23Vm3NG0rhfz0/bfKO3BORuOPvWaxT65ZBX6RYO0cs5SG/z1NpWdqi6JsJPYaHwfrLZk/RgZBf0a3mZroLUJFsZO0RylbsaCMduZvc+MO8aS4aPEfdKkU43RroM2VzLaquyHrbFkK03RHpizdcgHYDFtqIuGaGUhUIXzg2QgvzoE287McRKjEaF4GKEZaoEtODkIG7RkFHcboZVPy7jgal4Q/xB+o0rwMCzsFVDw6xCtTXdN0E5MegdBBtwohU0sq00bQ+gxZtxxPtl1SbF+G6CteOO9Xti+eQystOR9hfL5ac2cxTGUQl6s9e1WkiFhjvami0jU3ryO4WqXzM4EtRt0ftoJL919yJH2KfhIzQa9FKQYTdRAk/3h/5OwLcsu1C5epfgM19/o6FjYwLz1Qvl5aeXzxtawcAaMIoZ+k0S28juUG2PR9a2N1tQ6fv3qrP8ChIH14gr8AH+ijvxCfvB69CVg7cKrlaHz866ev2URDvbwqnICv3e0N9ZiKj6Um3gdnpNWL21jy3UWR5FlE1OP6lzjFFg1b8FuqK0mG8kurMN0MSGQDZucCiz7BDNGlyj5Quj+vLTE3Wf5k+C1hcibyKD5kzQLewXUR9WXOr9u3doJpe6XmVQRqgDM8+YnatZYsrVf66bA/51/3kYRJeje+wvJFBshPRnW6dbOGM+yz6xby2ft2SoZPBd692RYmLe4RsZWfX5L9ld7qckqyhFIyumwpUt4cu54a8KDq2ywi8YFr27wAVijW5uk4Bh37lzKhv4oePdLWcFHYO0lSu4POj63biNrxpHNECnUuNYpf1Czbre6jGyAG8kuQlIqcD8G26aKT6XskDsQl9eVahWVLv7+6CUopI168hpHQXUW2ggtIJbCrAuOH4XVk8VVUPZitInM0a/x8AIqNmT6YVg3b9HSbOTu4/kjEMxRCEbo9hsb/Dgs1LfU5aT2Suf+N4hsnoyDTqmmlaHn47D1QS5qoL6199yUdeCObUiS2x+fgIXJgozFqfrMz8INvYUafP9RzB2MDne07xK2Y3BNNjVtxidDfujs2JVm0edgoeKLItyxU3AjKzUoDPkZxmdh9dNhEGMhj9JdN+ClIOJHbkXBlQHk07Dmm20Kjrj+qfmyWHPx1stfjXl/GhZZMkQ6z5aayJMhs0HFmPr9eVjvyT+UyAD72XVrQak/ms/PWXwJVzFbx9yAJePkFd9+mVR8Aax/Cewl9BxuoJpHfyCr+5I5ay7hekV/aANrF8WgVtiXwHaGaf0l5FXO+a+8v9+GZbfbLb9mHLWXMPIlF7nKVa5ylatc5SpXucpVrnLh8rZcNj2EM8o0z0//0JKsnve8vZ2umv5qb42MGT/9Q8u8WO/rM0m/FW2R7dPtmGUfHs/flb9Cy78XbfpP6fZKi/tMPjyevyt/hZb/S7Q3V9pWyJX2oPxbtG/7aaf/GC1DR93u55Jm/+Of6+zv05J8al69rGcPLOOr19v6Ic8fR4RnbPX6Dm3SPxP09t0fXY8s1uN+zPqz9XzPQG6397rRizkRpO2+v64GjJPRc7ivk2hXTNO+zfKMccbE36J4CvMuRqjNRl28W2So3npJ1dFilidMNcvy3+ExdrqTJDV9Zfn4rY52vk0L22w0/CLabc54ka7Gs5tBmsVJ8h744JNqQ8azcT/NeKIu0k192kQcrQVGUUxHs/u04Cx9DA3ilour5IOb2XglcFj+2g3SPhcJz9K+uCSRfeWBfy3ldNr5KuPp1FjnYj3IeF75blN3Wog2j3Pd5vmh4PnvMu0iTSadUSra7VRf3dt70SwwxE3OMz5Z6I53s5Qn/ZcArXijeHjWhj5/n4qj+4rVnUw7HzDW36GTk4IXpS357gNjMd5TXmc8G1dp19uCZ8gyHos4fSoP4VXcEDxb3lYJTxYV2mnGC0yy6yfsoYwraIPWA314tJGg7fNk6nfyJmzRV8k9S6Zz78ywz7NRR9kuyCKNHxgfLLxmCc9LO+9PKc9K622jgvPuzKcdZbzvddXpjgp2X8I5SIv7JOxmxNh/5UYL5o9xm7Fpuc18EBdPPEM+eZEO4jgt+ZJlGvtPVezyuKj4m98ZG4+9ka1T3p+Xm71mWel7DYdovTtIOOdx4ImWNzGX3NllzgfVNosiZoPEpx0UlVk0yRJsJ92Yp7tyG6WEOEYjexH3ZFFtNma5/+ETaQeDNLSM642R8DzU5rkYlGn5qtqszwt0q0rwIPMiHmDaEStCFHPOiXdieCItC3/npc9zGOMurWmz4h7tMB0Ugdi1ztDZbsbjYDifZJh2kfMfwUs+FqnnBk6lTQMGI7vNrGufsZo2t0WZNguQzHP00NWjl48g6TJsyU9JUfNUUZ+N8eFptDEfh9t1E24c07zgNzWd8din5RV/py7C+/b1mKXzcF9bhmgJj2suKZIw3MEhWt8n89rgPGNmuu3q1CF8JPNpWfAb1yOW2tcFrzh3I7vC0S7q5o50SwX2Uwd1i+8a4TVGKqebcV/iboYyVCmPhU+Lj5xsmXUBdU2EzDOnB3GD6xi6fg8HaQfoiPDaRwx3hfGKv1loNpprHUO7cbS3RciPwVgs7br+Bndihr+8cpC2j45IKGRAPyZPGnv3x5P5cbSJpX3OgvFOyX+OdpPwm3GNDDw3dZAWByxSzZFAFmCl/v3xZH6UJfu0b3WdoTx5wwayzgtK7M38g7RYm6SSeFbH/t9e3aKc/wtpk5jXigdwkBbzRbxWb0voZ8SSPfP2NFoxbwNpo5aVs+Q9jrEygtqAIeXBs10SF/Oaho8wxTZJrd++LU6kffOKJk+6zNG+77kpvszrY5XsM2UzdEh4bbevkAe81/vRTXIibenyWN5SF299m9krpN46K6lCxMMJgZAB5N8vae3j9oSfSCuSm7pwNklQLhXXx4qSPCWhksrIiOXYLFc8ZuGGO3d7pzyZB9u8pYNTab0SwZMHjmiFYdV6M19E/RBMV9V7qZ+5iSqmWpEqmfIcHMVzkYUToBE7ivYJ0b7kNVq7TXENtKy3p7KImqVuot2UqmFBGwcrsNvUBXFRpWXzQJulqN5Ppa0rXEWF6dW3K54frdxg3S+vW/j1kvT6PHQX58ypVig3ZYEqqNvnor7F/4OnY2iFdSUv1TbbhGNL7izz+CHU16iaiq1TPgj02FnnZSWt+P0qLqpjvGcFdopTVlQXHMaMjeNjaCeYVg6OVKzpWZz0q7PXJAl4721xV514rwXn1ZuwSePyisuKTYUlpKVBdqdJ4ilznsRl3O4sYaRbnE7bGSesvC78LEY29Nccu0SuaZZkW8RZQI2jIk43pWXTVcbzsrOW68m7P7wY4bbLPmOlB+becl6M5+jEcJWwwVyUX6fTdleMDfBd776m8Z/38nqymEzJypuQi2nGwznWJo+TYmPf6u7GucizKxNf7RXsUs6yCbC8jYS9T8u29lYwlj7BfR2+5jwh885xtGufVu075DMYy3zNEp6/V/cK5n1xfmt55TUZq0kod/2CJ2l/NFk/rzfjTJh2Pqo6X70PtFjJttONaPraT1lgY0RceyrcS3qv2hDZRprZkbRZXrry5g9naf+3HNo0zeLiQUJUdka64r6zfLUVzSYjOa7UMy9fngdyGy3JsiRhLPkzDhWWsMcngr7cR8sS8TO/D5egjwy1IWpOfJS28zbNEz02xgrjJQN7fDuSGwQmb0/tQoBuvCVFLkQEkHU4JK1sjfA+46mQ4mFTH+duR7Fsk/a35n507/4gMxje3QWz2/XdXWB9fkMK2RebPZo3g0/sLrf9VI9re8TTy92XxWIxr92AXuGK6OVtOZwf6G8+9Nosl2gidZfL4D19qfkO5nzxNkQetu5p7PlwOFwcGtdRsqpfu/iGcqX9vnKl/b5ypf2+sgoVrt9WrrTfV1asZrP6Wwr58y95qcWwbtPjKi2S/wNh4Z1qivVpPQAAAABJRU5ErkJggg==" alt="Upande"><span>Attendance Insights</span></div><button id="att-sb-close" class="att-sb-close" aria-label="Close">&times;</button></div>
+    <div class="att-sb-body" id="att-sb-body"></div>
+    <div class="att-sb-foot">
+      <button class="tab-btn sb-lost-btn" data-tab="lost" id="sb-lost" title="Working time lost per employee">LOST HOURS</button>
+      <button class="tab-btn sb-actions-btn" data-tab="actions" id="sb-actions">ACTIONS</button>
+      <div class="sb-dev" id="sb-dev">
+        <button type="button" class="sb-dev-head tab-btn" id="sb-dev-head" data-tab="devices">
+          <span class="sb-dev-title">BIOMETRIC DEVICES</span>
+          <span class="sb-dev-count" id="sb-dev-count">–</span>
+        </button>
+      </div>
+      <div class="wm-account" id="wm-account">
+      <button type="button" class="wm-avatar" id="wm-avatar" aria-haspopup="menu" aria-expanded="false" title="Account"><span class="wm-ini" id="wm-ini">&middot;</span><span class="wm-uid" id="wm-uid"></span></button>
+      <div class="wm-menu" id="wm-account-menu" role="menu">
+        <div class="wm-menu__id"><small>Signed in as</small><span id="wm-account-id">&hellip;</span></div>
+        <a href="/app" role="menuitem" id="wm-account-desk">Open Desk</a>
+        <a href="/login" role="menuitem" id="wm-account-login" style="display:none">Log in</a>
+      </div>
+    </div>
+    </div>
+  </aside>
+
+<div class="topbar">
+  <div class="filt">
+    <label>Date</label>
+    <div id="r-date" class="filt-date"></div>
+    <select id="r-farm" style="width:140px"><option value="">All Farms</option></select>
+    <select id="r-company" style="width:140px"><option value="">All Companies</option></select>
+    <input type="hidden" id="r-emptype" value=""><div id="r-emptype-btns" class="emptype-toggle" role="group" aria-label="Employment type"></div>
+    <button class="btn" id="r-trend" title="Present headcount per farm over time">&#x1F4C8; Trend</button>
+    <button class="btn" id="r-refresh" title="Refresh data" style="margin-left:auto">&#8635; Refresh</button>
+  </div>
+</div>
+
+<div class="body">
+  <div id="r-status"></div>
+  <div class="att-modal-overlay" id="tile-modal">
+    <div class="att-modal" style="width:min(1000px,96vw)">
+      <div class="att-modal-head"><h3 id="tile-modal-title">List</h3><div style="display:flex;gap:8px;align-items:center"><input id="tile-modal-search" placeholder="Search…" style="height:28px"><span class="tag" id="tile-modal-count"></span><button class="dr-close" id="tile-modal-close" aria-label="Close">&times;</button></div></div>
+      <div class="att-modal-body" style="overflow:auto;max-height:72vh"><table class="tbl"><thead id="tile-modal-thead"></thead><tbody id="tile-modal-tbody"></tbody></table></div>
+    </div>
+  </div>
+
+  <div class="att-modal-overlay" id="hours-modal">
+    <div class="att-modal">
+      <div class="att-modal-head"><h3>Average Working Hours &mdash; last 7 days</h3><button class="dr-close" id="hours-modal-close" aria-label="Close">&times;</button></div>
+      <div class="att-modal-body"><div id="hours-modal-status"></div><div class="ch-wrap" style="height:380px;position:relative"><canvas id="ch-hours7d"></canvas></div></div>
+    </div>
+  </div>
+
+
+
+
+  <!-- ══════════ TAB: OVERVIEW ══════════ -->
+  <div class="tab-panel active" id="panel-overview">
+
+  <!-- KPI strip -->
+  <div class="kpi-strip" id="r-kpi"></div>
+
+  <!-- Overview charts: side by side -->
+
+  <!-- inline drill-down: shows the clicked tile's employees, replacing the charts above -->
+  <div class="card" id="r-tile-inline" style="display:none;margin-top:16px;margin-bottom:14px">
+    <div class="card-head tile-inline-head">
+      <h3 id="tile-inline-title">List</h3>
+      <span id="tile-inline-count"></span>
+      <div id="tile-inline-tabs" class="ti-tabs" style="display:none"></div>
+      <span class="ss-host"><input id="tile-inline-search" autocomplete="off" placeholder="Search employee, code, farm…"/><div class="ss-menu" id="tile-inline-search-menu"></div></span>
+      <button class="btn q export-xls" id="tile-inline-xls" title="Download this table to Excel">&#8595; EXCEL</button>
+    </div>
+    <div class="card-body">
+      <div class="tile-inline-wrap">
+        <table class="tile-inline-tbl">
+          <thead id="tile-inline-thead"></thead>
+          <tbody id="tile-inline-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- inline farm trend: replaces the employee table when TREND is active -->
+  <div class="card" id="r-trend-inline" style="display:none">
+    <div class="card-head tile-inline-head">
+      <h3>FARM TREND &mdash; PRESENT PER DAY</h3>
+      <div class="ti-tabs" id="trend-cos"></div>
+      <div class="ti-tabs" id="trend-ranges">
+        <button type="button" class="ti-tab active" data-td="pay">PAYROLL</button>
+        <button type="button" class="ti-tab" data-td="14">14D</button>
+        <button type="button" class="ti-tab" data-td="30">30D</button>
+        <button type="button" class="ti-tab" data-td="60">60D</button>
+        <button type="button" class="ti-tab" data-td="90">90D</button>
+      </div>
+      <button class="btn q" id="trend-close" style="margin-left:auto">&#10005; BACK TO TABLE</button>
+    </div>
+    <div class="card-body">
+      <div id="trend-status"></div>
+      <div class="ch-wrap" id="trend-wrap" style="position:relative"><canvas id="ch-trend"></canvas></div>
+    </div>
+  </div>
+
+  </div><!-- /panel-overview -->
+
+  <!-- ══════════ TAB: EXCEPTIONS ══════════ -->
+  <div class="tab-panel" id="panel-exceptions">
+
+  <!-- Late + Early expanded (2 col, no OT) -->
+  <div class="row r-2-late">
+    <div class="card">
+      <div class="card-head">
+        <h3>Late Arrivals — Detail</h3>
+        <span class="tag" id="late-range-tag">—</span>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div class="exc-tbl-wrap">
+          <table class="tbl" id="tbl-late">
+            <thead><tr>
+              <th>Employee</th><th>Code</th><th>Farm</th>
+              <th>Days Late</th><th>Avg Min Late</th><th>Max Min Late</th><th>Trend</th>
+            </tr></thead>
+            <tbody id="tbody-late"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h3>Early Departures — Detail</h3>
+        <span class="tag" id="early-range-tag">—</span>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div class="exc-tbl-wrap">
+          <table class="tbl" id="tbl-early">
+            <thead><tr>
+              <th>Employee</th><th>Code</th><th>Farm</th>
+              <th>Days Early</th><th>Avg Min Early</th><th>Max Min Early</th><th>Trend</th>
+            </tr></thead>
+            <tbody id="tbody-early"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  </div><!-- /panel-exceptions -->
+
+  <!-- ══════════ TAB: REGISTER ══════════ -->
+  <div class="tab-panel" id="panel-register">
+
+  <!-- Checkin records -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-head">
+      <h3>Checkin Records</h3>
+      <div class="tbl-export-bar">
+        <input type="text" id="r-search" placeholder="Search…" style="width:160px;height:28px;font-size:13px">
+        <span class="tag" id="r-rowcount">—</span>
+        <button class="btn export-csv" id="btn-csv">CSV</button>
+        <button class="btn export-xls" id="btn-xls">EXCEL</button>
+      </div>
+    </div>
+    <div class="tbl-wrap" style="max-height:480px">
+      <table class="tbl">
+        <thead><tr>
+          <th data-sort="date">Date</th>
+          <th data-sort="employee_name">Employee</th>
+          <th data-sort="employee">Code</th>
+          <th data-sort="farm">Farm</th>
+          <th data-sort="shift">Shift</th>
+          <th data-sort="in_time">In</th>
+          <th data-sort="out_time">Out</th>
+          <th data-sort="hours_worked">Hours</th>
+          <th>Status</th>
+        </tr></thead>
+        <tbody id="r-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Present / Absent split -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-head">
+      <h3>Attendance Register</h3>
+      <div class="tbl-export-bar">
+        <span class="tag" id="register-date-tag">—</span>
+        <button class="btn export-csv" id="btn-reg-csv" title="Download combined CSV (Present + Absent)">CSV</button>
+        <button class="btn export-xls" id="btn-reg-xls" title="Download Excel with Present, On Leave, Off and Absent sheets">EXCEL (4 SHEETS)</button>
+      </div>
+    </div>
+    <!-- count strip: four buckets + total, must reconcile -->
+    <div class="reg-strip" id="reg-strip">
+      <div class="reg-stat"><div class="rs-lbl"><span class="reg-dot present"></span>Present</div><div class="rs-val" id="rs-present" style="color:var(--good)">—</div><div class="rs-pct" id="rs-present-pct">&nbsp;</div></div>
+      <div class="reg-stat"><div class="rs-lbl"><span class="reg-dot leave"></span>On Leave</div><div class="rs-val" id="rs-leave" style="color:var(--violet)">—</div><div class="rs-pct" id="rs-leave-pct">&nbsp;</div></div>
+      <div class="reg-stat"><div class="rs-lbl"><span class="reg-dot off"></span>Off / Rest Day</div><div class="rs-val" id="rs-off" style="color:var(--text-2)">—</div><div class="rs-pct" id="rs-off-pct">&nbsp;</div></div>
+      <div class="reg-stat"><div class="rs-lbl"><span class="reg-dot absent"></span>Absent</div><div class="rs-val" id="rs-absent" style="color:var(--bad)">—</div><div class="rs-pct" id="rs-absent-pct">&nbsp;</div></div>
+      <div class="reg-stat" id="rs-total-stat"><div class="rs-lbl"><span class="reg-dot total"></span>Total</div><div class="rs-val" id="rs-total">—</div><div class="rs-pct" id="rs-balance">&nbsp;</div></div>
+    </div>
+    <div class="split-wrap" id="split-wrap">
+      <div class="split-panel">
+        <div class="split-head present">
+          <h4 style="color:var(--good)">PRESENT</h4>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="text" id="present-search" placeholder="Search…" style="height:24px;font-size:13px;width:160px" oninput="filterPresent()">
+            <span class="cnt" style="color:var(--good)" id="present-cnt">—</span>
+          </div>
+        </div>
+        <div class="split-tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>#</th><th>Employee</th><th>Code</th><th>Farm</th><th>In</th><th>Out</th><th>Hours</th><th>Source</th></tr></thead>
+            <tbody id="tbody-present"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="split-panel">
+        <div class="split-head absent">
+          <h4 style="color:var(--bad)">ABSENT / NOT CHECKED IN</h4>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="text" id="absent-search" placeholder="Search…" style="height:24px;font-size:13px;width:160px" oninput="filterAbsent()">
+            <span class="cnt" style="color:var(--bad)" id="absent-cnt">—</span>
+          </div>
+        </div>
+        <div class="split-tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>#</th><th>Employee</th><th>Code</th><th>Farm</th><th>Designation</th><th>Status</th></tr></thead>
+            <tbody id="tbody-absent"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <!-- On Leave detail (reconciles with the leave card) -->
+    <div class="reg-sub" id="reg-leave-sub">
+      <div class="reg-sub-head">
+        <h4 style="color:var(--violet)"><span class="reg-dot leave"></span>On Leave — detail</h4>
+        <span class="cnt" style="color:var(--violet)" id="reg-leave-cnt">—</span>
+      </div>
+      <div class="reg-sub-tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>#</th><th>Employee</th><th>Code</th><th>Farm</th><th>Designation</th><th>Leave Type</th></tr></thead>
+          <tbody id="tbody-reg-leave"></tbody>
+        </table>
+      </div>
+    </div>
+    <!-- Off / Rest-Day detail -->
+    <div class="reg-sub" id="reg-off-sub">
+      <div class="reg-sub-head">
+        <h4 style="color:var(--text-2)"><span class="reg-dot off"></span>Off / Rest Day — detail</h4>
+        <span class="cnt" style="color:var(--text-2)" id="reg-off-cnt">—</span>
+      </div>
+      <div class="reg-sub-tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>#</th><th>Employee</th><th>Code</th><th>Farm</th><th>Designation</th><th>Type</th></tr></thead>
+          <tbody id="tbody-reg-off"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── EMPLOYEES ON LEAVE ── -->
+  <div class="card" style="margin-bottom:14px" id="leave-card">
+    <div class="card-head">
+      <h3>EMPLOYEES ON LEAVE</h3>
+      <div class="tbl-export-bar">
+        <span class="tag" id="leave-date-tag">—</span>
+        <span class="cnt" style="color:var(--violet);font-family:var(--f-ui);font-size:13px;font-weight:500" id="leave-cnt">—</span>
+        <input type="text" id="leave-search" placeholder="Search…" style="width:160px;height:28px;font-size:13px" oninput="filterLeave()">
+        <button class="btn export-csv" id="btn-leave-csv">CSV</button>
+        <button class="btn export-xls" id="btn-leave-xls">EXCEL</button>
+      </div>
+    </div>
+    <div style="padding:10px 16px;border-bottom:1px solid var(--border-soft)" id="leave-type-summary">—</div>
+    <div class="tbl-wrap" style="max-height:380px">
+      <table class="tbl">
+        <thead><tr>
+          <th>#</th><th>Employee</th><th>Code</th><th>Farm</th>
+          <th>Department</th><th>Leave Type</th><th>Period</th><th>Days</th>
+        </tr></thead>
+        <tbody id="tbody-leave"></tbody>
+      </table>
+    </div>
+  </div>
+
+  </div><!-- /panel-register -->
+
+  <!-- ══════════ TAB: LOST HOURS ══════════ -->
+  <div class="tab-panel" id="panel-lost">
+    <div class="card" id="lost-card">
+      <div class="card-head tile-inline-head">
+        <h3>LOST WORK HOURS &mdash; PER EMPLOYEE</h3>
+        <div class="ti-tabs" id="lost-ranges">
+          <button type="button" class="ti-tab active" data-ld="7">7 DAYS</button>
+          <button type="button" class="ti-tab" data-ld="14">14 DAYS</button>
+          <button type="button" class="ti-tab" data-ld="30">30 DAYS</button>
+        </div>
+        <div class="lost-dates" id="lost-dates">
+          <label>From</label>
+          <span class="fdate" id="lost-from-ctl"></span><input type="hidden" id="lost-from">
+          <span class="lost-dates-arrow">&rarr;</span>
+          <label>To</label>
+          <span class="fdate" id="lost-to-ctl"></span><input type="hidden" id="lost-to">
+        </div>
+        <div class="ti-tabs" id="lost-views">
+          <button type="button" class="ti-tab active" data-lv="all">ALL</button>
+          <button type="button" class="ti-tab" data-lv="freq">MOST FREQUENT</button>
+          <button type="button" class="ti-tab" data-lv="beh">LATE / EARLY</button>
+          <button type="button" class="ti-tab" data-lv="abs">ABSENCE</button>
+          <button type="button" class="ti-tab" data-lv="nos">NO SCANS</button>
+        </div>
+        <input id="lost-search" placeholder="Search employee&hellip;">
+        <span class="tag" id="lost-count">&mdash;</span>
+        <button class="btn q" id="lost-xls">&#11015; EXCEL</button>
+      </div>
+      <div class="card-body">
+        <div id="lost-status"></div>
+        <div class="tile-inline-wrap" id="lost-wrap">
+          <table class="tile-inline-tbl" id="lost-tbl">
+            <thead id="lost-thead"></thead>
+            <tbody id="lost-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ TAB: BIOMETRIC DEVICES ══════════ -->
+  <div class="tab-panel" id="panel-devices">
+    <div class="card" id="devices-card">
+      <div class="card-head tile-inline-head">
+        <h3>BIOMETRIC DEVICES</h3>
+        <span class="tag" id="dev-online-tag">&mdash;</span>
+        <input id="dev-search" placeholder="Search device or location&hellip;">
+        <span class="tag" id="dev-count">&mdash;</span>
+        <button class="btn q export-xls" id="dev-xls" title="Download this table to Excel">&#11015; EXCEL</button>
+      </div>
+      <div class="card-body">
+        <div id="dev-status"></div>
+        <div class="tile-inline-wrap">
+          <table class="tile-inline-tbl" id="dev-tbl">
+            <thead><tr>
+              <th>Device Name</th><th>Device ID</th><th>Last Seen</th><th>Status</th>
+            </tr></thead>
+            <tbody id="dev-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ TAB: ACTIONS ══════════ -->
+  <div class="tab-panel" id="panel-actions">
+
+  <div class="act-bar">
+    <button class="btn" id="act-back">&larr; BACK TO ATTENDANCE</button>
+    <div class="act-switch" role="group" aria-label="Actions">
+      <button type="button" class="act-btn active" data-act="mark">MARK ATTENDANCE</button>
+      <button type="button" class="act-btn" data-act="shift">BULK SHIFT CHANGE</button>
+    </div>
+  </div>
+
+
+  <!-- ── MARK ATTENDANCE ── -->
+  <div class="card" style="margin-bottom:14px" id="mark-attendance-card">
+    <div class="card-head">
+      <h3>MARK ATTENDANCE FOR ABSENT EMPLOYEES</h3>
+      
+    </div>
+    <div class="card-body">
+      <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+        <div>
+          <label style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px">Attendance Date</label>
+          <span class="fdate" id="att-date-ctl"></span><input type="hidden" id="att-date">
+        </div>
+        <div>
+          <label style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px">Marking Reason</label>
+          <select id="att-reason" style="height:30px;font-size:13px;width:190px">
+            <option value="">— none (plain Present) —</option>
+            <option value="Away Assignment">Away Assignment</option>
+            <option value="Pending Off">Pending Off</option>
+            <option value="Pending Holiday">Pending Holiday</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px">Rest days</label>
+          <label class="att-off-toggle" id="att-allow-off-wrap" title="Attendance is normally never written on an employee's weekly off or a holiday. Tick this to override for this submission.">
+            <input type="checkbox" id="att-allow-off">
+            <span>ALLOW ON WEEK OFF</span>
+          </label>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn" id="att-select-all" style="height:30px">SELECT ALL</button>
+          <button class="btn" id="att-clear-sel" style="height:30px">CLEAR</button>
+          <button class="btn primary" id="att-submit" style="height:30px;background:var(--good);border-color:var(--good)">SUBMIT ATTENDANCE</button>
+        </div>
+      </div>
+      <div id="att-feedback" style="margin-bottom:10px"></div>
+      <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
+        <div style="background:var(--bg);padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em">Select employees to mark attendance</span>
+            <span style="font-family:var(--f-ui);font-size:12px;color:var(--text-2);font-weight:500" id="att-row-count">—</span>
+          </div>
+          <span class="ss-host"><input type="text" id="att-search" autocomplete="off" placeholder="Search name or code…" style="height:26px;font-size:13px;width:240px"><div class="ss-menu" id="att-search-menu"></div></span>
+        </div>
+        <!-- date-range marking: pick which dates the selected employees have no
+             attendance or an Absent record, then mark them all at once -->
+        <div class="att-range">
+          <div class="att-range-bar">
+            <label>Date range</label>
+            <span class="fdate" id="att-rf-ctl"></span><input type="hidden" id="att-range-from">
+            <span class="att-range-arrow">&rarr;</span>
+            <span class="fdate" id="att-rt-ctl"></span><input type="hidden" id="att-range-to">
+            <button class="btn q" id="att-range-load">FIND OPEN DATES</button>
+            <button class="btn q" id="att-range-all">ALL</button>
+            <button class="btn q" id="att-range-none">NONE</button>
+            <span class="att-range-note" id="att-range-note"></span>
+          </div>
+          <div class="att-range-days" id="att-range-days"></div>
+        </div>
+        <div id="att-checklist" style="max-height:340px;overflow-y:auto">
+          <div class="empty">Load the register first (run with a farm selected)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SHIFT CHANGE ── -->
+  <div class="card" style="margin-bottom:14px" id="shift-change-card">
+    <div class="card-head">
+      <h3>BULK SHIFT CHANGE</h3>
+      
+    </div>
+    <div class="card-body">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+        <div>
+          <label style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px">Farm / Unit</label>
+          <select id="shift-farm" style="height:30px;font-size:13px;width:140px"><option value="">All Farms</option></select>
+        </div>
+        <div>
+          <label style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px">New Shift</label>
+          <select id="shift-new" style="height:30px;font-size:13px;width:220px">
+            <option value="">— loading shifts —</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px">Effective Date</label>
+          <span class="fdate" id="shift-date-ctl"></span><input type="hidden" id="shift-date">
+        </div>
+        <div style="margin-top:18px;display:flex;gap:6px">
+          <select id="shift-f-et" style="height:30px;font-size:13px;width:130px"><option value="">All Types</option></select>
+          <select id="shift-f-des" style="height:30px;font-size:13px;width:150px"><option value="">All Designations</option></select>
+          <select id="shift-f-shift" style="height:30px;font-size:13px;width:150px"><option value="">All Shifts</option><option value="__none__">No Shift Assigned</option></select>
+          <button class="btn" id="shift-select-all" style="height:30px">SELECT ALL</button>
+          <button class="btn" id="shift-clear" style="height:30px">CLEAR</button>
+          <button class="btn primary" id="shift-submit" style="height:30px">APPLY SHIFT CHANGE</button>
+        </div>
+      </div>
+      <div id="shift-feedback" style="margin-bottom:10px"></div>
+      <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
+        <div style="background:var(--bg);padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em">Select employees to reassign</span>
+            <span style="font-family:var(--f-ui);font-size:12px;color:var(--text-2);font-weight:500" id="shift-row-count">—</span>
+          </div>
+          <span class="ss-host"><input type="text" id="shift-search" autocomplete="off" placeholder="Search name or code…" style="height:26px;font-size:13px;width:240px"><div class="ss-menu" id="shift-search-menu"></div></span>
+        </div>
+        <div id="shift-checklist" style="max-height:340px;overflow-y:auto">
+          <div class="empty">Select a farm and click Load Employees</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  </div><!-- /panel-actions -->
+
+</div>
+
+<!-- Lost-hours day breakdown: which days in the window cost time -->
+<div class="att-modal-overlay" id="lost-bd">
+  <div class="att-modal" style="width:min(900px,96vw)">
+    <div class="att-modal-head">
+      <div>
+        <h3 id="lost-bd-name">&mdash;</h3>
+        <div class="lost-bd-sub" id="lost-bd-sub">&mdash;</div>
+      </div>
+      <button class="dr-close" id="lost-bd-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="att-modal-body" id="lost-bd-body" style="overflow:auto;max-height:72vh"></div>
+  </div>
+</div>
+
+<!-- Employee History Drawer -->
+<div class="emp-overlay" id="emp-overlay">
+  <div class="emp-drawer">
+    <div class="dr-head">
+      <div>
+        <div class="dr-name" id="dr-name">—</div>
+        <div class="dr-sub" id="dr-sub">—</div>
+      </div>
+      <button class="dr-close" id="dr-close">&#215;</button>
+    </div>
+    <div class="dr-filters">
+      <label>From</label>
+      <span class="fdate" id="dr-from-ctl"></span><input type="hidden" id="dr-from">
+      <label>To</label>
+      <span class="fdate" id="dr-to-ctl"></span><input type="hidden" id="dr-to">
+
+    </div>
+    <div class="dr-body" id="dr-body">
+      <div class="empty">Select a date range above and click Load.</div>
+    </div>
+  </div>
+</div>
+
+
+
+
+
+{% endraw %}
+{% endblock %}
