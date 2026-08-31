@@ -1,0 +1,21 @@
+{
+ "action": "Create Entry",
+ "action_label": "Create a shift",
+ "creation": "2026-08-30 00:00:00.000000",
+ "description": "<b>What this is.</b> A shift says when the working day starts and ends, and how much grace there is either side. Attendance is worked out by comparing an employee's scans against their shift, so a wrong shift makes good attendance look bad.<br><br><b>What to do.</b> Create one for each pattern you run \u2014 day, night, and so on \u2014 with its start and end time.<br><br><b>Where to find it.</b> <b>Shift Type</b>, under HR.",
+ "docstatus": 0,
+ "doctype": "Onboarding Step",
+ "idx": 0,
+ "is_complete": 0,
+ "is_single": 0,
+ "is_skipped": 0,
+ "modified": "2026-08-30 00:00:00.000000",
+ "modified_by": "Administrator",
+ "name": "Create a Shift",
+ "owner": "Administrator",
+ "reference_document": "Shift Type",
+ "show_form_tour": 0,
+ "show_full_form": 1,
+ "title": "Shift Type \u2014 the working day",
+ "validate_action": 1
+}

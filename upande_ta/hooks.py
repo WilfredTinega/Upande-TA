@@ -22,6 +22,18 @@ doctype_js = {
 	"Stock Entry": "public/js/stock_entry.js",
 }
 
+doctype_list_js = {
+	"Employee": "public/js/employee_list.js",
+}
+
+
+# The dashboard was renamed from /attendance-dashboard to /attendance-insights,
+# which is what the page has always called itself. Bookmarks and any link that
+# went out before the rename would otherwise 404.
+website_redirects = [
+	{"source": "/attendance-dashboard", "target": "/attendance-insights"},
+]
+
 
 before_request = [
 	"upande_ta.upande_ta.overrides.monthly_attendance_sheet.apply_patch",
@@ -33,31 +45,46 @@ before_job = [
 ]
 
 
-app_include_js = [
-	
-	"monthly_attendance_sheet_colors.bundle.js",
+# Tells the desk which of the extra Monthly Attendance Sheet filters this site
+# can offer (Unit/Division only exists where the Employee custom field does), so
+# the client patch can render them without an extra round trip.
+extend_bootinfo = [
+	"upande_ta.upande_ta.overrides.monthly_attendance_sheet.extend_bootinfo",
 ]
 
-after_install = [
-	"upande_ta.install.ensure_ta_dashboard_block",
-	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
-	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
+
+app_include_js = [
+	"monthly_attendance_sheet_colors.bundle.js",
+	# Signed QZ Tray printing. Loaded on every page so any form can print to the
+	# local receipt printer; qz-tray.js itself is fetched only on terminals that
+	# have a printer saved. See upande_ta/upande_ta/api/qz.py.
+	"/assets/upande_ta/js/qz_bridge.js",
 ]
+
+# The Printer Settings page lives on the website, not the desk.
+web_include_js = [
+	"/assets/upande_ta/js/qz_bridge.js",
+]
+
+# One entry point each, so install and migrate apply the exact same set of steps
+# and a failure in any one of them is logged instead of aborting the rest. See
+# upande_ta/migrate.py for the ordered list, which covers:
+#   * force-reloading the module-level JSON resources the app ships (doctypes,
+#     reports, print formats) past Frappe's timestamp/hash skip;
+#   * the Scheduled Job Type rows configured per Biometric Setting, which the
+#     scheduler sync prunes on every migrate;
+#   * the Custom HTML Block and the custom fields added to HRMS/ERPNext doctypes;
+#   * the Desk nav the app ships (Workspace + Workspace Sidebar + Desktop Icon),
+#     normalising the workspace identity and collapsing duplicate tiles.
+# Keep these one string each and next to each other: a second assignment to the
+# same hook silently shadows the first, which is how the resource resync and the
+# nav normalisation stopped running once before.
+after_install = "upande_ta.migrate.after_install"
+after_migrate = "upande_ta.migrate.after_migrate"
 
 before_uninstall = [
 	"upande_ta.upande_ta.overrides.leave_type.remove_abbreviation_field",
 	"upande_ta.upande_ta.overrides.stock_entry.remove_biometric_stock_entry_fields",
-]
-
-
-after_migrate = [
-	"upande_ta.patches.v1.sanitize_link_filters.after_migrate_drop_check",
-	"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.resync_scheduled_jobs",
-	"upande_ta.install.ensure_ta_dashboard_block",
-	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
-	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
-	"upande_ta.upande_ta.cleanup.remove_orphans",
-	"upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime.ensure_overtime_setup",
 ]
 
 override_doctype_class = {
