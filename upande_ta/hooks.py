@@ -22,18 +22,6 @@ doctype_js = {
 	"Stock Entry": "public/js/stock_entry.js",
 }
 
-doctype_list_js = {
-	"Employee": "public/js/employee_list.js",
-}
-
-
-# The dashboard was renamed from /attendance-dashboard to /attendance-insights,
-# which is what the page has always called itself. Bookmarks and any link that
-# went out before the rename would otherwise 404.
-website_redirects = [
-	{"source": "/attendance-dashboard", "target": "/attendance-insights"},
-]
-
 
 before_request = [
 	"upande_ta.upande_ta.overrides.monthly_attendance_sheet.apply_patch",
@@ -42,14 +30,6 @@ before_request = [
 
 before_job = [
 	"upande_ta.upande_ta.overrides.monthly_attendance_sheet.apply_patch",
-]
-
-
-# Tells the desk which of the extra Monthly Attendance Sheet filters this site
-# can offer (Unit/Division only exists where the Employee custom field does), so
-# the client patch can render them without an extra round trip.
-extend_bootinfo = [
-	"upande_ta.upande_ta.overrides.monthly_attendance_sheet.extend_bootinfo",
 ]
 
 
@@ -76,15 +56,28 @@ web_include_js = [
 #   * the Custom HTML Block and the custom fields added to HRMS/ERPNext doctypes;
 #   * the Desk nav the app ships (Workspace + Workspace Sidebar + Desktop Icon),
 #     normalising the workspace identity and collapsing duplicate tiles.
-# Keep these one string each and next to each other: a second assignment to the
-# same hook silently shadows the first, which is how the resource resync and the
-# nav normalisation stopped running once before.
 after_install = "upande_ta.migrate.after_install"
-after_migrate = "upande_ta.migrate.after_migrate"
+after_install = [
+	"upande_ta.install.ensure_ta_dashboard_block",
+	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
+	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
+]
 
 before_uninstall = [
 	"upande_ta.upande_ta.overrides.leave_type.remove_abbreviation_field",
 	"upande_ta.upande_ta.overrides.stock_entry.remove_biometric_stock_entry_fields",
+]
+
+
+after_migrate = "upande_ta.migrate.after_migrate"
+after_migrate = [
+	"upande_ta.patches.v1.sanitize_link_filters.after_migrate_drop_check",
+	"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.resync_scheduled_jobs",
+	"upande_ta.install.ensure_ta_dashboard_block",
+	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
+	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
+	"upande_ta.upande_ta.cleanup.remove_orphans",
+	"upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime.ensure_overtime_setup",
 ]
 
 override_doctype_class = {

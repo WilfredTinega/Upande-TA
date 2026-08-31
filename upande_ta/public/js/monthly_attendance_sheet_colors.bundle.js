@@ -175,42 +175,6 @@ frappe.provide("frappe.views");
 		}
 	}
 
-	// Extra filters (Employment Type, Unit/Division) added to HRMS' stock filter
-	// list. Which ones the site can offer comes from the boot payload, since
-	// Unit/Division is an Employee custom field that only some sites ship --
-	// see overrides/monthly_attendance_sheet.py (extend_bootinfo).
-	const EXTRA_FILTER_ANCHOR = "branch"; // slot them in right after this one
-
-	function extraFilterDefs() {
-		const defs = (frappe.boot && frappe.boot.upande_ta_attendance_filters) || [];
-		return defs
-			.filter((df) => df && df.fieldname && df.options)
-			.map((df) => ({
-				fieldname: df.fieldname,
-				label: __(df.label || df.fieldname),
-				fieldtype: "Link",
-				options: df.options,
-			}));
-	}
-
-	function addExtraFilters(settings) {
-		try {
-			if (!settings || !Array.isArray(settings.filters)) return;
-
-			const existing = new Set(settings.filters.map((df) => df && df.fieldname));
-			const missing = extraFilterDefs().filter((df) => !existing.has(df.fieldname));
-			if (!missing.length) return;
-
-			let at = settings.filters.findIndex(
-				(df) => df && df.fieldname === EXTRA_FILTER_ANCHOR
-			);
-			at = at === -1 ? settings.filters.length : at + 1;
-			settings.filters.splice(at, 0, ...missing);
-		} catch (e) {
-			console.warn("[MAS filters]", e);
-		}
-	}
-
 	function patchPrototype() {
 		const QR = frappe.views && frappe.views.QueryReport;
 		if (!QR || !QR.prototype) return false;
@@ -240,12 +204,6 @@ frappe.provide("frappe.views");
 				
 			}
 			return origPrepareColumns.apply(this, arguments);
-		};
-
-		const origSetupFilters = QR.prototype.setup_filters;
-		QR.prototype.setup_filters = function () {
-			if (this.report_name === REPORT) addExtraFilters(this.report_settings);
-			return origSetupFilters.apply(this, arguments);
 		};
 
 		const origRender = QR.prototype.render_datatable;
