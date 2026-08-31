@@ -151,6 +151,21 @@ function open_device_action(frm, command_type, opts) {
 	}
 }
 
+// A device tied to one or more farms only accepts employees from those farms —
+// bulk_command() enforces that server-side and refuses the rest. Offering a
+// device the employee can never go on just moves the refusal later, so the
+// picker filters to what will actually be accepted.
+//
+// Add and Update are farm-gated; Delete is not (removing a stale or foreign
+// enrolment is exactly what an operator needs), so it sees every device.
+function devices_for_farm(devices, farm) {
+	return (devices || []).filter((d) => {
+		const farms = d.farms || [];
+		if (!farms.length) return true;          // unrestricted device
+		return !!farm && farms.includes(farm);
+	});
+}
+
 function fetch_addable_devices(frm) {
 	if (frm.__upande_ta_addable_devices) {
 		return Promise.resolve(frm.__upande_ta_addable_devices);
@@ -169,7 +184,8 @@ function fetch_addable_devices(frm) {
 		})),
 	]).then(([all_devices, on_devices]) => {
 		const on_sns = new Set((on_devices || []).map(d => d.device_sn));
-		return (all_devices || []).filter(d => !on_sns.has(d.device_sn));
+		const not_yet_on = (all_devices || []).filter(d => !on_sns.has(d.device_sn));
+		return devices_for_farm(not_yet_on, frm.doc.custom_farm);
 	});
 }
 
