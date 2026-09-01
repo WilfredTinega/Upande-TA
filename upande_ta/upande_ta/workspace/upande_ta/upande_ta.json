@@ -1,8 +1,8 @@
 {
  "app": "upande_ta",
  "charts": [],
- "content": "[{\"id\":\"hdr-shortcuts\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Your Shortcuts</b></span>\",\"col\":12}},{\"id\":\"sc-setting\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Biometric Setting\",\"col\":3}},{\"id\":\"sc-user\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Biometric User\",\"col\":3}},{\"id\":\"sc-template\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Biometric Template\",\"col\":3}},{\"id\":\"sc-logs\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Biometric Logs\",\"col\":3}},{\"id\":\"sc-gatepass\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Gate Pass\",\"col\":3}},{\"id\":\"sc-checkin\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Employee Checkin\",\"col\":3}},{\"id\":\"sc-attendance\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Attendance\",\"col\":3}},{\"id\":\"sc-shift\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Shift Type\",\"col\":3}},{\"id\":\"sp-1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"hdr-cards\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Masters &amp; Setup</b></span>\",\"col\":12}},{\"id\":\"card-bio\",\"type\":\"card\",\"data\":{\"card_name\":\"Biometrics\",\"col\":4}},{\"id\":\"card-att\",\"type\":\"card\",\"data\":{\"card_name\":\"Attendance\",\"col\":4}},{\"id\":\"card-gp\",\"type\":\"card\",\"data\":{\"card_name\":\"Gate Pass\",\"col\":4}},{\"id\":\"sp-2\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"hdr-overview\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Checkin Overview</b></span>\",\"col\":12}},{\"id\":\"cb-ta-dash\",\"type\":\"custom_block\",\"data\":{\"custom_block_name\":\"T&A Dashboard\",\"col\":12}}]",
- "creation": "2026-05-21 00:00:00.000000",
+ "content": "[{\"id\":\"hdr-cards\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Masters &amp; Setup</b></span>\",\"col\":12}},{\"id\":\"card-bio\",\"type\":\"card\",\"data\":{\"card_name\":\"Biometrics\",\"col\":3}},{\"id\":\"card-att\",\"type\":\"card\",\"data\":{\"card_name\":\"Attendance\",\"col\":3}},{\"id\":\"card-gp\",\"type\":\"card\",\"data\":{\"card_name\":\"Gate Pass\",\"col\":3}},{\"id\":\"card-reports\",\"type\":\"card\",\"data\":{\"card_name\":\"Reports\",\"col\":3}},{\"id\":\"sp-2\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"hdr-overview\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Checkin Overview</b></span>\",\"col\":12}},{\"id\":\"sc-insights\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Attendance Insights\",\"col\":3}},{\"id\":\"cb-ta-dash\",\"type\":\"custom_block\",\"data\":{\"custom_block_name\":\"T&A Dashboard\",\"col\":12}}]",
+ "creation": "2026-05-21 00:00:00",
  "custom_blocks": [
   {
    "custom_block_name": "T&A Dashboard",
@@ -152,9 +152,28 @@
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Reports",
+   "link_count": 1,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Monthly Attendance Sheet",
+   "link_count": 0,
+   "link_to": "Monthly Attendance Sheet",
+   "link_type": "Report",
+   "onboard": 0,
+   "report_ref_doctype": "Attendance",
+   "type": "Link"
   }
  ],
- "modified": "2026-08-17 00:00:00.000000",
+ "modified": "2026-09-01 08:48:04.404624",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Upande TA",
@@ -172,67 +191,11 @@
  "sequence_id": 50.0,
  "shortcuts": [
   {
-   "color": "Grey",
+   "color": "Cyan",
    "doc_view": "",
-   "label": "Biometric Setting",
-   "link_to": "Biometric Setting",
-   "type": "DocType"
-  },
-  {
-   "color": "Green",
-   "doc_view": "List",
-   "label": "Biometric User",
-   "link_to": "Biometric User",
-   "stats_filter": "[]",
-   "type": "DocType"
-  },
-  {
-   "color": "Green",
-   "doc_view": "List",
-   "label": "Biometric Template",
-   "link_to": "Biometric Template",
-   "stats_filter": "[]",
-   "type": "DocType"
-  },
-  {
-   "color": "Green",
-   "doc_view": "List",
-   "label": "Biometric Logs",
-   "link_to": "Biometric Logs",
-   "stats_filter": "[]",
-   "type": "DocType"
-  },
-  {
-   "color": "Orange",
-   "doc_view": "List",
-   "label": "Gate Pass",
-   "link_to": "Gate Pass",
-   "stats_filter": "[]",
-   "type": "DocType"
-  },
-  {
-   "color": "Green",
-   "doc_view": "List",
-   "label": "Employee Checkin",
-   "link_to": "Employee Checkin",
-   "stats_filter": "[]",
-   "type": "DocType"
-  },
-  {
-   "color": "Green",
-   "doc_view": "List",
-   "label": "Attendance",
-   "link_to": "Attendance",
-   "stats_filter": "[]",
-   "type": "DocType"
-  },
-  {
-   "color": "Green",
-   "doc_view": "List",
-   "label": "Shift Type",
-   "link_to": "Shift Type",
-   "stats_filter": "[]",
-   "type": "DocType"
+   "label": "Attendance Insights",
+   "type": "URL",
+   "url": "/attendance-insights"
   }
  ],
  "title": "Upande TA",
