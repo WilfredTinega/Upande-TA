@@ -43,6 +43,7 @@ def _make_material_request_with_items(item_rows, material_request_type="Material
 			"conversion_factor": 1,
 			"schedule_date": today(),
 			"warehouse": "_Test Warehouse - _TC",
+			"custom_purpose": "Test",
 		}
 		defaults.update(row)
 		mr.append("items", defaults)
