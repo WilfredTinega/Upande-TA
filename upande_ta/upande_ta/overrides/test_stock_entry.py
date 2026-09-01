@@ -57,6 +57,8 @@ def _make_material_request_with_items(item_rows, material_request_type="Material
 
 class IntegrationTestMaterialRequestEmployeeQuery(IntegrationTestCase):
 	def setUp(self):
+		if not frappe.db.exists("DocType", "Farm") or not frappe.db.exists("DocType", "Business Unit"):
+			self.skipTest("Farm/Business Unit doctype not installed on this site.")
 		if not frappe.get_all("Farm", limit=1) or not frappe.get_all("Business Unit", limit=1):
 			self.skipTest("No Farm/Business Unit record on this site to build a valid test Material Request.")
 		self.employees = frappe.get_all("Employee", filters={"status": "Active"}, limit=2, pluck="name")
