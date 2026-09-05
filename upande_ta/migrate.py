@@ -36,6 +36,7 @@ def _steps():
 		resync_scheduled_jobs,
 	)
 	from upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime import ensure_overtime_setup
+	from upande_ta.upande_ta.api.attendance_insights import ensure_attendance_insights_fields
 	from upande_ta.upande_ta.overrides.leave_type import ensure_abbreviation_field
 	from upande_ta.upande_ta.overrides.stock_entry import ensure_biometric_stock_entry_fields
 

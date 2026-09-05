@@ -393,25 +393,32 @@ def material_request_employee_query(doctype, txt, searchfield, start, page_lengt
 	filters["material_request"] is resolved client-side (see stock_entry.js)
 	from the current form's item rows -- not re-derived server-side from a
 	saved Stock Entry, so this works for unsaved drafts too. Scoped to that
-	Material Request's Employee Data rows that haven't been issued via
-	another Stock Entry yet (Employee Request.issued_via_stock_entry empty).
+	Material Request's own Item rows that have an employee set and haven't
+	been issued via another Stock Entry yet (Material Request Item.
+	issued_via_stock_entry empty).
 
 	filters["item_codes"] (also resolved client-side, from the item_code of
 	every item row sharing that same material_request) further narrows this
 	to employees allocated one of those specific items -- e.g. a Material
 	Request allocating Amisil to James and MPK to Timothy will only offer
-	James when the Stock Entry is issuing Amisil. An Employee Request row
-	with no item_code (the pre-existing, item-agnostic PPE-workflow shape) is
-	never filtered out by this, and if no item_codes are passed at all
-	(nothing to filter by) every row is kept, preserving today's behavior
-	exactly.
+	James when the Stock Entry is issuing Amisil. A blank-employee row
+	(only reachable for non-Material-Issue request types, where employee
+	stays optional) is never offered here at all -- it carries no employee
+	to offer in the first place. If no item_codes are passed at all
+	(nothing to filter by) every employee-having row is kept, preserving
+	today's behavior exactly. The same employee allocated more than one of
+	the filtered items is offered exactly once, not once per matching row.
 
 	Falls back to a plain Employee search when there's no Material Request
 	context, matching bio_employee's existing unrestricted behavior -- also
-	used when the Employee Request doctype doesn't exist at all (this app is
-	installed on other sites that don't have upande_stores, where
-	material_request can still be set on a Stock Entry Detail row for
-	reasons unrelated to this feature).
+	used when upande_stores' own ``employee`` Custom Field isn't present on
+	Material Request Item (this app is installed on other sites that don't
+	have upande_stores, where material_request can still be set on a Stock
+	Entry Detail row for reasons unrelated to this feature). Material
+	Request Item itself is a core ERPNext doctype -- its table always
+	exists regardless of whether upande_stores is installed -- so the real
+	"is this feature available" check is whether upande_stores' employee
+	column is actually present, not whether the table is.
 	"""
 	filters = frappe.parse_json(filters) if isinstance(filters, str) else (filters or {})
 	material_request = filters.get("material_request")
@@ -426,7 +433,7 @@ def material_request_employee_query(doctype, txt, searchfield, start, page_lengt
 	limit = cint(page_length) or 20
 	txt_lower = (txt or "").lower()
 
-	if not material_request or not frappe.db.table_exists("Employee Request"):
+	if not material_request or not frappe.db.has_column("Material Request Item", "employee"):
 		# list(...): frappe.get_all(..., as_list=True) returns a tuple of tuples
 		# on this Frappe version -- normalize to the documented list[tuple] return
 		# type (also what the standard Link-field query contract expects).
@@ -446,15 +453,29 @@ def material_request_employee_query(doctype, txt, searchfield, start, page_lengt
 		)
 
 	rows = frappe.get_all(
-		"Employee Request",
-		filters={"parent": material_request, "parenttype": "Material Request"},
+		"Material Request Item",
+		filters={
+			"parent": material_request,
+			"parenttype": "Material Request",
+			"employee": ["is", "set"],
+		},
 		fields=["employee", "employee_name", "issued_via_stock_entry", "item_code"],
 	)
 	results = [
 		(row.employee, row.employee_name)
 		for row in rows
 		if not row.issued_via_stock_entry
-		and (not row.item_code or not item_codes or row.item_code in item_codes)
+		and (not item_codes or row.item_code in item_codes)
 		and (txt_lower in (row.employee or "").lower() or txt_lower in (row.employee_name or "").lower())
 	]
-	return results[offset : offset + limit]
+	# The same employee can now have more than one row (once per item they
+	# need) -- de-duplicate by employee, preserving first-seen order, so a
+	# Stock Entry issuing several allocated items doesn't offer them twice.
+	seen = set()
+	deduped = []
+	for pair in results:
+		if pair[0] in seen:
+			continue
+		seen.add(pair[0])
+		deduped.append(pair)
+	return deduped[offset : offset + limit]
