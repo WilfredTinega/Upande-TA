@@ -34,9 +34,12 @@ frappe.provide("frappe.views");
 			if (fn === SUMMARY_LABEL_FIELD) {
 
 				return (
+					// Background comes from the themed variable in
+					// ensureSummaryStyle(): this label floats over the frozen
+					// column, so it has to repaint the band behind itself.
 					"<b class='ta-summary-label' style=\"position:absolute; left:0; top:0; bottom:0;" +
 					" display:flex; align-items:center; padding-left:15px; white-space:nowrap;" +
-					" z-index:5; background:#f7f7f7;\">" +
+					" z-index:5;\">" +
 					rawValue +
 					"</b>"
 				);
@@ -71,12 +74,22 @@ frappe.provide("frappe.views");
 	}
 
 	// Inject the border/styling for the summary block once.
+	//
+	// Themed, not hard-coded: the band used to be #f7f7f7 with a black rule,
+	// which turned the totals into a white slab with unreadable text once the
+	// desk was in dark mode. `--subtle-accent` resolves to gray-50 on light and
+	// gray-900 on dark — a step away from the row background either way — and
+	// `--heading-color` inverts with it, so the block reads the same in both.
 	function ensureSummaryStyle() {
 		if (document.getElementById("ta-mas-summary-style")) return;
 		const css =
-			
-			".dt-row.ta-summary-row .dt-cell { background:#f7f7f7 !important; position:relative; }" +
-			".dt-row.ta-summary-top .dt-cell { border-top:2px solid #000 !important; }";
+			":root { --ta-summary-bg: var(--subtle-accent, #f7f7f7);" +
+			" --ta-summary-fg: var(--heading-color, #171717); }" +
+			".dt-row.ta-summary-row .dt-cell { background:var(--ta-summary-bg) !important; color:var(--ta-summary-fg) !important; position:relative; }" +
+			".dt-row.ta-summary-top .dt-cell" +
+			" { border-top:2px solid var(--ta-summary-fg) !important; }" +
+			".dt-row.ta-summary-row .ta-summary-label" +
+			" { background:var(--ta-summary-bg); color:var(--ta-summary-fg); }";
 		const style = document.createElement("style");
 		style.id = "ta-mas-summary-style";
 		style.textContent = css;

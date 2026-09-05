@@ -23,6 +23,13 @@ signed-in session is required and the caller's own permissions still apply.
 
 import frappe
 
+# Kaitet has no "Task Worker" employment type — the Employment Type master holds
+# Permanent / Temporary / Contract, and task workers are carried as Temporary
+# ("Task Worker" is their designation). The sidebar's task-worker rollup keyed on
+# the employment type, so every farm badge read 0.
+TASK_WORKER_EMPLOYMENT_TYPE = "Temporary"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Server Script: attendance_dashboard_data  (type: API, api_method: attendance_dashboard_data)
 # REWRITE — v3  (PERFORMANCE)
@@ -120,7 +127,7 @@ def attendance_dashboard_data():
 
 	# per-company/per-farm split: task workers vs the rest
 	company_farm_counts = {}
-	cfcrows = frappe.db.sql("SELECT e.company AS co, e.custom_farm AS f, SUM(CASE WHEN e.employment_type='Task Worker' THEN 1 ELSE 0 END) AS tw, SUM(CASE WHEN COALESCE(e.employment_type,'')<>'Task Worker' THEN 1 ELSE 0 END) AS rest FROM `tabEmployee` e WHERE e.status='Active' AND IFNULL(e.company,'')<>'' AND IFNULL(e.custom_farm,'')<>'' GROUP BY e.company, e.custom_farm", as_dict=1)
+	cfcrows = frappe.db.sql("SELECT e.company AS co, e.custom_farm AS f, SUM(CASE WHEN e.employment_type=%(tw_type)s THEN 1 ELSE 0 END) AS tw, SUM(CASE WHEN COALESCE(e.employment_type,'')<>%(tw_type)s THEN 1 ELSE 0 END) AS rest FROM `tabEmployee` e WHERE e.status='Active' AND IFNULL(e.company,'')<>'' AND IFNULL(e.custom_farm,'')<>'' GROUP BY e.company, e.custom_farm", {"tw_type": TASK_WORKER_EMPLOYMENT_TYPE}, as_dict=1)
 	for cr in cfcrows:
 		company_farm_counts.setdefault(cr["co"], {})
 		company_farm_counts[cr["co"]][cr["f"]] = {"tw": int(cr["tw"] or 0), "rest": int(cr["rest"] or 0)}
@@ -1275,7 +1282,7 @@ def attendance_register():
 
 		sbfarms = {}
 		sbcounts = {}
-		sbrows = frappe.db.sql("SELECT company AS co, custom_farm AS f, SUM(CASE WHEN employment_type='Task Worker' THEN 1 ELSE 0 END) AS tw, SUM(CASE WHEN COALESCE(employment_type,'')<>'Task Worker' THEN 1 ELSE 0 END) AS rest FROM `tabEmployee` WHERE status='Active' AND IFNULL(company,'')<>'' AND IFNULL(custom_farm,'')<>'' GROUP BY company, custom_farm ORDER BY company, custom_farm", as_dict=True)
+		sbrows = frappe.db.sql("SELECT company AS co, custom_farm AS f, SUM(CASE WHEN employment_type=%(tw_type)s THEN 1 ELSE 0 END) AS tw, SUM(CASE WHEN COALESCE(employment_type,'')<>%(tw_type)s THEN 1 ELSE 0 END) AS rest FROM `tabEmployee` WHERE status='Active' AND IFNULL(company,'')<>'' AND IFNULL(custom_farm,'')<>'' GROUP BY company, custom_farm ORDER BY company, custom_farm", {"tw_type": TASK_WORKER_EMPLOYMENT_TYPE}, as_dict=True)
 		for rr in sbrows:
 			sbfarms.setdefault(rr["co"], [])
 			if rr["f"] not in sbfarms[rr["co"]]:

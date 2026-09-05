@@ -690,7 +690,9 @@
       {label:'Contract + Permanent', value:'Contract,Permanent'},
       {label:'Contract', value:'Contract'},
       {label:'Permanent', value:'Permanent'},
-      {label:'Task Worker', value:'Task Worker'},
+      // Task workers are carried as the Temporary employment type; there is no
+      // "Task Worker" row in the Employment Type master, so a chip filtering on
+      // it matched nobody.
       {label:'Temporary', value:'Temporary'}
     ];
     GROUPS.forEach(function(g){
@@ -742,7 +744,7 @@
       farms.forEach(function(f){
         var it=document.createElement('div'); it.className='att-sb-farm'; it.setAttribute('data-co',co); it.setAttribute('data-farm',f);
         var c=(counts[co]||{})[f]||null;
-        var cnt = c ? '<span class="att-sb-counts"><span class="c-tw" title="Task Workers">'+c.tw+'</span><span class="c-rest" title="Others">'+c.rest+'</span></span>' : '';
+        var cnt = c ? '<span class="att-sb-counts"><span class="c-tw" title="Temporary (task workers)">'+c.tw+'</span><span class="c-rest" title="Others">'+c.rest+'</span></span>' : '';
         it.innerHTML='<span class="att-sb-fname"></span>'+cnt;
         it.querySelector('.att-sb-fname').textContent=f;
         it.addEventListener('click',function(){ _sbSetSelect('r-company',co); _sbSetSelect('r-farm',f); _setActive(it); load(); scheduleAutoRefresh(); _sbTrendSync(); closeSidebar(); });

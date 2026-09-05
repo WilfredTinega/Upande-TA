@@ -88,7 +88,25 @@
   "biometric_verificationse_section",
   "stock_verification_window_minutes",
   "biometric_verificationse_column",
-  "enable_automatic_submission_on_stock_entry"
+  "enable_automatic_submission_on_stock_entry",
+  "attendance_tab",
+  "absent_marking_section",
+  "absent_marking_column",
+  "enable_absent",
+  "absent_event_frequency",
+  "absent_cron_format",
+  "auto_supersede_absent",
+  "absent_marking_column_period",
+  "absent_grace_minutes",
+  "absent_lookback_days",
+  "absent_max_lookback_days",
+  "absent_batch_size",
+  "absent_shift_scope",
+  "absent_skip_when_no_device_activity",
+  "absent_marking_column_actions",
+  "absent_preview_date",
+  "absent_preview",
+  "absent_run_now"
  ],
  "fields": [
   {
@@ -530,13 +548,138 @@
    "fieldname": "biometric_verificationse_section",
    "fieldtype": "Section Break",
    "label": "Biometric Verification(SE)"
+  },
+  {
+   "fieldname": "absent_marking_section",
+   "fieldtype": "Section Break",
+   "label": "Absent Marking"
+  },
+  {
+   "fieldname": "absent_marking_column",
+   "fieldtype": "Column Break",
+   "label": "Schedule"
+  },
+  {
+   "default": "0",
+   "description": "Mark Absent once a shift window closes and the grace period below has passed. Independent of Shift Type.last_sync_of_checkin, so it does not wait a day.",
+   "fieldname": "enable_absent",
+   "fieldtype": "Check",
+   "label": "Enable Auto Absent?"
+  },
+  {
+   "default": "Cron",
+   "depends_on": "eval:doc.enable_absent",
+   "description": "How often the pass runs. The grace period can only be honoured to this resolution \u2014 a 30 minute grace needs Cron, e.g. */15 * * * *.",
+   "fieldname": "absent_event_frequency",
+   "fieldtype": "Select",
+   "label": "Absent Event Frequency",
+   "mandatory_depends_on": "eval:doc.enable_absent",
+   "options": "\nAll\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "default": "*/15 * * * *",
+   "depends_on": "eval:doc.enable_absent && doc.absent_event_frequency=='Cron'",
+   "fieldname": "absent_cron_format",
+   "fieldtype": "Data",
+   "label": "Absent Cron Format",
+   "mandatory_depends_on": "eval:doc.enable_absent && doc.absent_event_frequency=='Cron'"
+  },
+  {
+   "fieldname": "absent_marking_column_period",
+   "fieldtype": "Column Break",
+   "label": "Period"
+  },
+  {
+   "default": "60",
+   "depends_on": "eval:doc.enable_absent",
+   "description": "Minutes to wait after the shift window closes (shift end plus its allowed check-out grace) before a day with no logs is marked Absent. 60 means an 08:00-17:00 shift is marked at 18:00 the same day.",
+   "fieldname": "absent_grace_minutes",
+   "fieldtype": "Int",
+   "label": "Mark Absent After Shift End (Minutes)",
+   "non_negative": 1
+  },
+  {
+   "default": "3",
+   "depends_on": "eval:doc.enable_absent",
+   "description": "How many days back each run re-checks, to catch windows missed while the scheduler was down. Capped at 31.",
+   "fieldname": "absent_lookback_days",
+   "fieldtype": "Int",
+   "label": "Process Days Back",
+   "non_negative": 1
+  },
+  {
+   "default": "Shifts with Auto Attendance Enabled",
+   "depends_on": "eval:doc.enable_absent",
+   "fieldname": "absent_shift_scope",
+   "fieldtype": "Select",
+   "label": "Shifts to Process",
+   "options": "Shifts with Auto Attendance Enabled\nAll Shift Types"
+  },
+  {
+   "fieldname": "absent_marking_column_actions",
+   "fieldtype": "Column Break",
+   "label": "Run Now"
+  },
+  {
+   "fieldname": "absent_preview_date",
+   "fieldtype": "Date",
+   "label": "Date"
+  },
+  {
+   "description": "Reports who would be marked, and writes nothing.",
+   "fieldname": "absent_preview",
+   "fieldtype": "Button",
+   "label": "Preview Absentees"
+  },
+  {
+   "fieldname": "absent_run_now",
+   "fieldtype": "Button",
+   "label": "Mark Absentees Now"
+  },
+  {
+   "default": "1",
+   "description": "When Present / Half Day / On Leave is marked for a day already marked Absent - by hand, or by a check-in that synced late - cancel the Absent instead of failing with a duplicate error.",
+   "fieldname": "auto_supersede_absent",
+   "fieldtype": "Check",
+   "label": "Replace Absent When Attendance Is Marked"
+  },
+  {
+   "default": "1",
+   "depends_on": "eval:doc.enable_absent",
+   "description": "Leave a shift window alone when nobody at all scanned in it. Protects against a device or poll outage being recorded as everyone absent.",
+   "fieldname": "absent_skip_when_no_device_activity",
+   "fieldtype": "Check",
+   "label": "Skip When No Device Activity"
+  },
+  {
+   "default": "31",
+   "depends_on": "eval:doc.enable_absent",
+   "description": "Upper bound on any single run, including a manual date range typed into the buttons below. Marking a long stretch in one pass is how a small misconfiguration becomes thousands of wrong rows. 0 = no cap.",
+   "fieldname": "absent_max_lookback_days",
+   "fieldtype": "Int",
+   "label": "Maximum Days Back (Cap)",
+   "non_negative": 1
+  },
+  {
+   "default": "100",
+   "depends_on": "eval:doc.enable_absent",
+   "description": "Each batch is committed on its own, so a failure late in a large run cannot roll back the rows already written. 0 = commit once at the end.",
+   "fieldname": "absent_batch_size",
+   "fieldtype": "Int",
+   "label": "Employees per Batch",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "attendance_tab",
+   "fieldtype": "Tab Break",
+   "label": "Attendance"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-29 17:40:20.581297",
+ "modified": "2026-09-05 09:20:01.653735",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

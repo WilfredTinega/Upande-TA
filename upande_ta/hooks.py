@@ -89,6 +89,11 @@ before_uninstall = [
 
 override_doctype_class = {
 	"Overtime Slip": "upande_ta.upande_ta.overrides.overtime_slip.UpandeOvertimeSlip",
+	# An auto-marked Absent must not block the record that corrects it: a late
+	# check-in, or a supervisor marking someone Present. Stock ERPNext throws
+	# DuplicateAttendanceError, which the check-in path answers by flagging the
+	# scan `skip_auto_attendance` — losing it for good.
+	"Attendance": "upande_ta.upande_ta.overrides.attendance.UpandeAttendance",
 }
 
 doc_events = {
