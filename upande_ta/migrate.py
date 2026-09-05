@@ -29,6 +29,8 @@ def _steps():
 	"""Every after_install / after_migrate action, in dependency order."""
 	from upande_ta.install import ensure_ta_dashboard_block
 	from upande_ta.patches.v1.sanitize_link_filters import after_migrate_drop_check
+	from upande_ta.upande_ta.api.absent_marking import ensure_absent_marking_defaults
+	from upande_ta.upande_ta.api.attendance_insights import ensure_attendance_insights_fields
 	from upande_ta.upande_ta.cleanup import remove_orphans
 	from upande_ta.upande_ta.doctype.biometric_setting.biometric_setting import (
 		resync_scheduled_jobs,
@@ -50,6 +52,10 @@ def _steps():
 		#    fields this app adds to HRMS/ERPNext doctypes.
 		("ensure_ta_dashboard_block", ensure_ta_dashboard_block),
 		("ensure_attendance_insights_fields", ensure_attendance_insights_fields),
+		# Single doctypes only materialise field defaults on save, so the absent
+		# marking settings added to Biometric Setting would otherwise read as a
+		# zero grace period until someone opened and saved the form.
+		("ensure_absent_marking_defaults", ensure_absent_marking_defaults),
 		("ensure_abbreviation_field", ensure_abbreviation_field),
 		("ensure_biometric_stock_entry_fields", ensure_biometric_stock_entry_fields),
 		("ensure_overtime_setup", ensure_overtime_setup),
