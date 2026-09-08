@@ -1,13 +1,15 @@
 # Copyright (c) 2026, Upande LTD and contributors
 
-"""Cancel bogus "Absent" attendance that actually has a check-in log.
+"""Replace bogus "Absent" attendance that actually has a check-in log.
 
 Ported from the "Cancel Absent Attendance with Checkin log" Server Script.
 
 An employee marked Absent for a day on which they *did* punch a biometric
 check-in is a false absent -- the attendance was auto-created before the log
-synced. This drains such records in batches so a single scheduler tick never
-tries to cancel the whole backlog at once.
+synced. Each one is turned into a Present, which supersedes the Absent through
+the Attendance override rather than leaving the date empty. This drains such
+records in batches so a single scheduler tick never tries to convert the whole
+backlog at once.
 
 Scope: only absents *created by the Administrator* are cancelled. Those are the
 ones the auto-attendance / bulk jobs produce under the system user; an absent
@@ -37,7 +39,7 @@ _BASE_FROM_WHERE = """
 
 
 def cancel_absent_attendance_with_checkin():
-	"""Cancel one batch of Administrator-owned Absent attendance that has a check-in."""
+	"""Convert one batch of Administrator-owned false Absents into Present."""
 	cutoff_dt = frappe.utils.add_to_date(frappe.utils.now_datetime(), days=-LOOKBACK_DAYS)
 	cutoff = str(frappe.utils.getdate(cutoff_dt))
 	params = {"cutoff": cutoff, "owner": ABSENT_OWNER}
@@ -52,17 +54,43 @@ def cancel_absent_attendance_with_checkin():
 		return {"cancelled": 0, "failed": 0, "remaining": 0}
 
 	candidates = frappe.db.sql(
-		"SELECT DISTINCT a.name AS att_name "
+		"SELECT DISTINCT a.name AS att_name, a.employee, a.attendance_date, a.shift "
 		+ _BASE_FROM_WHERE
 		+ " ORDER BY a.attendance_date LIMIT %(lim)s",
 		{**params, "lim": BATCH_SIZE},
 		as_dict=True,
 	)
 
+	from hrms.hr.doctype.attendance.attendance import mark_attendance
+
 	cancelled = 0
+	marked_present = 0
 	failed = 0
 	for row in candidates:
 		try:
+			# Mark the day Present rather than only cancelling the Absent.
+			#
+			# Cancelling on its own leaves the date with no attendance at all,
+			# and a cancelled row is invisible to every duplicate check on the
+			# way back in (they all scope to `docstatus < 2`). The shift-end
+			# pass in upande_ta.upande_ta.api.absent_marking then saw an
+			# unaccounted day and marked it Absent again on its next run, which
+			# this cron cancelled again: a fresh Attendance row every fifteen
+			# minutes for as long as the date stayed in range.
+			#
+			# The Attendance override supersedes the conflicting Absent while
+			# validating the Present, so this is one operation and the date is
+			# never left empty for the pass to re-fill.
+			name = mark_attendance(row.employee, row.attendance_date, "Present", row.shift)
+			if name:
+				marked_present += 1
+				cancelled += 1
+				continue
+
+			# mark_attendance() swallows the duplicate/overlap errors and
+			# returns None. That means something else already covers the date,
+			# or supersede is switched off on Biometric Setting. Fall back to
+			# the plain cancel so a false Absent is still cleared.
 			att_doc = frappe.get_doc("Attendance", row.att_name)
 			att_doc.flags.ignore_permissions = True
 			att_doc.cancel()
@@ -74,10 +102,12 @@ def cancel_absent_attendance_with_checkin():
 				message=f"{row.att_name}: {frappe.get_traceback()}",
 			)
 
-	frappe.db.commit()
+	if not frappe.in_test:
+		frappe.db.commit()  # nosemgrep - the batch must survive a later failure
 
 	summary = {
 		"cancelled": cancelled,
+		"marked_present": marked_present,
 		"failed": failed,
 		"remaining": remaining_before - cancelled,
 	}
@@ -147,7 +177,8 @@ def cancel_absent_attendance_on_weekoff():
 				message=f"{row.name}: {frappe.get_traceback()}",
 			)
 
-	frappe.db.commit()
+	if not frappe.in_test:
+		frappe.db.commit()  # nosemgrep - the batch must survive a later failure
 
 	summary = {"cancelled": cancelled, "failed": failed}
 	frappe.logger("upande_ta").info(f"Cancel Absent on Week Off run: {summary}")

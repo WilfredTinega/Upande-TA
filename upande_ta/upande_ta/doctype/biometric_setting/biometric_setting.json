@@ -490,7 +490,7 @@
   {
    "default": "Cron",
    "depends_on": "eval:doc.enable_absent",
-   "description": "How often the pass runs. The grace period can only be honoured to this resolution — a 30 minute grace needs Cron, e.g. */15 * * * *.",
+   "description": "How often the pass runs. The grace period can only be honoured to this resolution \u2014 a 30 minute grace needs Cron, e.g. */15 * * * *.",
    "fieldname": "absent_event_frequency",
    "fieldtype": "Select",
    "label": "Absent Event Frequency",

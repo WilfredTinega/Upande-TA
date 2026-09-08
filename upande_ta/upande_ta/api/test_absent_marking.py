@@ -238,6 +238,54 @@ class IntegrationTestAbsentMarking(IntegrationTestCase):
 
 		self.assertIsNone(self._status(self.scanner))
 
+	def test_a_scan_outside_the_window_still_counts_as_at_work(self):
+		"""Punched out at 23:00 for a shift whose window closed at 19:00.
+
+		The scan is outside the window but plainly on the day, so the employee
+		was at work and must not be marked Absent. Reported separately from an
+		in-window scan so a shift whose people all punch late is visible as a
+		timings problem.
+		"""
+		_checkin(self.scanner, self.day, 23, "OUT")
+
+		summary = self._run()
+
+		self.assertIsNone(self._status(self.scanner))
+		window = self._window(summary)
+		self.assertEqual(window["scanned"], 0)
+		self.assertEqual(window["scanned_off_window"], 1)
+
+	def test_a_late_scan_becomes_present_rather_than_a_recurring_absent(self):
+		"""The pass and the cleanup cron used to undo each other forever.
+
+		The pass marked Absent because nothing landed inside the window; the
+		cron cancelled it because a scan existed on the date; the cancelled row
+		was invisible to both duplicate checks, so the next run marked the day
+		again. The cron now writes the Present instead, which supersedes the
+		Absent and leaves the date accounted for.
+		"""
+		from upande_ta.upande_ta.attendance_cleanup import cancel_absent_attendance_with_checkin
+
+		self._run()
+		self.assertEqual(self._status(self.absentee), "Absent")
+
+		# The scan syncs late, outside the window but on the same date.
+		_checkin(self.absentee, self.day, 23, "OUT")
+
+		cancel_absent_attendance_with_checkin()
+		self.assertEqual(self._status(self.absentee), "Present")
+
+		# ...and the next pass leaves it alone instead of marking a fresh row.
+		self._run()
+		self.assertEqual(self._status(self.absentee), "Present")
+		self.assertEqual(
+			frappe.db.count(
+				"Attendance",
+				{"employee": self.absentee, "attendance_date": self.day, "docstatus": 1},
+			),
+			1,
+		)
+
 	def test_does_not_mark_on_the_employees_own_rest_day(self):
 		self._run()
 

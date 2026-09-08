@@ -245,10 +245,20 @@ def _process_window(shift, day, now, grace_minutes, skip_idle_windows, dry_run, 
 		window["skipped"] = "no device activity in window"
 		return window
 
+	# A scan anywhere on the attendance date also counts, not just one inside
+	# the window. Somebody who forgot to punch in and only punched out after the
+	# check-out allowance closed was plainly at work, and marking them Absent is
+	# wrong on its own terms. It is also what used to put this pass in a loop
+	# with `attendance_cleanup.cancel_absent_attendance_with_checkin`, which
+	# clears an Absent on exactly that evidence: the Absent was cancelled, the
+	# cancelled row is invisible to the query below (`docstatus < 2`), and the
+	# next run marked the day again.
+	scanned_on_date = _employees_with_checkins_on_date(list(candidates), day)
+
 	already_marked = _employees_with_attendance(list(candidates), day)
 	on_leave = _employees_on_leave(list(candidates), day)
 
-	accounted = scanned | already_marked | on_leave
+	accounted = scanned | scanned_on_date | already_marked | on_leave
 	pending = []
 	rest_days = 0
 	unknown_rest_days = 0
@@ -267,6 +277,10 @@ def _process_window(shift, day, now, grace_minutes, skip_idle_windows, dry_run, 
 
 	window["assigned"] = len(candidates)
 	window["scanned"] = len(scanned & candidates)
+	# Reported apart from `scanned` so a shift whose people are all punching
+	# outside their own window is visible as a shift-timing problem rather than
+	# quietly counting as normal attendance.
+	window["scanned_off_window"] = len((scanned_on_date - scanned) & candidates)
 	window["already_marked"] = len(already_marked & candidates)
 	window["on_leave"] = len(on_leave & candidates)
 	window["rest_day"] = rest_days
@@ -507,6 +521,35 @@ def _employees_with_checkins(employees, actual_start, actual_end):
 	)
 
 
+def _employees_with_checkins_on_date(employees, day):
+	"""Employees with any scan on `day` itself, whatever shift window it fell in.
+
+	Deliberately calendar-date based, matching the rule
+	`attendance_cleanup.cancel_absent_attendance_with_checkin` uses to clear a
+	false Absent. The two have to agree on what "this person was at work" means,
+	or one writes a row the other removes.
+
+	This never narrows who is marked, only widens who is spared: a night shift's
+	scans land on the next calendar day and are already caught by the window
+	query, so nothing depends on this alone.
+	"""
+	if not employees:
+		return set()
+
+	return set(
+		frappe.db.sql(
+			"""
+			SELECT DISTINCT employee
+			FROM `tabEmployee Checkin`
+			WHERE employee IN %(employees)s
+			  AND DATE(time) = %(day)s
+			""",
+			{"employees": tuple(employees), "day": getdate(day)},
+			pluck=True,
+		)
+	)
+
+
 def _employees_with_attendance(employees, day):
 	"""Employees whose date is already accounted for, under any shift."""
 	if not employees:
@@ -719,7 +762,7 @@ def _reclaim_skipped_checkins(days=None):
 	for name in rows:
 		frappe.db.set_value("Employee Checkin", name, "skip_auto_attendance", 0, update_modified=False)
 
-	if rows:
+	if rows and not frappe.in_test:
 		frappe.db.commit()  # nosemgrep - the flag reset must land for the next run
 
 	return {"since": str(since), "reclaimed": len(rows), "checkins": rows}

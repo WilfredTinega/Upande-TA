@@ -1,7 +1,7 @@
 # Copyright (c) 2026, Upande LTD and contributors
 
 app_name = "upande_ta"
-app_title = "T&A"
+app_title = "Upande TA"
 app_publisher = "Upande LTD"
 app_description = "Upande Time and Attendance"
 app_email = "info@upande.com"
