@@ -43,6 +43,10 @@ after_install = [
 	"upande_ta.install.ensure_ta_dashboard_block",
 	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
 	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
+	# Single doctypes only materialise field defaults on save, so the absent
+	# marking settings added to Biometric Setting would otherwise read as a
+	# zero grace period until someone opened and saved the form.
+	"upande_ta.upande_ta.api.absent_marking.ensure_absent_marking_defaults",
 ]
 
 before_uninstall = [
@@ -58,6 +62,10 @@ after_migrate = [
 	"upande_ta.install.ensure_ta_dashboard_block",
 	"upande_ta.upande_ta.overrides.leave_type.ensure_abbreviation_field",
 	"upande_ta.upande_ta.overrides.stock_entry.ensure_biometric_stock_entry_fields",
+	# Single doctypes only materialise field defaults on save, so the absent
+	# marking settings added to Biometric Setting would otherwise read as a
+	# zero grace period until someone opened and saved the form.
+	"upande_ta.upande_ta.api.absent_marking.ensure_absent_marking_defaults",
 	"upande_ta.upande_ta.cleanup.remove_orphans",
 	"upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime.ensure_overtime_setup",
 	# HRMS ships Monthly Attendance Sheet with prepared_report=1, which re-enables
@@ -71,6 +79,11 @@ after_migrate = [
 
 override_doctype_class = {
 	"Overtime Slip": "upande_ta.upande_ta.overrides.overtime_slip.UpandeOvertimeSlip",
+	# An auto-marked Absent must not block the record that corrects it: a late
+	# check-in, or a supervisor marking someone Present. Stock ERPNext throws
+	# DuplicateAttendanceError, which the check-in path answers by flagging the
+	# scan `skip_auto_attendance` — losing it for good.
+	"Attendance": "upande_ta.upande_ta.overrides.attendance.UpandeAttendance",
 }
 
 doc_events = {

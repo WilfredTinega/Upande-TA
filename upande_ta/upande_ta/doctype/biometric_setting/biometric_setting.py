@@ -12,6 +12,7 @@ SCHEDULER_TASKS = [
  ("checkin", "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_checkin",      "Biometric: Poll Attendance"),
  ("biodata", "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_biodata_sync", "Biometric: Sync BioData"),
  ("flip",    "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_flip_last_in", "Biometric: Flip Last IN → OUT"),
+ ("absent",  "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_absent_marking", "Biometric: Mark Absentees"),
 ]
 
 SCHEDULER_EVENT_AGAINST = "Biometric Setting"
@@ -44,6 +45,7 @@ _PREFIX_ENABLE = {
  "checkin": "enable_checkin",
  "biodata": "enable_bio_templates",
  "flip":    "enable_flip",
+ "absent":  "enable_absent",
 }
 
 _FREQUENCY_WINDOWS = {
@@ -914,6 +916,31 @@ def _publish_device_status_update(payload):
 			title="Biometric: publish_realtime failed",
 			message=frappe.get_traceback(),
 		)
+
+
+def run_absent_marking():
+	"""Mark Absent for shift windows that have closed with no check-in logs.
+
+	Runs off the wall clock and the grace period configured on this doctype, not
+	off `Shift Type.last_sync_of_checkin` — HRMS's own pass waits a full day
+	past the shift and stalls entirely when the biometric poll stalls. See
+	upande_ta/upande_ta/api/absent_marking.py.
+	"""
+	from upande_ta.upande_ta.api.absent_marking import run_absent_marking as _run
+
+	return _run()
+
+
+@frappe.whitelist()
+def mark_absentees_now(
+	from_date: str | None = None,
+	to_date: str | None = None,
+	dry_run: str | int | bool = 0,
+):
+	"""Attendance tab button: run the pass now, or preview it (dry_run=1)."""
+	from upande_ta.upande_ta.api.absent_marking import mark_absentees_now as _mark
+
+	return _mark(from_date=from_date, to_date=to_date, dry_run=dry_run)
 
 
 def run_flip_last_in():

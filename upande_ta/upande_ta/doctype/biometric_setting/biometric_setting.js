@@ -125,11 +125,16 @@
 frappe.ui.form.on("Biometric Setting", {
 	refresh: function(frm) {
 		make_primary(frm, "get_checkin");
+		make_primary(frm, "absent_run_now");
 		make_primary(frm, "get_bio");
 		make_primary(frm, "update");
 		if (!frm.doc.date) {
 			frm.doc.date = frappe.datetime.get_today();
 			frm.refresh_field("date");
+		}
+		if (!frm.doc.absent_preview_date) {
+			frm.doc.absent_preview_date = frappe.datetime.get_today();
+			frm.refresh_field("absent_preview_date");
 		}
 		refresh_device_options(frm);
 		backfill_poll_device_sns(frm);
@@ -176,12 +181,26 @@ frappe.ui.form.on("Biometric Setting", {
 	enable_users:             autosave_on_change,
 	enable_bio_templates:     autosave_on_change,
 	enable_flip:              autosave_on_change,
+	enable_absent:            autosave_on_change,
 	checkin_event_frequency:  autosave_on_change,
 	biodata_event_frequency:  autosave_on_change,
 	flip_event_frequency:     autosave_on_change,
+	absent_event_frequency:   autosave_on_change,
 	checkin_cron_format:      autosave_on_change,
 	biodata_cron_format:      autosave_on_change,
 	flip_cron_format:         autosave_on_change,
+	absent_cron_format:       autosave_on_change,
+
+	absent_preview: function(frm) {
+		run_absent_marking(frm, 1);
+	},
+
+	absent_run_now: function(frm) {
+		frappe.confirm(
+			__("Mark Absent for every closed shift window with no check-in logs? Preview first if you have just changed the grace period."),
+			() => run_absent_marking(frm, 0)
+		);
+	},
 
 	update: function(frm) {
 		const day = frm.doc.date || frappe.datetime.get_today();
@@ -1015,7 +1034,8 @@ function render_template_list(wrapper, device_sn, templates, frm) {
 const SCHEDULED_JOB_PREFIX_TO_FREQUENCY = {
 	checkin: "checkin_event_frequency",
 	biodata: "biodata_event_frequency",
-	flip:    "flip_event_frequency"
+	flip:    "flip_event_frequency",
+	absent:  "absent_event_frequency"
 };
 
 function autosave_on_change(frm) {
@@ -1031,6 +1051,89 @@ function autosave_on_change(frm) {
 		.finally(() => {
 			frm._autosaving = false;
 		});
+}
+
+// The absent pass reports every shift window it looked at, and why it passed
+// over the ones it skipped — a run that marks nobody has to be distinguishable
+// from a run that never happened (device outage, rest day, nothing due yet).
+function run_absent_marking(frm, dry_run) {
+	const day = frm.doc.absent_preview_date || null;
+	const title = dry_run ? __("Previewing absentees") : __("Marking absentees");
+
+	const call = () => run_with_progress(
+		title,
+		dry_run
+			? __("Checking closed shift windows for missing check-ins...")
+			: __("Marking Absent where no check-in logs exist..."),
+		{
+			method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.mark_absentees_now",
+			args: { from_date: day, to_date: day, dry_run: dry_run ? 1 : 0 },
+			callback: function(r) {
+				if (r.exc || !r.message) return;
+				show_absent_result(r.message, dry_run);
+			}
+		}
+	);
+
+	if (frm.is_dirty()) {
+		frm.save().then(call);
+	} else {
+		call();
+	}
+}
+
+function show_absent_result(result, dry_run) {
+	const windows = result.windows || [];
+	const total = dry_run
+		? windows.reduce((n, w) => n + ((w.would_mark || []).length), 0)
+		: (result.marked || 0);
+
+	const rows = windows.map((w) => {
+		const marked = dry_run ? (w.would_mark || []).length : (w.marked_employees || []).length;
+		const note = w.skipped
+			? `<span style="color:var(--text-muted)">${frappe.utils.escape_html(w.skipped)}</span>`
+			: [
+				`${w.scanned || 0} scanned`,
+				`${w.already_marked || 0} already marked`,
+				`${w.on_leave || 0} on leave`,
+				`${w.rest_day || 0} week off / holiday`,
+				(w.other_shift ? `${w.other_shift} on another shift` : ""),
+				// Skipped rather than marked: without a week-off list assigned to
+				// the employee there is no way to tell a working day from a rest
+				// day, and marking would risk an Absent on someone's day off.
+				(w.no_week_off_list
+					? `<span style="color:var(--orange-500)">${w.no_week_off_list} no week-off list — skipped</span>`
+					: "")
+			].filter(Boolean).join(", ");
+
+		return `<tr>
+			<td>${frappe.utils.escape_html(w.date || "")}</td>
+			<td>${frappe.utils.escape_html(w.shift || "")}</td>
+			<td>${frappe.utils.escape_html(String(w.window_end || ""))}</td>
+			<td style="text-align:right">${w.assigned || 0}</td>
+			<td style="text-align:right;font-weight:600">${marked}</td>
+			<td>${note}</td>
+		</tr>`;
+	}).join("");
+
+	const body = windows.length
+		? `<table class="table table-bordered" style="font-size:12px">
+				<thead><tr>
+					<th>Date</th><th>Shift</th><th>Window closed</th>
+					<th style="text-align:right">Assigned</th>
+					<th style="text-align:right">${dry_run ? "Would mark" : "Marked"}</th>
+					<th>Notes</th>
+				</tr></thead>
+				<tbody>${rows}</tbody>
+			</table>`
+		: `<p>${__("No shift window is due yet for {0} - {1}. A window becomes due {2} minutes after the shift closes.",
+				[result.from_date, result.to_date, result.grace_minutes])}</p>`;
+
+	new frappe.ui.Dialog({
+		title: dry_run ? __("Would mark {0} Absent", [total]) : __("Marked {0} Absent", [total]),
+		size: "large",
+		fields: [{ fieldtype: "HTML", options: body }]
+	}).show();
 }
 
 function render_scheduled_job_links(frm) {
