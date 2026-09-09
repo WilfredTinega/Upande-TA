@@ -18,6 +18,8 @@ marked by a real HR user is a deliberate human decision and is left untouched.
 
 import frappe
 
+from upande_ta.upande_ta.compat import in_test
+
 # How many attendance docs to cancel per scheduler tick.
 BATCH_SIZE = 100
 # Only look at recent attendance; older backlog is out of scope.
@@ -102,7 +104,7 @@ def cancel_absent_attendance_with_checkin():
 				message=f"{row.att_name}: {frappe.get_traceback()}",
 			)
 
-	if not frappe.in_test:
+	if not in_test():
 		frappe.db.commit()  # nosemgrep - the batch must survive a later failure
 
 	summary = {
@@ -177,7 +179,7 @@ def cancel_absent_attendance_on_weekoff():
 				message=f"{row.name}: {frappe.get_traceback()}",
 			)
 
-	if not frappe.in_test:
+	if not in_test():
 		frappe.db.commit()  # nosemgrep - the batch must survive a later failure
 
 	summary = {"cancelled": cancelled, "failed": failed}

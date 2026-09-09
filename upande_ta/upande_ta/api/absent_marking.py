@@ -46,6 +46,8 @@ from datetime import datetime, timedelta
 import frappe
 from frappe.utils import add_days, cint, get_datetime, get_time, getdate, now_datetime, nowdate
 
+from upande_ta.upande_ta.compat import in_test
+
 SETTINGS_DOCTYPE = "Biometric Setting"
 
 # Every number this module runs on comes from Biometric Setting, and the shipped
@@ -339,7 +341,7 @@ def _mark_absent(employees, day, shift, due_at, batch_size):
 
 			marked.append(employee)
 			_stamp_reason(name, shift, due_at)
-		if not frappe.in_test:
+		if not in_test():
 			frappe.db.commit()  # nosemgrep - each batch must survive a later failure
 
 	return marked, errors
@@ -694,9 +696,30 @@ def _holiday_list_for(employee, day):
 def _assigned_holiday_list(assigned_to, day):
 	"""The dated Holiday List Assignment for an employee or a company, if any.
 
-	Returns None where the doctype does not exist (pre-v16 HRMS), leaving the
-	`Employee.holiday_list` fallback to answer.
+	Read through this app's own resolver, the way the Shift Type patch, the
+	Monthly Attendance Sheet and the dashboard all do: Holiday List Assignment
+	is shipped by upande_ta, so it answers on v15 as well, where
+	``hrms.utils.holiday_list`` does not exist at all. Going to hrms first is
+	what made the dated lookup a silent no-op on v15 — every date resolved off
+	whatever ``Employee.holiday_list`` says *today*, so a week off that has
+	since changed no longer protected the dates it covered.
+
+	hrms is still asked when its own helper is there and ours found nothing, so
+	a v16 site keeps whatever HRMS's version knows that ours does not. Returns
+	None when neither answers, leaving the `Employee.holiday_list` fallback in
+	`_holiday_list_for` to decide.
 	"""
+	try:
+		from upande_ta.upande_ta.holiday_list import get_assigned_holiday_list as _own
+
+		assigned = _own(assigned_to, day)
+		if assigned:
+			return assigned
+	except Exception:
+		# A missing table or a broken assignment must not stop the run; the
+		# static list below still answers.
+		pass
+
 	try:
 		from hrms.utils.holiday_list import get_assigned_holiday_list
 	except ImportError:
@@ -762,7 +785,7 @@ def _reclaim_skipped_checkins(days=None):
 	for name in rows:
 		frappe.db.set_value("Employee Checkin", name, "skip_auto_attendance", 0, update_modified=False)
 
-	if rows and not frappe.in_test:
+	if rows and not in_test():
 		frappe.db.commit()  # nosemgrep - the flag reset must land for the next run
 
 	return {"since": str(since), "reclaimed": len(rows), "checkins": rows}
