@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_bulk_edit": 1,
- "creation": "2026-07-15 15:47:16.467369",
+ "creation": "2026-09-10 00:35:03.022573",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -9,6 +9,11 @@
   "device_location",
   "device_sn",
   "farms",
+  "supports_fingerprint",
+  "supports_face",
+  "supports_palm",
+  "supports_card",
+  "supports_password",
   "last_seen",
   "status"
  ],
@@ -56,13 +61,48 @@
    "label": "Farms",
    "read_only": 1,
    "width": "250px"
+  },
+  {
+   "default": "1",
+   "fieldname": "supports_fingerprint",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Fingerprint"
+  },
+  {
+   "default": "1",
+   "fieldname": "supports_face",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Face"
+  },
+  {
+   "default": "1",
+   "fieldname": "supports_palm",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Palm"
+  },
+  {
+   "default": "1",
+   "fieldname": "supports_card",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Card"
+  },
+  {
+   "default": "1",
+   "fieldname": "supports_password",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Password"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-07-29 17:08:33.322664",
+ "modified": "2026-09-10 00:47:44.168389",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Device",

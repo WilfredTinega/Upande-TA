@@ -1011,7 +1011,10 @@ def attendance_register():
 		night_bio_rows = frappe.db.sql("""
 			SELECT ec.employee,
 				MIN(CASE WHEN HOUR(ec.`time`) >= 14 THEN ec.`time` END) AS arrival_time,
-				MAX(CASE WHEN HOUR(ec.`time`) <  12 THEN ec.`time` END) AS departure_time
+				MAX(CASE WHEN HOUR(ec.`time`) <  12 THEN ec.`time` END) AS departure_time,
+				MIN(CASE WHEN ec.log_type = 'IN'  THEN ec.`time` END) AS lt_arrival,
+				MAX(CASE WHEN ec.log_type = 'OUT' THEN ec.`time` END) AS lt_departure,
+				SUM(CASE WHEN ec.log_type = 'IN' THEN 1 ELSE 0 END)   AS lt_in_count
 			FROM `tabEmployee Checkin` ec
 			JOIN `tabEmployee` emp ON emp.name = ec.employee
 			WHERE ec.`time` >= DATE_SUB(%(reg_date)s, INTERVAL 1 DAY) + INTERVAL 12 HOUR
@@ -1020,6 +1023,21 @@ def attendance_register():
 			  """ + ci_extra + """
 			GROUP BY ec.employee
 		""", ci_params, as_dict=True)
+
+		# Once normalize_checkin_directions() has run over the window, a night
+		# shift is a clean IN ... OUT pair and log_type is a better signal than
+		# hour-of-day — it does not assume the shift straddles noon. We only
+		# trust it when the window IS that clean pair (exactly one IN, and any
+		# OUT after it); anything else keeps the time-based inference above, so
+		# a window the flip pass has not reached behaves exactly as before.
+		for r in night_bio_rows:
+			if int(r.lt_in_count or 0) != 1 or not r.lt_arrival:
+				continue
+			if r.lt_departure and r.lt_departure <= r.lt_arrival:
+				continue
+			r.arrival_time   = r.lt_arrival
+			r.departure_time = r.lt_departure
+
 		night_bio_map = {r.employee: r for r in night_bio_rows}
 
 		step = "attendance"
@@ -1293,7 +1311,15 @@ def attendance_register():
 		# ── LATE-IN / EARLY-OUT for this date (moved off attendance_dashboard_data,
 		# which took up to 33s and made the browser fetch fail). Single indexed
 		# day-range query; night shifts (end<=start) are skipped because their
-		# boundaries cross midnight. ──
+		# boundaries cross midnight.
+		#
+		# Lateness/earliness is measured against the ASSIGNED shift window that
+		# HRMS stamped on the scan (ec.shift_start / ec.shift_end) — the same
+		# window normalize_checkin_directions() uses to decide IN vs OUT, so the
+		# two agree. TIMESTAMP(DATE(scan), st.start_time) is kept only as a
+		# fallback for the ~1 in 5 scans that carry no resolved shift; it assumes
+		# the shift starts on the same calendar date as the scan, which is wrong
+		# for anything crossing midnight. ──
 		step = "late_early"
 		le_extra = ""
 		le_params = {"reg_date": reg_date, "le_today": 1 if is_today else 0, "le_now": now_t}
@@ -1309,16 +1335,21 @@ def attendance_register():
 		le_sql = (
 			"SELECT x.employee AS employee, x.employee_name AS employee_name, x.farm AS farm, "
 			"	   x.shift AS shift, "
-			"	   TIMESTAMPDIFF(MINUTE, TIMESTAMP(DATE(x.first_in), st.start_time), x.first_in) AS mins_late, "
+			"	   TIMESTAMPDIFF(MINUTE, "
+			"		   COALESCE(x.shift_start, TIMESTAMP(DATE(x.first_in), st.start_time)), "
+			"		   x.first_in) AS mins_late, "
 			"	   CASE WHEN %(le_today)s = 0 "
 			"			  OR TIME(%(le_now)s) >= TIME(st.end_time) "
 			"			  OR TIMESTAMPDIFF(SECOND, x.first_in, x.last_out) >= 10800 "
-			"			THEN TIMESTAMPDIFF(MINUTE, x.last_out, TIMESTAMP(DATE(x.last_out), st.end_time)) "
+			"			THEN TIMESTAMPDIFF(MINUTE, x.last_out, "
+			"				 COALESCE(x.shift_end, TIMESTAMP(DATE(x.last_out), st.end_time))) "
 			"			ELSE NULL END AS mins_early "
 			"FROM ( "
 			"  SELECT ec.employee, e.employee_name, "
 			"		 COALESCE(NULLIF(TRIM(e.custom_farm), ''), '') AS farm, "
 			"		 COALESCE(MAX(ec.shift), MAX(e.default_shift)) AS shift, "
+			"		 MAX(ec.shift_start) AS shift_start, "
+			"		 MAX(ec.shift_end)   AS shift_end, "
 			"		 MIN(CASE WHEN ec.log_type = 'IN' THEN ec.`time` END) AS first_in, "
 			"		 MAX(CASE WHEN ec.log_type = 'OUT' THEN ec.`time` END) AS last_out "
 			"  FROM `tabEmployee Checkin` ec "

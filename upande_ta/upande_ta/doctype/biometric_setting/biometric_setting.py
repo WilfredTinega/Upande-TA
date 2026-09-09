@@ -7,12 +7,16 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import getdate, now_datetime, nowdate
 
-from upande_ta.upande_ta.doctype.biometric_user.biometric_user import _post_to_nodered
+from upande_ta.upande_ta.doctype.biometric_user.biometric_user import (
+	_device_capabilities,
+	_device_supports,
+	_post_to_nodered,
+)
 
 SCHEDULER_TASKS = [
  ("checkin", "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_checkin",      "Biometric: Poll Attendance"),
  ("biodata", "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_biodata_sync", "Biometric: Sync BioData"),
- ("flip",    "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_flip_last_in", "Biometric: Flip Last IN → OUT"),
+ ("flip",    "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_flip_last_in", "Biometric: Normalize Checkin Directions"),
  ("absent",  "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.run_absent_marking", "Biometric: Mark Absentees"),
 ]
 
@@ -62,6 +66,51 @@ _FREQUENCY_WINDOWS = {
  "Yearly":       timedelta(days=365),
  "Cron":         timedelta(hours=1),
 }
+
+# Serial-number prefix -> the credentials that family of terminal has actually
+# delivered on this fleet. The prefix is not a published model code, but it is a
+# reliable grouping: the WJA/CO8D readers have never returned a single
+# fingerprint across ~1,000 Bio Template rows, while NYU/PYA/TDBD return both
+# 1,400-char fingerprints and face templates. Palm and card have never appeared
+# anywhere. Longest prefix wins, so a more specific entry can be added later.
+_SERIAL_CAPABILITY_PROFILES = {
+	"NYU":  ("Fingerprint + face reader", ("supports_fingerprint", "supports_face", "supports_password")),
+	"PYA":  ("Fingerprint + face reader", ("supports_fingerprint", "supports_face", "supports_password")),
+	"TDBD": ("Fingerprint + face reader", ("supports_fingerprint", "supports_face", "supports_password")),
+	"WJA":  ("Face terminal",             ("supports_face", "supports_password")),
+	"CO8D": ("Face terminal",             ("supports_face", "supports_password")),
+}
+
+
+@frappe.whitelist()
+def capability_profile_for_serial(device_sn):
+	"""Default capability flags for a serial number, by prefix.
+
+	Used when a device is first added, so the operator does not have to know
+	which credentials the terminal carries. An unrecognised prefix returns no
+	profile and the field defaults (everything on) stand — being permissive on
+	an unknown device is safer than silently refusing to push to it.
+	"""
+	sn = (device_sn or "").strip().upper()
+	if not sn:
+		return {}
+
+	match = None
+	for prefix in sorted(_SERIAL_CAPABILITY_PROFILES, key=len, reverse=True):
+		if sn.startswith(prefix):
+			match = prefix
+			break
+	if not match:
+		return {}
+
+	model, supported = _SERIAL_CAPABILITY_PROFILES[match]
+	return {
+		"prefix":       match,
+		"model":        model,
+		# _CAPABILITY_EVIDENCE is this module's single list of the five flags.
+		"capabilities": {f: (1 if f in supported else 0) for f in _CAPABILITY_EVIDENCE},
+	}
+
 
 class BiometricSetting(Document):
 	def validate(self):
@@ -643,8 +692,18 @@ def request_biodata_internal(device_sn, pin=None, manage_cache=True):
 		else:
 			frappe.cache().delete_value(cache_key)
 
+	# Only ask a terminal for what it can actually hold. Polling a palm table
+	# from a face reader just burns a command slot and a round trip, and the
+	# reply is either empty or unstorable.
+	caps = _device_capabilities(device_sn)
+
 	queued = []
-	for table, label in _BIODATA_QUERIES:
+	skipped = []
+	for table, label, cap_field in _BIODATA_QUERIES:
+		if cap_field and not _device_supports(caps, cap_field):
+			skipped.append(label)
+			continue
+
 		cmd_id = frappe.generate_hash(length=10)
 		parts = [f"C:{cmd_id}:DATA QUERY {table}"]
 		if pin:
@@ -662,14 +721,32 @@ def request_biodata_internal(device_sn, pin=None, manage_cache=True):
 		 "command":       command,
 		})
 		queued.append({"table": table, "command_id": cmd_id})
-	return {"device_sn": device_sn, "pin": pin or None, "queued": queued}
 
+	if skipped:
+		frappe.logger().info(
+			f"Biodata poll {device_sn}: skipped {', '.join(skipped)} "
+			f"(not supported by this device)"
+		)
+
+	return {
+		"device_sn": device_sn,
+		"pin":       pin or None,
+		"queued":    queued,
+		"skipped":   skipped,
+	}
+
+# (table, label, capability flag that gates it). A None flag means always ask.
+#
+# USERINFO is never gated — it carries the user record itself (name, privilege,
+# card, password, verify mode), which is needed whatever sensors the terminal
+# has. BIOPHOTO is gone entirely: Bio Template stores fingerprint/face/palm
+# templates only, so an enrolment photo had nowhere to land and every one of
+# those replies came back as "Unsupported bio_type: ''".
 _BIODATA_QUERIES = [
- ("FINGERTMP", "Fingerprint"),
- ("FACE",      "Face"),
- ("BIOPHOTO",  "BioPhoto"),
- ("USERINFO",  "Password"),
- ("BIODATA",   "Palm"),
+ ("FINGERTMP", "Fingerprint", "supports_fingerprint"),
+ ("FACE",      "Face",        "supports_face"),
+ ("USERINFO",  "Password",    None),
+ ("BIODATA",   "Palm",        "supports_palm"),
 ]
 
 @frappe.whitelist()
@@ -761,6 +838,139 @@ def request_biodata_multi(device_sns, pins=None):
 		"device_sns": device_sns,
 		"queued":    total_queued,
 		"by_device": results,
+	}
+
+
+# Which Bio Template column proves a credential exists, per capability flag.
+# All five live on the same Bio Template row, so one pass over a device's rows
+# answers for every credential at once.
+_CAPABILITY_EVIDENCE = {
+	"supports_fingerprint": "fingerprint_template",
+	"supports_face":        "face_template",
+	"supports_palm":        "palm_template",
+	"supports_card":        "card",
+	"supports_password":    "password",
+}
+
+# A handful of rows is noise (a test enrolment, a default card of "0"), not
+# proof that a terminal has the sensor. Require a real share of its roster.
+_CAPABILITY_MIN_ROWS = 5
+_CAPABILITY_MIN_SHARE = 0.02
+
+
+def _capability_evidence(device_sn):
+	"""Count, per credential, how many of this device's Bio Template rows carry
+	one. Returns ``(total_rows, {flag: count})`` — ``(0, {})`` when the device
+	has no rows at all."""
+	parent_name = frappe.db.get_value("Biometric Template", {"device_sn": device_sn}, "name")
+	if not parent_name:
+		return 0, {}
+
+	cols = []
+	for flag, column in _CAPABILITY_EVIDENCE.items():
+		# card/password are text fields where "0" is the device's own "unset".
+		if column.endswith("_template"):
+			cond = f"`{column}` IS NOT NULL AND `{column}` <> ''"
+		else:
+			cond = f"COALESCE(`{column}`, '') NOT IN ('', '0')"
+		cols.append(f"SUM({cond}) AS `{flag}`")
+
+	row = frappe.db.sql(
+		f"""
+		SELECT COUNT(*) AS total, {', '.join(cols)}
+		  FROM `tabBio Template`
+		 WHERE parent = %s AND parentfield = 'bio_templates'
+		""",
+		(parent_name,),
+		as_dict=True,
+	)
+	if not row:
+		return 0, {}
+	total = int(row[0].get("total") or 0)
+	counts = {flag: int(row[0].get(flag) or 0) for flag in _CAPABILITY_EVIDENCE}
+	return total, counts
+
+
+@frappe.whitelist()
+def detect_device_capabilities(device_sn=None, apply=0):
+	"""Map each device's capability flags from the templates it has delivered.
+
+	All five credentials share the Bio Template row, so what a terminal has
+	actually uploaded is the best evidence of what it can store. Two rules keep
+	this from disabling a working device:
+
+	* a flag is only turned **on** when the credential appears on at least
+	  ``_CAPABILITY_MIN_ROWS`` rows **and** 2% of the device's roster — one
+	  stray card number is noise, not a card reader;
+	* nothing is turned **off** for a device that has delivered **no templates
+	  at all**. A device with an empty Biometric Template cannot be told apart
+	  from one whose uploads are failing upstream, and switching its flags off
+	  would quietly stop every future push.
+
+	Dry run by default: pass ``apply=1`` to write. Returns one entry per device
+	with the evidence counts and the flags that would change.
+	"""
+	frappe.only_for(("System Manager", "HR Manager"))
+	apply = int(apply or 0)
+
+	settings = frappe.get_single("Biometric Setting")
+	rows = [
+		d for d in (settings.devices or [])
+		if d.device_sn and (not device_sn or d.device_sn == device_sn)
+	]
+	if not rows:
+		frappe.throw("No matching device in Biometric Setting")
+
+	report = []
+	changed_total = 0
+	for d in rows:
+		total, counts = _capability_evidence(d.device_sn)
+		entry = {
+			"device_sn":       d.device_sn,
+			"device_location": d.device_location or d.device_sn,
+			"template_rows":   total,
+			"evidence":        counts,
+			"changes":         {},
+			"skipped":         "",
+		}
+
+		has_any_template = any(
+			counts.get(flag, 0)
+			for flag, column in _CAPABILITY_EVIDENCE.items()
+			if column.endswith("_template")
+		)
+		if not has_any_template:
+			entry["skipped"] = (
+				"no biometric template has ever arrived from this device — "
+				"cannot tell a missing sensor from a broken upload, flags left as they are"
+			)
+			report.append(entry)
+			continue
+
+		threshold = max(_CAPABILITY_MIN_ROWS, int(total * _CAPABILITY_MIN_SHARE))
+		for flag in _CAPABILITY_EVIDENCE:
+			wanted = 1 if counts.get(flag, 0) >= threshold else 0
+			if int(d.get(flag) or 0) != wanted:
+				entry["changes"][flag] = wanted
+
+		if entry["changes"] and apply:
+			for flag, wanted in entry["changes"].items():
+				frappe.db.set_value(
+					"Biometric Device", d.name, flag, wanted, update_modified=False
+				)
+				d.set(flag, wanted)
+		changed_total += len(entry["changes"])
+		report.append(entry)
+
+	if apply and changed_total:
+		frappe.db.commit()
+		frappe.clear_cache(doctype="Biometric Setting")
+
+	return {
+		"applied":  bool(apply),
+		"devices":  len(report),
+		"changes":  changed_total,
+		"report":   report,
 	}
 
 
@@ -949,19 +1159,21 @@ def run_flip_last_in():
 	settings = frappe.get_single("Biometric Setting")
 	if not settings.enable_flip:
 		return {"skipped": True, "reason": "enable_flip is off"}
-	from upande_ta.upande_ta.overrides.employee_checkin import auto_close_open_ins
-	return auto_close_open_ins()
+	from upande_ta.upande_ta.overrides.employee_checkin import normalize_checkin_directions
+	return normalize_checkin_directions()
 
 
 @frappe.whitelist()
 def flip_checkins_for_date(date=None):
-	"""Manually run the IN→OUT flip for a single date (the Checkin tab's Update
-	button). For each employee with more than one IN scan that day, the trailing
-	IN is flipped to OUT based on the employee's assigned shift window; middle
-	scans are left intact. Defaults to today when no date is given."""
+	"""Manually normalize check-in directions for a single date (the Checkin
+	tab's Update button), scoped to each employee's assigned shift window.
+
+	A day whose last scan is an IN gets that scan flipped to OUT; a day with no
+	IN at all — every scan stamped OUT by the reader — gets its earliest scan
+	flipped to IN. Middle scans are left intact. Defaults to today."""
 	frappe.only_for(("System Manager", "HR Manager"))
-	from upande_ta.upande_ta.overrides.employee_checkin import auto_close_open_ins
+	from upande_ta.upande_ta.overrides.employee_checkin import normalize_checkin_directions
 
 	day = getdate(date) if date else getdate(nowdate())
-	return auto_close_open_ins(target_date=day, days=1)
+	return normalize_checkin_directions(target_date=day, days=1)
 	
