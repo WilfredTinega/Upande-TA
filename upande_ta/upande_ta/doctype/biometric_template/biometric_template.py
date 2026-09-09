@@ -222,11 +222,21 @@ def store_biotemplate():
             f"{prefix}_major_ver": _int(data.get("major_ver")),
             f"{prefix}_minor_ver": _int(data.get("minor_ver")),
             f"{prefix}_size":      _int(data.get("size")),
+            # The device's own Type= marker. Firmwares disagree on the face code
+            # (Horus E1 answers 2, others 9), so record what the device said
+            # rather than only what we assume when pushing back.
+            f"{prefix}_type_code": _int(data.get("type_code") or data.get("type")),
             f"{prefix}_raw_log":   _str(data.get("raw_log")),
             _BIO_TEMPLATE_FIELD[prefix]: _str(data.get("template")),
         })
 
     parent_name = _ensure_biometric_template_parent(device_sn)
+
+    if not is_user_record:
+        # The push side learns this device's BIODATA Type= codes from its own
+        # stored rows; a newly reported code has to invalidate that.
+        frappe.cache().delete_value(f"bio_type_codes:{device_sn}")
+        frappe.cache().delete_value(f"bio_algo_versions:{device_sn}")
 
     existing = frappe.db.get_value(
         "Bio Template",

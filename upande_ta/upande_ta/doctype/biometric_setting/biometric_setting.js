@@ -18,6 +18,32 @@
 			background: var(--gray-800, #333);
 		}
 
+		/* grid.scss paints .grid-heading-row with a raw --gray-600, and that
+		   token gets DARKER on the dark theme (#7c7c7c light -> #383838 dark),
+		   so the header text ends up near-invisible on the dark panel. Point
+		   this form's grids at the semantic --text-color instead, which flips
+		   properly (--ink-gray-8: #171717 light -> #d9d9d9 dark). Light mode is
+		   untouched — every rule is gated on the theme attribute — and the
+		   .upande-bio-grid scope keeps the rest of the desk alone. */
+		[data-theme="dark"] .upande-bio-grid .grid-heading-row,
+		[data-theme="dark"] .upande-bio-grid .grid-heading-row .col,
+		[data-theme="dark"] .upande-bio-grid .grid-heading-row .static-area,
+		[data-theme="dark"] .upande-bio-grid .grid-heading-row .grid-static-col {
+			color: var(--text-color);
+		}
+		[data-theme="dark"] .upande-bio-grid .grid-body .grid-static-col,
+		[data-theme="dark"] .upande-bio-grid .grid-body .grid-static-col .static-area,
+		[data-theme="dark"] .upande-bio-grid .grid-body .grid-row .col {
+			color: var(--text-color);
+		}
+		/* Placeholders stay muted — "Click to set farms" must not read as data.
+		   The status pill keeps its green/red: those rules use !important. */
+		[data-theme="dark"] .upande-bio-grid .grid-body .missing-value,
+		[data-theme="dark"] .upande-bio-grid .grid-body .text-muted,
+		[data-theme="dark"] .upande-bio-grid .grid-body .grid-empty {
+			color: var(--text-muted);
+		}
+
 		.grid-row [data-fieldname="status"] .field-area { display: none !important; }
 		.grid-row [data-fieldname="status"] .static-area { display: block !important; }
 
@@ -146,12 +172,14 @@ frappe.ui.form.on("Biometric Setting", {
 		subscribe_device_status(frm);
 		add_device_refresh_button(frm);
 		wire_device_farms(frm);
+		mark_bio_grids(frm);
 	},
 
 	devices_on_form_rendered: function(frm) {
 		paint_device_status(frm);
 		add_device_refresh_button(frm);
 		wire_device_farms(frm);
+		mark_bio_grids(frm);
 	},
 
 	devices_add: function(frm, cdt, cdn) {
@@ -159,6 +187,7 @@ frappe.ui.form.on("Biometric Setting", {
 		if (row && !row.status) row.status = "Offline";
 		add_device_refresh_button(frm);
 		wire_device_farms(frm);
+		mark_bio_grids(frm);
 		setTimeout(() => paint_device_status(frm), 0);
 		setTimeout(() => paint_device_status(frm), 150);
 		setTimeout(() => paint_device_farms(frm), 0);
@@ -191,6 +220,23 @@ frappe.ui.form.on("Biometric Setting", {
 	flip_cron_format:         autosave_on_change,
 	absent_cron_format:       autosave_on_change,
 
+	detect_capabilities: function(frm) {
+		// Dry run first, always: the report says what each device has actually
+		// delivered before anything is switched off.
+		run_with_progress(
+			__("Detecting device capabilities"),
+			__("Reading the templates each device has delivered..."),
+			{
+				method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.detect_device_capabilities",
+				args: { apply: 0 },
+				callback(r) {
+					if (r.exc || !r.message) return;
+					show_capability_report(frm, r.message);
+				}
+			}
+		);
+	},
+
 	absent_preview: function(frm) {
 		run_absent_marking(frm, 1);
 	},
@@ -207,7 +253,7 @@ frappe.ui.form.on("Biometric Setting", {
 		const run_flip = () => {
 			run_with_progress(
 				__("Updating check-ins"),
-				__("Flipping trailing IN → OUT for {0} by assigned shift...", [day]),
+				__("Normalizing check-in directions for {0} by assigned shift...", [day]),
 				{
 					method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.flip_checkins_for_date",
 					args: { date: day },
@@ -215,8 +261,8 @@ frappe.ui.form.on("Biometric Setting", {
 						if (!r.exc && r.message) {
 							const m = r.message;
 							frappe.show_alert({
-								message: __("Updated {0}: flipped {1} IN→OUT across {2} shift window(s).",
-									[day, m.flipped || 0, m.candidates || 0]),
+								message: __("Updated {0}: {1} IN→OUT, {2} OUT→IN across {3} shift window(s).",
+									[day, m.flipped_to_out || 0, m.flipped_to_in || 0, m.candidates || 0]),
 								indicator: (m.flipped ? "green" : "blue")
 							}, 10);
 						}
@@ -309,6 +355,92 @@ frappe.ui.form.on("Biometric Setting", {
 		}
 	}
 });
+
+// Grid wrappers the dark-theme text rules apply to. Re-applied whenever Frappe
+// rebuilds the grid DOM.
+function mark_bio_grids(frm) {
+	["devices", "poll_devices"].forEach(fieldname => {
+		const field = frm.fields_dict && frm.fields_dict[fieldname];
+		if (field && field.$wrapper) field.$wrapper.addClass("upande-bio-grid");
+	});
+}
+
+const CAPABILITY_LABELS = {
+	supports_fingerprint: __("Fingerprint"),
+	supports_face:        __("Face"),
+	supports_palm:        __("Palm"),
+	supports_card:        __("Card"),
+	supports_password:    __("Password"),
+};
+
+function show_capability_report(frm, res) {
+	const rows = (res.report || []).map(d => {
+		const ev = d.evidence || {};
+		const cells = Object.keys(CAPABILITY_LABELS).map(flag => {
+			const n = ev[flag] || 0;
+			const change = d.changes && Object.prototype.hasOwnProperty.call(d.changes, flag)
+				? d.changes[flag] : null;
+			let cell = String(n);
+			if (change === 1) cell = `<b style="color:var(--green-600)">${n} → on</b>`;
+			if (change === 0) cell = `<b style="color:var(--red-600)">${n} → off</b>`;
+			return `<td style="text-align:right;padding:2px 8px">${cell}</td>`;
+		}).join("");
+		const note = d.skipped
+			? `<div style="color:var(--color-text-secondary);font-size:11px">${d.skipped}</div>`
+			: "";
+		return `<tr>
+			<td style="padding:2px 8px">${frappe.utils.escape_html(d.device_location || d.device_sn)}${note}</td>
+			<td style="text-align:right;padding:2px 8px">${d.template_rows || 0}</td>
+			${cells}
+		</tr>`;
+	}).join("");
+
+	const head = Object.values(CAPABILITY_LABELS)
+		.map(l => `<th style="text-align:right;padding:2px 8px">${l}</th>`).join("");
+
+	const d = new frappe.ui.Dialog({
+		title: __("Device Capabilities"),
+		size: "large",
+		fields: [{
+			fieldtype: "HTML",
+			options: `
+				<p>${__("Rows carrying each credential, from the templates every device has delivered. Nothing has been changed yet.")}</p>
+				<div style="overflow-x:auto">
+				<table class="table table-bordered" style="font-size:12px;margin-bottom:0">
+					<thead><tr>
+						<th style="padding:2px 8px">${__("Device")}</th>
+						<th style="text-align:right;padding:2px 8px">${__("Rows")}</th>
+						${head}
+					</tr></thead>
+					<tbody>${rows}</tbody>
+				</table></div>`
+		}],
+		primary_action_label: res.changes
+			? __("Apply {0} change(s)", [res.changes])
+			: __("Close"),
+		primary_action() {
+			d.hide();
+			if (!res.changes) return;
+			run_with_progress(
+				__("Applying capabilities"),
+				__("Writing the capability flags..."),
+				{
+					method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.detect_device_capabilities",
+					args: { apply: 1 },
+					callback(r2) {
+						if (r2.exc) return;
+						frm.reload_doc();
+						frappe.show_alert({
+							message: __("{0} capability flag(s) updated.", [(r2.message || {}).changes || 0]),
+							indicator: "green"
+						}, 7);
+					}
+				}
+			);
+		}
+	});
+	d.show();
+}
 
 function run_with_progress(title, message, call_args) {
 	let pct = 5;
@@ -1171,10 +1303,45 @@ function inject_job_link(frm, fieldname, info) {
 }
 
 frappe.ui.form.on("Biometric Device", {
-	device_sn: function(frm) { refresh_device_options(frm); },
+	device_sn: function(frm, cdt, cdn) {
+		refresh_device_options(frm);
+		apply_serial_capability_profile(frm, cdt, cdn);
+	},
 	device_location: function(frm) { refresh_device_options(frm); },
 	devices_remove: function(frm) { refresh_device_options(frm); }
 });
+
+// Capabilities are set once, when the device is added: the serial's prefix says
+// which family of terminal it is, and therefore which credentials it carries.
+// Only ever applied to a row that has not been saved yet, so it can never
+// overwrite a flag an operator (or Detect Capabilities) has already set.
+function apply_serial_capability_profile(frm, cdt, cdn) {
+	const row = locals[cdt] && locals[cdt][cdn];
+	if (!row || !row.__islocal || !row.device_sn) return;
+	if (row.__capability_profile_applied === row.device_sn) return;
+
+	frappe.call({
+		method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.capability_profile_for_serial",
+		args: { device_sn: row.device_sn },
+		callback(r) {
+			const profile = r.message;
+			if (!profile || !profile.capabilities) return;
+			row.__capability_profile_applied = row.device_sn;
+			Object.keys(profile.capabilities).forEach(flag => {
+				frappe.model.set_value(cdt, cdn, flag, profile.capabilities[flag]);
+			});
+			frm.refresh_field("devices");
+			const on = Object.keys(profile.capabilities)
+				.filter(f => profile.capabilities[f])
+				.map(f => CAPABILITY_LABELS[f])
+				.join(", ");
+			frappe.show_alert({
+				message: __("{0} ({1}) — set to {2}", [profile.model, profile.prefix, on]),
+				indicator: "blue"
+			}, 7);
+		}
+	});
+}
 
 frappe.ui.form.on("Biometric Checkin", {
 	poll_devices_add: function(frm) { refresh_device_options(frm); },

@@ -45,6 +45,8 @@
   "biodata_cron_format",
   "column_break_biodata",
   "get_bio",
+  "column_break_yqif",
+  "detect_capabilities",
   "section_break_znbu",
   "biodata_device_picker",
   "column_break_fwjy",
@@ -305,6 +307,7 @@
    "label": "Update"
   },
   {
+   "default": "Hourly",
    "depends_on": "eval:doc.enable_flip",
    "fieldname": "flip_event_frequency",
    "fieldtype": "Select",
@@ -673,13 +676,23 @@
    "fieldname": "attendance_tab",
    "fieldtype": "Tab Break",
    "label": "Attendance"
+  },
+  {
+   "depends_on": "eval:doc.enable_bio_templates",
+   "fieldname": "detect_capabilities",
+   "fieldtype": "Button",
+   "label": "Detect Capabilities"
+  },
+  {
+   "fieldname": "column_break_yqif",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-05 09:20:01.653735",
+ "modified": "2026-09-10 00:28:19.216968",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",
