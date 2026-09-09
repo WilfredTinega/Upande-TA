@@ -137,6 +137,49 @@ def _ensure_biometric_template_parent(device_sn):
     frappe.db.commit()
     return doc.name
 
+def _attach_photo(row_name, filename, content_b64):
+    """Attach a base64 enrolment photo to a Bio Template row, returning its URL.
+
+    The photo is the raw biometric sample, so unlike a template it is portable:
+    a terminal running a different face algorithm can re-extract its own
+    template from it. Stored private, and failures are swallowed — a photo that
+    will not attach must never cost us the template that came with it.
+    """
+    if not row_name or not content_b64:
+        return None
+    try:
+        existing = frappe.db.get_value(
+            "File",
+            {
+                "attached_to_doctype": "Bio Template",
+                "attached_to_name":    row_name,
+                "attached_to_field":   "photo",
+            },
+            "name",
+        )
+        if existing:
+            frappe.delete_doc("File", existing, ignore_permissions=True, force=True)
+
+        photo = frappe.get_doc({
+            "doctype":             "File",
+            "file_name":           filename,
+            "attached_to_doctype": "Bio Template",
+            "attached_to_name":    row_name,
+            "attached_to_field":   "photo",
+            "content":             content_b64,
+            "decode":              True,
+            "is_private":          1,
+        })
+        photo.insert(ignore_permissions=True)
+        return photo.file_url
+    except Exception as e:
+        frappe.log_error(
+            f"Could not attach enrolment photo for Bio Template {row_name}: {e}",
+            "Biometric Photo Attach",
+        )
+        return None
+
+
 @frappe.whitelist(allow_guest=True)
 def store_biotemplate():
     data      = frappe.request.get_json() or {}
@@ -165,9 +208,10 @@ def store_biotemplate():
 
     kind = bio_type.lower()
     is_user_record = kind == "user"
+    is_photo = kind == "photo"
     prefix = _BIO_PREFIX.get(kind)
 
-    if not is_user_record and not prefix:
+    if not is_user_record and not is_photo and not prefix:
         frappe.response["http_status_code"] = 400
         frappe.response["message"] = {
             "status":  "error",
@@ -175,7 +219,15 @@ def store_biotemplate():
         }
         return
 
-    if not is_user_record and not _str(data.get("template")):
+    if is_photo and not _str(data.get("content")):
+        frappe.response["http_status_code"] = 400
+        frappe.response["message"] = {
+            "status":  "error",
+            "message": "Missing content (the photo must be sent inline, base64)",
+        }
+        return
+
+    if not is_user_record and not is_photo and not _str(data.get("template")):
         frappe.response["http_status_code"] = 400
         frappe.response["message"] = {"status": "error", "message": "Missing template"}
         return
@@ -214,6 +266,14 @@ def store_biotemplate():
     if is_user_record:
         for src, dst in _USER_FIELDS.items():
             new_values[dst] = _str(data.get(src))
+    elif is_photo:
+        # The photo itself becomes a File attached to the row once the row
+        # exists; only its metadata lives in columns.
+        new_values.update({
+            "photo_filename": _str(data.get("filename")) or f"{user_id}.jpg",
+            "photo_size":     _int(data.get("size")),
+            "photo_raw_log":  _str(data.get("raw_log")),
+        })
     else:
         new_values.update({
             f"{prefix}_bio_no":    _int(data.get("bio_no")),
@@ -343,6 +403,21 @@ def store_biotemplate():
                 f"Concurrent insert detected for employee {employee_name} on device "
                 f"{device_sn}; merged into existing row instead of creating a duplicate."
             )
+
+    if is_photo:
+        attached = _attach_photo(
+            row_name,
+            new_values["photo_filename"],
+            _str(data.get("content")),
+        )
+        if attached:
+            frappe.db.set_value(
+                "Bio Template", row_name, "photo", attached, update_modified=False
+            )
+            frappe.db.commit()
+            message += f" Photo attached as {attached}."
+        else:
+            message += " Photo metadata stored but the image could not be attached."
 
     frappe.response["message"] = {
         "status":         status,

@@ -739,14 +739,19 @@ def request_biodata_internal(device_sn, pin=None, manage_cache=True):
 #
 # USERINFO is never gated — it carries the user record itself (name, privilege,
 # card, password, verify mode), which is needed whatever sensors the terminal
-# has. BIOPHOTO is gone entirely: Bio Template stores fingerprint/face/palm
-# templates only, so an enrolment photo had nowhere to land and every one of
-# those replies came back as "Unsupported bio_type: ''".
+# has. BIODATA carries Type=8, so it is the palm query specifically.
+#
+# BIOPHOTO is gated on supports_face: the enrolment photo is only interesting
+# on a face terminal, and it is the one artefact that CAN cross algorithm
+# versions — a 5.6 reader can re-extract its own template from a photo taken by
+# a 40.1 reader, which a template copy can never do. It lands as a File
+# attached to the Bio Template row (bio_type "photo").
 _BIODATA_QUERIES = [
  ("FINGERTMP", "Fingerprint", "supports_fingerprint"),
  ("FACE",      "Face",        "supports_face"),
  ("USERINFO",  "Password",    None),
  ("BIODATA",   "Palm",        "supports_palm"),
+ ("BIOPHOTO",  "BioPhoto",    "supports_face"),
 ]
 
 @frappe.whitelist()
