@@ -154,17 +154,20 @@ save, guarded by a `before_insert` flag.
    not merged — those are read from the device's own row so a neighbour's code
    is never echoed to this terminal.
 
-   A borrowed template must also be **algorithm-compatible**. Templates only
-   load on an engine of the same version, and `Type=` cannot tell versions
-   apart: this fleet runs three face algorithms — 40.1 (756-char), 35.x
-   (748-char) and 5.6 (344-char) — and all three report `Type=9`. A 40.1
-   template pushed to a 5.6 terminal is accepted and then silently discarded,
-   which is why a face could appear to "never save". `_device_algo_versions()`
-   learns each device's majority `MajorVer.MinorVer` per modality from its own
-   uploads; a mismatched source is refused outright, and a device that has
-   never delivered that modality still gets a speculative push (no worse than
-   pushing nothing). Fingerprints on this fleet are uniform (13.0, 1400-char)
-   and travel freely.
+   An enrollment is **always shared** with the selected device — a version
+   mismatch never withholds it, and `MajorVer`/`MinorVer` travel with the
+   template so the device knows which algorithm the payload is and decides for
+   itself. `_device_algo_versions()` learns each device's majority
+   `MajorVer.MinorVer` per modality from its own uploads and uses it only to
+   *choose between* enrollments when someone has more than one: an employee
+   with both a 40.1 and a 5.6 face gets the one that terminal speaks. With a
+   single enrollment, that one goes regardless.
+
+   Worth knowing when a push looks accepted but nothing appears on the device:
+   templates generally only load on an engine of the same version, `Type=`
+   cannot tell versions apart, and this fleet runs three face algorithms —
+   40.1 (756-char), 35.x (748-char) and 5.6 (344-char) — all reporting
+   `Type=9`. Fingerprints here are uniform (13.0, 1400-char) and travel freely.
 3. **Already on device** — a modality the device already holds byte-for-byte is
    skipped; `force` bypasses this when the device has just lost the user (fresh
    add, re-add, PIN re-key).

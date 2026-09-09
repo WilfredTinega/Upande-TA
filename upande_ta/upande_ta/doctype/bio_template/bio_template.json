@@ -54,7 +54,13 @@
   "palm_size",
   "column_break_palm",
   "palm_template",
-  "palm_raw_log"
+  "palm_raw_log",
+  "photo_section",
+  "photo",
+  "photo_filename",
+  "column_break_photo",
+  "photo_size",
+  "photo_raw_log"
  ],
  "fields": [
   {
@@ -342,13 +348,46 @@
    "in_list_view": 1,
    "label": "Deleted?",
    "read_only": 1
+  },
+  {
+   "fieldname": "photo_section",
+   "fieldtype": "Section Break",
+   "label": "Enrolment Photo"
+  },
+  {
+   "fieldname": "photo",
+   "fieldtype": "Attach Image",
+   "label": "Photo",
+   "read_only": 1
+  },
+  {
+   "fieldname": "photo_filename",
+   "fieldtype": "Data",
+   "label": "Photo Filename",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_photo",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "photo_size",
+   "fieldtype": "Int",
+   "label": "Photo Size",
+   "read_only": 1
+  },
+  {
+   "fieldname": "photo_raw_log",
+   "fieldtype": "Small Text",
+   "label": "Photo Raw Log",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-05-10 17:02:38.510653",
+ "modified": "2026-09-10 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bio Template",

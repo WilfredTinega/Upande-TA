@@ -1062,6 +1062,15 @@ def _is_template_deleted(device_sn, user_id):
 # default"), which is what a freshly added user should get.
 _SHAREABLE_USER_FIELDS = ("card", "vice_card", "password")
 
+# The mirror of the above: fields that belong to the TERMINAL, never to the
+# person. When the merge base is another device's row (this device has none of
+# its own), these are dropped so _build_userinfo_command falls back to Pri=0 /
+# Grp=1 / Verify=-1 instead of inheriting them.
+_DEVICE_LOCAL_USER_FIELDS = (
+    "privilege", "user_group", "timezone_group", "verify_mode",
+    "start_datetime", "end_datetime",
+)
+
 
 def _get_template_row(employee, device_sn=None):
     """Resolve what to push to ``device_sn``, merged **per credential**.
@@ -1097,26 +1106,46 @@ def _get_template_row(employee, device_sn=None):
     base = own or rows[0]
 
     merged = dict(base)
+    if own is None:
+        # base belongs to another terminal. Its templates are what we came for,
+        # but copying the row wholesale would also carry its access control —
+        # a Pri=14 super admin on one reader would become one here.
+        for _f in _DEVICE_LOCAL_USER_FIELDS:
+            merged.pop(_f, None)
     others = [r for r in rows if r.get("name") != base.get("name")]
     algo = _device_algo_versions(device_sn)
 
     for label, _code, no_f, idx_f, valid_f, major_f, minor_f, _type_f, tmp_f in _BIO_TYPES:
         if merged.get(tmp_f):
             continue
+
+        candidates = [o for o in others if o.get(tmp_f) and o.get(valid_f)]
+        if not candidates:
+            continue
+
+        # Every enrollment is shared with the selected device — a version
+        # mismatch never withholds it. The device is told which algorithm the
+        # payload is (MajorVer/MinorVer travel with the template) and decides
+        # for itself.
+        #
+        # The target's own algorithm version is only a *preference*, used to
+        # pick between enrollments when someone has more than one: an employee
+        # with both a 40.1 and a 5.6 face gets the one that terminal speaks.
+        # With a single enrollment, that one is pushed regardless.
         want = algo.get(label)
-        for other in others:
-            if not other.get(tmp_f) or not other.get(valid_f):
-                continue
-            # A template only loads on an engine of the same algorithm version.
-            # When we know this device's version, refuse a mismatch outright —
-            # the device would accept the command and drop the template. When
-            # we do not know it (the device has never delivered this modality)
-            # we still try: it is no worse than not pushing at all.
-            if want and (int(other.get(major_f) or 0), int(other.get(minor_f) or 0)) != want:
-                continue
-            for field in (tmp_f, valid_f, no_f, idx_f, major_f, minor_f):
-                merged[field] = other.get(field)
-            break
+        source = None
+        if want:
+            source = next(
+                (
+                    o for o in candidates
+                    if (int(o.get(major_f) or 0), int(o.get(minor_f) or 0)) == want
+                ),
+                None,
+            )
+        source = source or candidates[0]
+
+        for field in (tmp_f, valid_f, no_f, idx_f, major_f, minor_f):
+            merged[field] = source.get(field)
 
     for field in _SHAREABLE_USER_FIELDS:
         if merged.get(field) not in (None, "", "0"):
