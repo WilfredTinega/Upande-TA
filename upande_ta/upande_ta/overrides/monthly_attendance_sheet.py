@@ -4,7 +4,7 @@ import re
 
 import frappe
 from frappe import _
-from frappe.utils import getdate
+from frappe.utils import cint, getdate
 
 from upande_ta.upande_ta.overrides.leave_type import LEAVE_TYPE_ABBR_FIELD
 
@@ -37,15 +37,79 @@ def get_extra_filter_config() -> list[dict]:
 		df = meta.get_field(employee_field)
 		if not df or df.fieldtype != "Link" or not df.options:
 			continue
-		config.append(
-			{
-				"fieldname": filter_field,
-				"label": _(df.label or employee_field),
-				"options": df.options,
-			}
-		)
+		entry = {
+			"fieldname": filter_field,
+			"label": _(df.label or employee_field),
+			"options": df.options,
+		}
+		# A unit belongs to exactly one company, so once a company is picked the
+		# picker must not offer another company's units. Only advertise the
+		# scope where the link target actually carries a company field — the
+		# custom field is site-shipped and its target varies.
+		if filter_field == "unit_division" and frappe.get_meta(df.options).has_field("company"):
+			entry["company_scoped"] = 1
+		config.append(entry)
 
 	return config
+
+
+def _unit_division_doctype():
+	"""The doctype Employee's Unit/Division custom field links to, or None.
+
+	Resolved from Employee's meta rather than taken from the client, so the
+	table name interpolated into the query below can never come from a request.
+	"""
+	df = frappe.get_meta("Employee").get_field(EXTRA_FILTER_FIELDS["unit_division"])
+	if not df or df.fieldtype != "Link" or not df.options:
+		return None
+	if not frappe.get_meta(df.options).has_field("company"):
+		return None
+	return df.options
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def unit_division_query(doctype, txt, searchfield, start, page_len, filters):
+	"""Link query for the Unit/Division report filter, scoped to the company.
+
+	Endebess belongs to Kaitet Ltd., not Karen Roses, so selecting a company
+	must narrow the list rather than leave every unit on offer. Honours the
+	report's "Include Company Descendants" checkbox, because the report itself
+	resolves employees across descendant companies.
+	"""
+	target = _unit_division_doctype()
+	if not target:
+		return []
+
+	filters = filters or {}
+	company = filters.get("company")
+
+	companies = []
+	if company:
+		companies = [company]
+		if cint(filters.get("include_company_descendants")):
+			companies += frappe.db.get_descendants("Company", company) or []
+
+	where = [f"`{searchfield}` LIKE %(txt)s"]
+	params = {
+		"txt":      f"%{txt or ''}%",
+		"start":    cint(start),
+		"page_len": cint(page_len) or 20,
+	}
+	if companies:
+		where.append("IFNULL(`company`, '') IN %(companies)s")
+		params["companies"] = tuple(companies)
+
+	return frappe.db.sql(
+		f"""
+		SELECT `name`, IFNULL(`company`, '') AS company
+		  FROM `tab{target}`
+		 WHERE {" AND ".join(where)}
+		 ORDER BY `name` ASC
+		 LIMIT %(start)s, %(page_len)s
+		""",
+		params,
+	)
 
 
 def extend_bootinfo(bootinfo=None):
