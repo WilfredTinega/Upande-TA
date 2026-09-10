@@ -1269,6 +1269,29 @@ def attendance_register():
 			else:
 				r["flag"] = ""
 
+		# A rest day is not an absence. Reaching here flagged as "Week Off
+		# (unmarked)" means the branch chain above missed the weekly off (a null
+		# default_shift, a night worker whose shift resolved only from a Shift
+		# Assignment, stale bytecode in the running worker...) and the row was
+		# still counted against ABSENT. Reclassify instead of labelling, so the
+		# KPI card and the list can never disagree.
+		#
+		# Rows with a DRAFT leave application keep their "Pending: …" flag and
+		# stay absent — an unapproved leave is not yet time off.
+		moved = [
+			r for r in absent
+			if r["name"] in off_ids and r["name"] not in pend_map
+		]
+		if moved:
+			moved_ids = {r["name"] for r in moved}
+			absent = [r for r in absent if r["name"] not in moved_ids]
+			for r in moved:
+				r.pop("flag", None)
+				r.pop("night_note", None)
+				r["off_type"] = "Weekly Off"
+				r["att_status"] = r.get("att_status") or None
+				off.append(r)
+
 		# ── biometric device status (child table of the Biometric Setting single) ──
 		bio_devs = frappe.db.sql("""
 			SELECT device_sn, device_location, status, last_seen

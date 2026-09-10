@@ -1,5 +1,7 @@
 # Copyright (c) 2026, Upande LTD and contributors
 
+from datetime import timedelta
+
 import frappe
 from frappe import _
 from frappe.utils import add_days, get_datetime, get_time, getdate, today
@@ -106,7 +108,7 @@ def _flip_to_in(checkin_name):
 	return _set_log_type(checkin_name, "IN", "open-closed-out")
 
 
-def normalize_checkin_directions(target_date=None, days=7):
+def normalize_checkin_directions(target_date=None, days=7, hours=0):
 	"""Give each (employee, working day) window a clean IN ... OUT pair.
 
 	Two passes, in this order:
@@ -131,9 +133,19 @@ def normalize_checkin_directions(target_date=None, days=7):
 	window. A scan with no shift resolved falls back to its calendar day, with
 	an early-morning scan pulled back to the previous day only for employees on
 	an overnight Shift Type."""
-	end_date   = getdate(target_date) if target_date else getdate(today())
-	start_date = add_days(end_date, -(days - 1))
+	# Lookback is days + hours, set on Biometric Setting. Both zero means the
+	# setting was never filled in, so fall back to a day rather than a
+	# zero-width window that would silently do nothing.
+	lookback = timedelta(days=int(days or 0), hours=int(hours or 0))
+	if lookback <= timedelta(0):
+		lookback = timedelta(days=1)
 
+	end_date   = getdate(target_date) if target_date else getdate(today())
+	start_date = getdate(get_datetime(f"{end_date} 23:59:59") - lookback)
+
+	# Scans are fetched by whole calendar days even when the lookback is a few
+	# hours: a window must never be half-loaded, or pass 2 would "open" a day
+	# whose real first scan sits just outside the range.
 	range_start = get_datetime(f"{start_date} 00:00:00")
 	range_end   = get_datetime(f"{add_days(end_date, 1)} 23:59:59")
 
@@ -236,6 +248,7 @@ def normalize_checkin_directions(target_date=None, days=7):
 	return {
 		"start_date":      str(start_date),
 		"end_date":        str(end_date),
+		"lookback":        f"{int(days or 0)}d {int(hours or 0)}h",
 		"windows":         examined,
 		"shift_windowed_scans": shift_windowed,
 		"total_scans":     len(logs),

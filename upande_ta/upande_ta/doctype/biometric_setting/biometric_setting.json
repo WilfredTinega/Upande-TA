@@ -23,6 +23,8 @@
   "enable_flip",
   "flip_event_frequency",
   "flip_cron_format",
+  "flip_lookback_days",
+  "flip_lookback_hours",
   "checkins_column",
   "date",
   "update",
@@ -686,13 +688,30 @@
   {
    "fieldname": "column_break_yqif",
    "fieldtype": "Column Break"
+  },
+  {
+   "default": "7",
+   "depends_on": "eval:doc.enable_flip",
+   "description": "How far back each run re-scans. 0 days + 0 hours falls back to 1 day.",
+   "fieldname": "flip_lookback_days",
+   "fieldtype": "Int",
+   "label": "Update Lookback (Days)",
+   "non_negative": 1
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.enable_flip",
+   "fieldname": "flip_lookback_hours",
+   "fieldtype": "Int",
+   "label": "Update Lookback (Hours)",
+   "non_negative": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-10 00:28:19.216968",
+ "modified": "2026-09-10 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

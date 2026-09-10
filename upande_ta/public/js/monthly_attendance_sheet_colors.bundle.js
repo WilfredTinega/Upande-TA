@@ -194,16 +194,59 @@ frappe.provide("frappe.views");
 	// see overrides/monthly_attendance_sheet.py (extend_bootinfo).
 	const EXTRA_FILTER_ANCHOR = "branch"; // slot them in right after this one
 
+	const UNIT_QUERY =
+		"upande_ta.upande_ta.overrides.monthly_attendance_sheet.unit_division_query";
+
 	function extraFilterDefs() {
 		const defs = (frappe.boot && frappe.boot.upande_ta_attendance_filters) || [];
 		return defs
 			.filter((df) => df && df.fieldname && df.options)
-			.map((df) => ({
-				fieldname: df.fieldname,
-				label: __(df.label || df.fieldname),
-				fieldtype: "Link",
-				options: df.options,
-			}));
+			.map((df) => {
+				const out = {
+					fieldname: df.fieldname,
+					label: __(df.label || df.fieldname),
+					fieldtype: "Link",
+					options: df.options,
+				};
+				// A unit belongs to one company, so once a company is chosen the
+				// picker must not offer another company's units. The server side
+				// resolves descendants too, matching what the report does with
+				// "Include Company Descendants".
+				if (df.company_scoped) {
+					out.get_query = function () {
+						const qr = frappe.query_report;
+						if (!qr) return {};
+						return {
+							query: UNIT_QUERY,
+							filters: {
+								company: qr.get_filter_value("company"),
+								include_company_descendants: qr.get_filter_value(
+									"include_company_descendants"
+								),
+							},
+						};
+					};
+				}
+				return out;
+			});
+	}
+
+	// Switching company must not leave last company's unit sitting in the box:
+	// the report would then return nothing and look broken. Clear it instead.
+	function clearUnitOnCompanyChange(report) {
+		try {
+			const company = report.get_filter && report.get_filter("company");
+			const unit = report.get_filter && report.get_filter("unit_division");
+			if (!company || !unit || company.__ta_unit_hooked) return;
+			company.__ta_unit_hooked = true;
+			const prior = company.df.on_change;
+			company.df.on_change = function () {
+				if (unit.get_value()) unit.set_value("");
+				if (prior) return prior.apply(this, arguments);
+			};
+		} catch (e) {
+			console.warn("[MAS unit scope]", e);
+		}
 	}
 
 	function addExtraFilters(settings) {
@@ -258,7 +301,9 @@ frappe.provide("frappe.views");
 		const origSetupFilters = QR.prototype.setup_filters;
 		QR.prototype.setup_filters = function () {
 			if (this.report_name === REPORT) addExtraFilters(this.report_settings);
-			return origSetupFilters.apply(this, arguments);
+			const out = origSetupFilters.apply(this, arguments);
+			if (this.report_name === REPORT) clearUnitOnCompanyChange(this);
+			return out;
 		};
 
 		const origRender = QR.prototype.render_datatable;
