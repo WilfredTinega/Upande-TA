@@ -255,21 +255,30 @@ get_employee_related_details._upande_ta_patched = True
 
 
 def build_shift_resolver(employees, filters):
-	"""Return resolve(employee, attendance_date) -> assigned shift name.
+	"""Return resolve(employee, attendance_date) -> the employee's shift for the period.
 
-	Rows in the detailed view are grouped by this value, so an employee is
-	grouped under the shift they were *assigned* (Shift Assignment, then the
-	Employee's default shift) rather than whatever shift each individual
-	Attendance record happened to be stamped with. This collapses the split
-	rows produced by different attendance sources (manual Mark Attendance,
-	Attendance Request, auto-marked Weekly Off, auto leave from Leave
-	Application) into a single row per assigned shift.
+	The detailed view emits one row per distinct value this returns, so it
+	deliberately resolves to a *single* shift per employee for the whole report
+	period: the shift their assignments cover the most days of, ties going to
+	the later assignment. Anything else -- a mid-period shift change, a day the
+	assignments do not cover, or attendance stamped with a different shift by
+	its source (manual Mark Attendance, Attendance Request, auto-marked Weekly
+	Off, auto leave from Leave Application) -- would otherwise split the
+	employee across two rows.
+
+	Assignment `status` is deliberately NOT filtered on. HRMS' daily
+	`mark_expired_shift_assignments_as_inactive` job flips every assignment to
+	Inactive once its end_date has passed, so filtering on Active erased the
+	shift for every day before a re-assignment: those days fell through to
+	Employee.default_shift, which is unset for most staff, and the employee
+	gained a second row with a blank Shift cell.
 	"""
 	employees = list(employees)
 	if not employees:
-		return lambda employee, attendance_date: ""
+		return lambda employee, attendance_date=None: ""
 
-	start_date, end_date = _hrms.get_date_range_from_filters(filters)
+	period_start, period_end = _hrms.get_date_range_from_filters(filters)
+	period_start, period_end = getdate(period_start), getdate(period_end)
 
 	ShiftAssignment = frappe.qb.DocType("Shift Assignment")
 	rows = (
@@ -282,17 +291,28 @@ def build_shift_resolver(employees, filters):
 		)
 		.where(
 			(ShiftAssignment.docstatus == 1)
-			& (ShiftAssignment.status == "Active")
 			& (ShiftAssignment.employee.isin(employees))
-			& (ShiftAssignment.start_date <= end_date)
-			& (ShiftAssignment.end_date.isnull() | (ShiftAssignment.end_date >= start_date))
+			& (ShiftAssignment.start_date <= period_end)
+			& (ShiftAssignment.end_date.isnull() | (ShiftAssignment.end_date >= period_start))
 		)
 		.orderby(ShiftAssignment.start_date)
 	).run(as_dict=1)
 
-	assignments = {}
+	# employee -> shift -> [days covered inside the period, latest start date]
+	coverage = {}
 	for r in rows:
-		assignments.setdefault(r.employee, []).append(r)
+		if not r.shift_type:
+			continue
+		assignment_start = getdate(r.start_date) if r.start_date else period_start
+		covered_from = max(assignment_start, period_start)
+		covered_to = min(getdate(r.end_date), period_end) if r.end_date else period_end
+		days = (covered_to - covered_from).days + 1
+		if days <= 0:
+			continue
+		shifts = coverage.setdefault(r.employee, {})
+		tally = shifts.setdefault(r.shift_type, [0, assignment_start])
+		tally[0] += days
+		tally[1] = max(tally[1], assignment_start)
 
 	default_shifts = dict(
 		frappe.get_all(
@@ -303,16 +323,16 @@ def build_shift_resolver(employees, filters):
 		)
 	)
 
-	def resolve(employee, attendance_date):
-		day = getdate(attendance_date)
-		for a in assignments.get(employee, []):
-			if a.start_date and getdate(a.start_date) > day:
-				continue
-			if a.end_date and getdate(a.end_date) < day:
-				continue
-			if a.shift_type:
-				return a.shift_type
-		return default_shifts.get(employee) or ""
+	resolved = {}
+	for employee in employees:
+		shifts = coverage.get(employee)
+		if shifts:
+			resolved[employee] = max(shifts.items(), key=lambda item: (item[1][0], item[1][1]))[0]
+		else:
+			resolved[employee] = default_shifts.get(employee) or ""
+
+	def resolve(employee, attendance_date=None):
+		return resolved.get(employee) or ""
 
 	return resolve
 
@@ -613,6 +633,38 @@ def apply_patch(*args, **kwargs):
 
 
 def disable_prepared_report():
-	if frappe.db.exists("Report", "Monthly Attendance Sheet"):
-		if frappe.db.get_value("Report", "Monthly Attendance Sheet", "prepared_report"):
-			frappe.db.set_value("Report", "Monthly Attendance Sheet", "prepared_report", 0)
+	"""Keep the Monthly Attendance Sheet running live, never as a Prepared Report.
+
+	A Prepared Report serves a snapshot built by a background job, so the grid
+	shows attendance as it stood whenever that job last ran -- which is exactly
+	what people open the report to check.
+
+	Frappe turns this on by itself: `Report.execute_script_report` arms a
+	15-second timer and calls `enable_prepared_report` if the run outlasts it,
+	so one slow month (a company with ~1,400 employees) latches the report into
+	snapshot mode for everyone, permanently. `disable_prepared_report_automation`
+	is the flag that stops that, so it has to be set as well -- clearing
+	`prepared_report` alone only lasts until the next slow run.
+
+	Written with db.set_value: the Report is standard, and a doc.save() on a
+	standard report is refused outside developer mode.
+	"""
+	if not frappe.db.exists("Report", "Monthly Attendance Sheet"):
+		return
+
+	current = frappe.db.get_value(
+		"Report",
+		"Monthly Attendance Sheet",
+		["prepared_report", "disable_prepared_report_automation"],
+		as_dict=True,
+	)
+	if not current:
+		return
+
+	if current.prepared_report or not current.disable_prepared_report_automation:
+		frappe.db.set_value(
+			"Report",
+			"Monthly Attendance Sheet",
+			{"prepared_report": 0, "disable_prepared_report_automation": 1},
+		)
+		frappe.clear_cache(doctype="Report")
