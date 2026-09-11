@@ -943,7 +943,7 @@ def attendance_register():
 		""", sa_params, as_dict=True)
 		assigned_shift_map = {}
 		for r in sa_rows:
-			# first active assignment wins; do not overwrite
+			# newest assignment covering the date wins; do not overwrite
 			if r.employee not in assigned_shift_map:
 				assigned_shift_map[r.employee] = r.shift_type
 
@@ -1103,7 +1103,15 @@ def attendance_register():
 			# resolve effective shift: default_shift is source of truth, with an
 			# active Shift Assignment used only as a fallback when default_shift
 			# is not set on the employee.
-			eff_shift = emp.default_shift or assigned_shift_map.get(emp.name)
+			# The assignment covering this date wins over default_shift, which
+			# is a leftover on most records: 700004 still reads "LOE/ECE
+			# SECURITY DAY SHIFT" from a one-day June assignment while every
+			# scan since 21 Aug is stamped SECURITY NIGHT SHIFT. Reading it the
+			# other way round declared a night guard a day worker, sent them
+			# down the calendar-day branch below, and split one night across two
+			# rows -- last night's dawn OUT in one, tonight's evening IN in the
+			# next, with no IN against the OUT the user sees.
+			eff_shift = assigned_shift_map.get(emp.name) or emp.default_shift
 			is_night = eff_shift in night_shift_set if eff_shift else False
 			if is_night:
 				night_total = night_total + 1
@@ -2226,8 +2234,8 @@ def attendance_mark():
 		frappe.response["message"] = {"error": "emp_ids was empty after split"}
 		return
 
-	# ── resolve an active Shift Assignment per employee covering att_date.
-	# Used only as a fallback when the employee has no default_shift. ──
+	# ── resolve the active Shift Assignment per employee covering att_date.
+	# It wins over Employee.default_shift, which is stale on most records. ──
 	assigned_shift_map = {}
 	sa_rows = frappe.db.sql("""
 		SELECT sa.employee, sa.shift_type
@@ -2238,7 +2246,7 @@ def attendance_mark():
 		  AND (sa.end_date IS NULL OR sa.end_date >= %(att_date)s)
 	""", {"emp_ids": tuple(emp_ids), "att_date": att_date}, as_dict=True)
 	for r in sa_rows:
-		# first active assignment wins; do not overwrite
+		# newest assignment covering the date wins; do not overwrite
 		if r.employee not in assigned_shift_map:
 			assigned_shift_map[r.employee] = r.shift_type
 
@@ -2317,9 +2325,9 @@ def attendance_mark():
 					  "error": "Employee not found"})
 				  continue
 
-			  # effective shift: employee default_shift is source of truth, active
-			  # Shift Assignment used only when default_shift is blank.
-			  eff_shift = emp_doc.default_shift or assigned_shift_map.get(emp_id)
+			  # effective shift: the assignment covering this date is the source
+			  # of truth, default_shift only when there is no assignment.
+			  eff_shift = assigned_shift_map.get(emp_id) or emp_doc.default_shift
 
 			  att = frappe.new_doc("Attendance")
 			  att.employee		= emp_id
