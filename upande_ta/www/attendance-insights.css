@@ -275,7 +275,7 @@
 
 
   @media(max-width:1100px){.r-2,.r-2-late,.r-3{grid-template-columns:1fr}.split-wrap{grid-template-columns:1fr}}
-  @media(max-width:600px){.kpi-strip{grid-template-columns:repeat(2,1fr)}.topbar{flex-direction:column;align-items:stretch}.dr-kpis{grid-template-columns:repeat(2,1fr)}.dr-charts{grid-template-columns:1fr}}
+  @media(max-width:600px){.topbar{flex-direction:column;align-items:stretch}.dr-kpis{grid-template-columns:repeat(2,1fr)}.dr-charts{grid-template-columns:1fr}}
 
 /* ============================================================
    Attendance Insights — Upande glass re-skin
@@ -675,11 +675,8 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0!important;height:0!impor
 #tile-modal .att-modal-body{overflow:auto!important;overflow-y:auto!important;max-height:78vh!important;padding:0}
 #tile-modal .att-modal{max-height:90vh}
 
-/* ── 10-tile grid + clickable tiles (late/early added) ── */
-/* all 10 tiles on a single row — never wrap to the next line */
-.kpi-strip{grid-template-columns:repeat(10,minmax(0,1fr))!important}
-@media(max-width:1200px){.kpi-strip{grid-template-columns:repeat(5,minmax(0,1fr))!important}}
-@media(max-width:720px){.kpi-strip{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+/* ── clickable tiles ── the strip's COLUMN LADDER lives in exactly one place,
+   the "KPI TILE LADDER" block further down; nothing here sets columns. */
 .kpi{cursor:pointer;transition:transform .12s ease,box-shadow .12s ease,border-color .12s ease}
 .kpi.active{border-color:var(--text)!important;background:var(--accent-light)!important;box-shadow:0 0 0 1.5px var(--text) inset!important}
 .kpi.active .kpi-lbl{color:var(--text)!important}
@@ -708,16 +705,9 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0!important;height:0!impor
   .topbar{padding-left:14px!important}
 }
 
-/* tiles: fixed-width, left-aligned, real space BETWEEN them (not stretched full width) */
-.kpi-strip{display:flex!important;flex-wrap:wrap!important;justify-content:flex-start!important;gap:14px!important;grid-template-columns:none!important}
-.kpi{flex:0 0 auto!important;width:132px!important}
-@media(max-width:720px){.kpi{width:calc(50% - 7px)!important}}
-
-/* tile strip spans the full topbar width: 10 equal columns, gap between, one row */
-.kpi-strip{display:grid!important;grid-template-columns:repeat(10,minmax(0,1fr))!important;gap:14px!important}
+/* tile strip spans the full topbar width; the gap is the same at every width */
+.kpi-strip{display:grid!important;gap:14px!important}
 .kpi{width:auto!important;flex:none!important}
-@media(max-width:1200px){.kpi-strip{grid-template-columns:repeat(5,minmax(0,1fr))!important}}
-@media(max-width:720px){.kpi-strip{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
 
 /* Neutralize Frappe's page wrappers so the content's left origin is the VIEWPORT
    (same origin as the position:fixed topbar). Without this, wrapper padding pushes
@@ -807,6 +797,7 @@ body>.container,.container{max-width:none!important;width:auto!important;margin:
 /* ── One per-tile color var drives BORDER + NUMBER + ACTIVE highlight (same hue everywhere) ── */
 .kpi--total{--tc:#0a0a0a} .kpi--expected{--tc:#64748b} .kpi--present{--tc:#38a160} .kpi--absent{--tc:#cb2929}
 .kpi--off{--tc:#7c3aed} .kpi--nocheckout{--tc:#d9a514} .kpi--leaves{--tc:#318ad8} .kpi--night{--tc:#3730a3}
+.kpi--manual{--tc:#0891b2}
 .kpi--late{--tc:#ea580c} .kpi--early{--tc:#db2777}
 .kpi{border:1.5px solid var(--tc,#e5e5e5)!important}
 .kpi .kpi-val{color:var(--tc,#0a0a0a)!important}                 /* number matches its border, always */
@@ -934,7 +925,7 @@ html,body{overflow:hidden!important;height:100%!important}
 
 /* Status pills use the same palette as the tiles */
 .pill.st-present{--sc:#38a160} .pill.st-absent{--sc:#cb2929} .pill.st-off{--sc:#7c3aed}
-.pill.st-leaves{--sc:#318ad8} .pill.st-night{--sc:#3730a3} .pill.st-nocheckout{--sc:#d9a514}
+.pill.st-leaves{--sc:#318ad8} .pill.st-night{--sc:#3730a3} .pill.st-nocheckout{--sc:#d9a514} .pill.st-manual{--sc:#0891b2}
 .pill.st-late{--sc:#ea580c} .pill.st-early{--sc:#db2777} .pill.st-total{--sc:#0a0a0a} .pill.st-expected{--sc:#64748b}
 .tile-inline-tbl .pill[class*="st-"]{background:transparent!important;color:var(--sc,var(--text))!important;border:1px solid var(--sc,var(--border))!important;font-weight:600}
 
@@ -969,12 +960,29 @@ html,body{overflow:hidden!important;height:100%!important}
 .sb-dev-seen{font-size:12px;white-space:nowrap;flex:0 0 auto}
 .sb-dev-item{gap:6px;padding:6px 10px}
 
-/* tiles always fill the full width, whatever the count (auto columns, equal share) */
-@media(min-width:1201px){
-  .kpi-strip{display:grid!important;grid-auto-flow:column!important;grid-auto-columns:minmax(0,1fr)!important;grid-template-columns:none!important}
+/* ════════ KPI TILE LADDER ════════ the ONE place the strip's columns are set.
+   Three earlier generations of this rule (repeat(10)/repeat(5)/repeat(2), twice
+   byte-identical, plus a dead flex/132px version) were folded in here.
+   There are TEN tiles (Total, Expected, Present, Manually Marked, No Checkout,
+   Absent, Week Off, Leaves, Night Shift, Late In / Early Out -- the last is ONE
+   combined tile). Column counts are picked so no last row holds a single orphan:
+     >=1700px    10 across, one row      (content >= ~124px per tile)
+     1101-1699   6 columns  -> 6+4       (content >= ~120px per tile at 1101)
+     721-1100    4 columns  -> 4+4+2     (content >= ~137px per tile)
+     <=720       2 columns  -> 5 rows    (content ~166px per tile at 360)
+   3 columns at phone width would be 3+3+3+1 -- the orphan this ladder exists to
+   avoid -- and 2 columns also gives each tile half a narrow screen rather than a
+   third, so the label and a 4-digit value both fit without clipping.
+   Below 901px the sidebar is off-canvas, so the strip has the full width. */
+.kpi-strip{grid-auto-flow:row!important;grid-auto-columns:auto!important}
+@media(min-width:1700px){
+  .kpi-strip{grid-auto-flow:column!important;grid-auto-columns:minmax(0,1fr)!important;grid-template-columns:none!important}
 }
-@media(max-width:1200px){
-  .kpi-strip{display:grid!important;grid-auto-flow:row!important;grid-auto-columns:auto!important;grid-template-columns:repeat(5,minmax(0,1fr))!important}
+@media(max-width:1699px){
+  .kpi-strip{grid-template-columns:repeat(6,minmax(0,1fr))!important}
+}
+@media(max-width:1100px){
+  .kpi-strip{grid-template-columns:repeat(4,minmax(0,1fr))!important}
 }
 @media(max-width:720px){
   .kpi-strip{grid-template-columns:repeat(2,minmax(0,1fr))!important}
@@ -1866,3 +1874,107 @@ body.trend-mode.att-loading .att-sb-farm.active,body.trend-mode.att-loading .att
    drill-down table needs would squash the date. */
 #lost-bd .tile-inline-tbl th:first-child,
 #lost-bd .tile-inline-tbl td:first-child{width:110px!important;white-space:nowrap}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE REPAIRS — phone / tablet. Last in the file, so these win over the
+   desktop-first generations above. Nothing here changes a colour, a font or
+   the spacing scale; each rule fixes something that is clipped, overlapping or
+   unreachable below 901px. The column ladder for the tiles is NOT here — it
+   lives in the single "KPI TILE LADDER" block above, for every width.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* 1. Off-canvas sidebar was anchored bottom-only (top:auto), so its height was
+   its CONTENT height: a company tree taller than the screen grew off the top of
+   the viewport, where a position:fixed panel can never be scrolled to. Anchor
+   both edges and the existing .att-sb-body{flex:1;overflow-y:auto} scrolls it. */
+@media(max-width:900px){
+  .att-sidebar{top:16px!important;bottom:16px!important}
+}
+
+/* 2. The drawer's close control was a bare 16px glyph — under half a fingertip.
+   Same glyph, a real hit box; negative margins keep the header its old height. */
+@media(max-width:900px){
+  .att-sb-close{display:flex!important;align-items:center;justify-content:center;
+    width:36px!important;height:36px!important;margin:-6px -8px -6px 0!important;flex:0 0 auto}
+}
+
+/* 3. The fixed "☰ UNITS" toggle (left:10px;top:10px) sat ON TOP of the topbar's
+   first control, the DATE picker. Reserve its band at the top of the topbar so
+   the filters start below it instead of underneath it. */
+@media(max-width:900px){
+  .topbar{padding-top:52px!important}
+}
+
+/* 4. Phone: the filter row wraps to 5-6 lines, so a sticky topbar was holding
+   ~280px of a ~640px screen permanently. Let it scroll away — the UNITS toggle
+   is fixed, so the sidebar stays reachable. Tablet keeps it sticky. */
+@media(max-width:720px){
+  .topbar{position:static!important}
+}
+
+/* 5. Wide tables (up to 9 columns) were capped at max-width:100% with
+   overflow-x:hidden, so past ~600px of columns the right-hand ones were simply
+   cut off and unreachable — the page cannot scroll sideways to them either
+   (html,body{overflow-x:hidden}). Give each table its own horizontal scroller,
+   the same "scroll INSIDE the card" idiom used for .tbl-wrap elsewhere. */
+@media(max-width:900px){
+  .tile-inline-wrap,#r-tile-inline .tile-inline-wrap,#lost-card .tile-inline-wrap{
+    overflow-x:auto!important;overflow-y:auto!important;
+    -webkit-overflow-scrolling:touch;scrollbar-width:thin!important}
+  #lost-card .tile-inline-wrap::-webkit-scrollbar{height:8px!important;display:block!important}
+  .tile-inline-tbl{table-layout:auto!important;width:max-content!important;
+    min-width:100%!important;max-width:none!important}
+  /* header cells already nowrap; let the body cells follow so the columns keep
+     their natural width inside the scroller instead of wrapping to 1 word each */
+  .tile-inline-tbl tbody td{white-space:nowrap!important}
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOBILE SCROLL RELEASE — must stay LAST in the file.
+   The desktop layout is a fixed app shell: html/body are locked to 100% with
+   overflow:hidden and every level down to the table wrap is a flex child with
+   min-height:0 / height:0, so the INNER wrap scrolls and the page never does.
+   The earlier mobile re-scope freed html, body and .body, but not the chain
+   between them (#r-tile-inline{overflow:hidden} at :1232 and
+   #devices-card>.card-body{flex:1 1 0} at :1640 are unconditional, and the
+   Frappe wrappers were only ever given overflow-x). One clipped ancestor is
+   enough to swallow the page scroll, which is why it still would not move.
+   Below 901px there is no fixed shell: let the document grow and scroll once.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media(max-width:900px){
+  html,body{
+    overflow-x:hidden!important;overflow-y:auto!important;
+    height:auto!important;min-height:100%!important;max-height:none!important;
+    position:static!important;-webkit-overflow-scrolling:touch}
+
+  /* frappe's own wrappers had overflow-x only — clear any height lock too.
+     Named selectors first, then the same release by STRUCTURE: the wrapper
+     chain frappe renders (body > div > div > main > div) differs between
+     versions and themes, so naming classes alone leaves whichever one this
+     site actually uses still clipped. Structure cannot be guessed wrong. */
+  body>.container,#page-attendance-insights,#page-attendance-dashboard,
+  .page-content-wrapper,.page-content,main,.page_content,.webpage-content,
+  article.web-page-content,#attendance-dashboard,
+  body>div,body>div>div,body>div>div>main,body>div>div>div,main>div{
+    height:auto!important;max-height:none!important;
+    overflow-y:visible!important;position:static!important}
+  /* ...but the drawer, its toggle and any modal MUST stay fixed */
+  .att-sidebar,.att-sb-toggle,.att-modal,.att-modal-backdrop,
+  .modal,.modal-backdrop,nav.navbar{position:fixed!important}
+  .att-sidebar{top:16px!important;bottom:16px!important;height:auto!important}
+
+  /* the app shell chain: panel -> card -> card-body -> table wrap */
+  .body,.body>.tab-panel,.body>.tab-panel.active,
+  #panel-overview,#panel-actions,#panel-register,
+  #r-tile-inline,#r-tile-inline>.card-body,
+  #lost-card,#lost-card>.card-body,
+  #devices-card,#devices-card>.card-body{
+    height:auto!important;max-height:none!important;min-height:0!important;
+    overflow-y:visible!important;position:static!important;
+    flex:none!important}
+
+  /* the table keeps its HORIZONTAL scroller (wide columns) but stops being a
+     vertical scroll box — its rows extend the page instead of hiding in 70vh */
+  .tile-inline-wrap,#r-tile-inline .tile-inline-wrap,#lost-card .tile-inline-wrap{
+    height:auto!important;max-height:none!important;overflow-y:visible!important}
+}
