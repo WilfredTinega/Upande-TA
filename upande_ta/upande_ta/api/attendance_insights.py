@@ -895,6 +895,9 @@ def attendance_register():
 			shift_end_map[sr["name"]] = str(sr["end_time"]) if sr["end_time"] else None
 		night_pending = []
 		now_t = str(frappe.utils.nowtime())[:8]
+		# full clock, for windows that cross midnight (a night shift booked
+		# against reg_date only ends the following morning)
+		now_dt = str(frappe.utils.today()) + " " + now_t
 		is_future = str(reg_date) > str(frappe.utils.today())
 
 		emp_where = ["emp.status = 'Active'"]
@@ -1239,14 +1242,29 @@ def attendance_register():
 					started = now_t >= str(ss)[:8]
 				elif is_today and not ss:
 					started = False
+				# A shift that is still RUNNING is no more an absence than one that
+				# has not begun. A night shift crosses midnight, so the shift booked
+				# against reg_date ends on reg_date + 1 at the Shift Type end time --
+				# the same next-morning window the night check-in query uses. Testing
+				# that end against the clock on reg_date itself would close the shift
+				# ~12 hours early and call everyone on duty absent. While the end is
+				# still ahead the row stays pending (it shows under Night Shift only);
+				# once it has passed with no scan it is a real absence, as before.
+				se = shift_end_map.get(eff_shift)
+				end_dt = (str(frappe.utils.add_days(reg_date, 1)) + " " + str(se)[:8]) if se else None
+				ended = (end_dt is None) or (now_dt >= end_dt)
 				row = base(emp)
 				row["att_status"] = att.att_status if att else None
 				row["shift"] = eff_shift
 				row["is_night"] = True
 				row["shift_start"] = str(ss) if ss else None
-				if started:
+				row["shift_end"] = str(se) if se else None
+				if started and ended:
 					row["night_note"] = "Night shift started " + st_txt + " \u2014 no check-in"
 					absent.append(row)
+				elif started:
+					row["night_note"] = "Night shift started " + st_txt + " \u2014 on shift now"
+					night_pending.append(row)
 				else:
 					row["night_note"] = "Shift starts " + st_txt
 					night_pending.append(row)

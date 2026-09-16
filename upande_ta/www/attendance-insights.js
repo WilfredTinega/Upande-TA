@@ -263,6 +263,7 @@
     document.querySelectorAll('.tab-panel').forEach(function(p){
       p.classList.toggle('active', p.id==='panel-'+name);
     });
+    try{ _sbSyncActive(); }catch(e){}
     try{ _fitTopbar(); }catch(e){}
     // lazy-load the heavy checkin table the first time Register is opened
     if(name==='register') loadRows();
@@ -711,6 +712,21 @@
   // picks up the NEW values (load() fires the hook before the DOM values settle).
   function _sbTrendSync(){ setTimeout(function(){ try{ if(window._reloadTrend) window._reloadTrend(); }catch(e){} try{ if(window._reloadLost) window._reloadLost(); }catch(e){} }, 0); }
   function _setActive(el){var a=document.querySelectorAll('.att-sb-farm.active,.att-sb-co-head.active');for(var i=0;i<a.length;i++)a[i].classList.remove('active');if(el)el.classList.add('active');}
+  // The sidebar carries ONE selection, not two: the company/farm tree and the
+  // panel buttons (LOST HOURS / ACTIONS / BIOMETRIC DEVICES) are the same choice
+  // of what the main pane shows. The tree's active row is derived from the
+  // r-company/r-farm values, and is dropped while a panel is open — the panel
+  // button is the selection then. Called on every sidebar rebuild AND from
+  // activateTab, so a reload can't resurrect a highlight the panel replaced.
+  function _sbSyncActive(){
+    var body=$('att-sb-body'); if(!body) return;
+    _setActive(null);
+    if(document.querySelector('.tab-btn.active')) return;
+    var cco=($('r-company')||{}).value||'', cff=($('r-farm')||{}).value||'';
+    if(!cco) return;
+    if(cff){ var it2=body.querySelector('.att-sb-farm[data-co="'+cco+'"][data-farm="'+cff+'"]'); if(it2)it2.classList.add('active'); }
+    else { var ch=body.querySelector('.att-sb-co-head[data-co="'+cco+'"]'); if(ch)ch.classList.add('active'); }
+  }
   function _sbSetSelect(id,val){var s=$(id);if(!s)return;var f=false;for(var i=0;i<s.options.length;i++){if(s.options[i].value===val){f=true;break;}}if(!f){var o=document.createElement('option');o.value=val;o.textContent=val;s.appendChild(o);}s.value=val;}
   function closeSidebar(){var sb=$('att-sidebar');if(sb)sb.classList.remove('open');}
   function sidebarSkeleton(){
@@ -738,7 +754,7 @@
       h.querySelector('.att-sb-co-name').textContent=co;
       h.querySelector('.att-sb-co-cnt').textContent=farms.length;
       h.setAttribute('data-co',co);
-      h.addEventListener('click',function(){ grp.classList.toggle('collapsed'); _sbSetSelect('r-company',co); _sbSetSelect('r-farm',''); _setActive(h); load(); scheduleAutoRefresh(); _sbTrendSync(); });
+      h.addEventListener('click',function(){ grp.classList.toggle('collapsed'); _sbSetSelect('r-company',co); _sbSetSelect('r-farm',''); activateTab('overview'); _setActive(h); load(); scheduleAutoRefresh(); _sbTrendSync(); });
       grp.appendChild(h);
       var box=document.createElement('div'); box.className='att-sb-farms';
       farms.forEach(function(f){
@@ -747,16 +763,13 @@
         var cnt = c ? '<span class="att-sb-counts"><span class="c-tw" title="Temporary (task workers)">'+c.tw+'</span><span class="c-rest" title="Others">'+c.rest+'</span></span>' : '';
         it.innerHTML='<span class="att-sb-fname"></span>'+cnt;
         it.querySelector('.att-sb-fname').textContent=f;
-        it.addEventListener('click',function(){ _sbSetSelect('r-company',co); _sbSetSelect('r-farm',f); _setActive(it); load(); scheduleAutoRefresh(); _sbTrendSync(); closeSidebar(); });
+        it.addEventListener('click',function(){ _sbSetSelect('r-company',co); _sbSetSelect('r-farm',f); activateTab('overview'); _setActive(it); load(); scheduleAutoRefresh(); _sbTrendSync(); closeSidebar(); });
         box.appendChild(it);
       });
       grp.appendChild(box);
       body.appendChild(grp);
     });
-    try{ var cco=($('r-company')||{}).value||'', cff=($('r-farm')||{}).value||'';
-      var act=body.querySelectorAll('.att-sb-farm.active,.att-sb-co-head.active'); for(var i=0;i<act.length;i++)act[i].classList.remove('active');
-      if(cco){ if(cff){ var it2=body.querySelector('.att-sb-farm[data-co="'+cco+'"][data-farm="'+cff+'"]'); if(it2)it2.classList.add('active'); } else { var ch=body.querySelector('.att-sb-co-head[data-co="'+cco+'"]'); if(ch)ch.classList.add('active'); } }
-    }catch(e){}
+    try{ _sbSyncActive(); }catch(e){}
   }
   (function(){var t=$('att-sb-toggle'),c=$('att-sb-close'),sb=$('att-sidebar');
     if(t&&sb)t.addEventListener('click',function(){sb.classList.toggle('open')});
@@ -869,11 +882,12 @@
     return m ? (h+'h '+m+'m') : (h+'h');
   }
   function tileColsFor(key){
-    var titles={total:'All Employees',expected:'Expected to Work',present:'Present',absent:'Absent',off:'Week Off / Rest Day',nocheckout:'No Checkout (checked in, not out)',leaves:'On Leave',night:'Night Shift',late:'Late Check-ins (after shift start)',early:'Early Checkouts (before shift end)'};
+    var titles={total:'All Employees',expected:'Expected to Work',present:'Present',manual:'Manually Marked Present',absent:'Absent',off:'Week Off / Rest Day',nocheckout:'No Checkout (checked in, not out)',leaves:'On Leave',night:'Night Shift',late:'Late Check-ins (after shift start)',early:'Early Checkouts (before shift end)'};
     // shared column defs. v = renderer, s = sort key extractor
     function _isOvernight(r){ var inD=(r.in_time||'').slice(0,10), refD=window._selDate||''; return !!(r.is_night || (inD && refD && inD<refD)); }
     function _statusText(r){
       if(r.pending_night) return r.night_note || 'Shift starts in the evening';
+      if(key==='manual') return 'Manual';
       if(key==='present'||key==='nocheckout'||key==='night'){
         if(_isOvernight(r)) return 'Overnight';
         if(r.source==='manual') return 'Manual';
@@ -912,7 +926,7 @@
     var statCol ={h:'Status',v:function(r){var t=_statusText(r); if(!t) return '';
       var sk=key; var tl=t.toLowerCase();
       if(tl==='overnight'||tl==='night') sk='night';
-      else if(tl==='manual') sk='nocheckout';
+      else if(tl==='manual') sk='manual';
       else if(tl.indexOf('leave')>=0) sk='leaves';
       else if(tl.indexOf('present')>=0||tl.indexOf('half')>=0||tl.indexOf('home')>=0) sk='present';
       else if(tl.indexOf('absent')>=0) sk='absent';
@@ -928,6 +942,7 @@
     var colMap={
       present:   [idCol,nameCol,shiftCol,farmCol,inCol,outCol,workedCol,timeCol,statCol],
       nocheckout:[idCol,nameCol,shiftCol,farmCol,inCol,workedCol,statCol],
+      manual:    [idCol,nameCol,shiftCol,farmCol,inCol,workedCol,statCol],
       night:     [idCol,nameCol,shiftCol,farmCol,inCol,outCol,workedCol,statCol],
       absent:    [idCol,nameCol,shiftCol,farmCol,{h:'Designation',v:function(r){return esc(r.designation||'')},s:function(r){return (r.designation||'').toLowerCase()}},{h:'Pending Leave / Week Off',v:function(r){
         if(r.flag) return '<span class="pill pill-reason">'+esc(r.flag)+'</span>';
@@ -1150,10 +1165,12 @@
     // ── On Leave / Off breakdown (chips by leave type) ──
     var lb = leaveTypeBreakdown(onLeave, off, 4);
 
-    var noCheckout = present.filter(function(r){ return !r.out_time; });
+    // a manual mark has no device checkout by definition, so it is not a missing one
+    var noCheckout = present.filter(function(r){ return !r.out_time && r.source!=='manual'; });
     var night = present.filter(function(r){ return r.is_night; });
-    // night staff whose EVENING shift hasn't started yet: not absent — listed here with
-    // their start time so it is obvious they are simply not due on shift yet.
+    // night staff whose EVENING shift hasn't started yet, or is still running: not
+    // absent — listed here with their shift note so it is obvious they are simply
+    // not due on shift yet, or are on it right now.
     var nightPending=(reg.night_pending||[]).map(function(r){ r.pending_night=true; return r; });
     night = night.concat(nightPending);
     // tag each row with its bucket so the combined (all) view can show a Status
@@ -1163,11 +1180,12 @@
     off.forEach(function(r){ r.bucket='Week Off' });
     var allEmp = present.concat(absent, onLeave, off);
     var expectedList = present.concat(absent);
-    window._tileLists = {total:allEmp, expected:expectedList, present:present, absent:absent, off:off, nocheckout:noCheckout, leaves:onLeave, night:night, late:topLate, early:topEarly, lateearly:topLate};
+    window._tileLists = {total:allEmp, expected:expectedList, present:present, manual:manualRows, absent:absent, off:off, nocheckout:noCheckout, leaves:onLeave, night:night, late:topLate, early:topEarly, lateearly:topLate};
     var items=[
       {key:'total',      lbl:'Total Employees', val:fmt(total)},
       {key:'expected',   lbl:'Expected',        val:fmt(expectedList.length)},
       {key:'present',    lbl:'Present',         val:fmt(present.length)},
+      {key:'manual',     lbl:'Manually Marked', val:fmt(manualCount)},
       {key:'nocheckout', lbl:'No Checkout',     val:fmt(noCheckout.length)},
       {key:'absent',     lbl:'Absent',          val:fmt(absent.length)},
       {key:'off',        lbl:'Week Off',        val:fmt(off.length)},
@@ -1728,6 +1746,12 @@ function renderAvgHours(serverSeries){
     }
     $('dr-sub').textContent=parts.join(' · ');
     var pivoted=pivotDrawerRows(rows);
+    // "Days in Range" is the CALENDAR span of the FROM -> TO filter, not the number
+    // of rows returned. Those are different questions, and the row count is already
+    // reported as "N day records" just below -- showing it twice hid the fact that a
+    // 31-day range had only 18 records. Same span idiom as the Lost Hours range.
+    var rangeDays=Math.round((fromISO(d.to_date)-fromISO(d.from_date))/86400000)+1;
+    if(!isFinite(rangeDays)||rangeDays<1) rangeDays=pivoted.length||0;
     var html='<div class="dr-kpis">'+
       drKpi('Days Present',kpi.days_seen||0)+
       drKpi('Absent',kpi.absent_days||0)+
@@ -1735,7 +1759,7 @@ function renderAvgHours(serverSeries){
       drKpi('Week Off',kpi.weekoff_days||0)+
       drKpi('Late Arrivals',kpi.late_days||0)+
       drKpi('Early Departs',kpi.early_days||0)+
-      drKpi('Days in Range',pivoted.length)+
+      drKpi('Days in Range',rangeDays)+
     '</div>';
     html+='<div class="dr-actions"><div style="display:flex;gap:6px">'+
       '<button class="btn export-csv" id="dr-csv">CSV</button>'+
@@ -2963,7 +2987,12 @@ function _fitTables(){
 function _fitTopbar(){ try{
   var tb=document.querySelector('.topbar'), b=document.querySelector('.body'), kp=document.getElementById('r-kpi');
   if(!tb||!b) return;
-  if(window.innerWidth<=900){ if(kp){kp.style.position='';kp.style.left='';kp.style.width='';kp.style.top='';kp.style.right='';kp.style.display='';} b.style.paddingLeft='';b.style.paddingRight=''; b.style.paddingTop=(tb.offsetHeight+8)+'px'; document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight+'px'); return; }
+  // tiles only belong to the attendance (overview) view; class-based so it beats !important
+  var ov=document.getElementById('panel-overview'), ovOn=ov&&ov.classList.contains('active');
+  document.body.classList.toggle('no-tiles', !ovOn);
+  // <=900 the topbar and the tile strip are both in the normal flow, so the
+  // desktop padding-top reserve would be a second, empty copy of the header.
+  if(window.innerWidth<=900){ if(kp){kp.style.position='';kp.style.left='';kp.style.width='';kp.style.top='';kp.style.right='';kp.style.display='';} b.style.paddingLeft='';b.style.paddingRight='';b.style.paddingTop=''; document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight+'px'); return; }
   var r=tb.getBoundingClientRect();
   var root=document.documentElement.style;
   root.setProperty('--topbar-h', r.height+'px');
@@ -2972,10 +3001,10 @@ function _fitTopbar(){ try{
   // The BODY sits inside Frappe wrappers with a residual containing-block offset, so we
   // align it INCREMENTALLY to the tiles' (or topbar's) actual rendered left — measurement
   // based, so it converges regardless of any wrapper/container offset.
-  var ov=document.getElementById('panel-overview'), ovOn=ov&&ov.classList.contains('active');
-  // tiles only belong to the attendance (overview) view; class-based so it beats !important
-  document.body.classList.toggle('no-tiles', !ovOn);
   if(window.requestAnimationFrame){ requestAnimationFrame(function(){ try{
+    // a desktop->mobile resize can land this frame after the <=900 pass has already
+    // cleared the reserve; re-check so it is never written back on a phone
+    if(window.innerWidth<=900) return;
     // Topbar + tiles are pinned at calc(sidebar+32) (a tight 16px from the sidebar).
     // Compensate the BODY's margin so it renders at that SAME left, cancelling any wrapper
     // offset — one-shot deterministic (no oscillation): newMargin = target - bodyLeft + curMargin.
