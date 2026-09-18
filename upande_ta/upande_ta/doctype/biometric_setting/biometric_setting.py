@@ -23,6 +23,76 @@ SCHEDULER_TASKS = [
 SCHEDULER_EVENT_AGAINST = "Biometric Setting"
 
 
+def _payroll_day(value):
+	try:
+		n = int(str(value).strip())
+		return n if 1 <= n <= 31 else None
+	except (ValueError, TypeError):
+		return None
+
+
+def get_payroll_period_days(company=None):
+	"""(from_day, to_day) day-of-month pair for `company`, from Biometric
+	Setting's per-company Payroll Dates table (Attendance Filters tab).
+
+	A row whose Company matches wins; otherwise the first blank-Company row is
+	the site-wide default, same "blank = applies to everyone" convention as the
+	Attendance Filters exclude tables. (None, None) when nothing is configured
+	or the matched row's values don't parse.
+	"""
+	settings = frappe.get_single("Biometric Setting")
+	rows = settings.get("attendance_payroll_periods") or []
+
+	match = fallback = None
+	for row in rows:
+		if company and row.company == company:
+			match = row
+			break
+		if not row.company and fallback is None:
+			fallback = row
+
+	chosen = match or fallback
+	if not chosen:
+		return None, None
+
+	return _payroll_day(chosen.get("from")), _payroll_day(chosen.to)
+
+
+def _month_day(year, month, day):
+	"""Date for (year, month, day), clamping day to the month's last day."""
+	import calendar
+
+	last = calendar.monthrange(year, month)[1]
+	return getdate(f"{year}-{month:02d}-{min(int(day), last):02d}")
+
+
+@frappe.whitelist()
+def get_payroll_period(company=None):
+	"""Client-facing: the payroll period for `company` as both day-of-month
+	numbers and the actual rolling-window dates (start = `from` day in the
+	PREVIOUS month, end = `to` day in the CURRENT month, relative to today) --
+	used to default the Monthly Attendance Sheet's date range when a Company is
+	picked. {"from": int|None, "to": int|None, "start_date": str|None, "end_date": str|None}
+	"""
+	from_day, to_day = get_payroll_period_days(company)
+	if not from_day or not to_day:
+		return {"from": from_day, "to": to_day, "start_date": None, "end_date": None}
+
+	today = getdate(nowdate())
+	py = today.year if today.month > 1 else today.year - 1
+	pm = today.month - 1 if today.month > 1 else 12
+
+	start_date = _month_day(py, pm, from_day)
+	end_date = _month_day(today.year, today.month, to_day)
+
+	return {
+		"from": from_day,
+		"to": to_day,
+		"start_date": str(start_date),
+		"end_date": str(end_date),
+	}
+
+
 def _ensure_scheduler_event(method):
 	"""Return the name of a Scheduler Event linking `method` to Biometric Setting,
 	creating it if missing. Returns None when the Scheduler Event doctype is absent

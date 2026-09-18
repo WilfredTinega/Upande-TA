@@ -1978,3 +1978,17 @@ body.trend-mode.att-loading .att-sb-farm.active,body.trend-mode.att-loading .att
   .tile-inline-wrap,#r-tile-inline .tile-inline-wrap,#lost-card .tile-inline-wrap{
     height:auto!important;max-height:none!important;overflow-y:visible!important}
 }
+
+/* Row-number column must never wrap. .tile-inline-tbl carries the long chain of
+   conflicting table-layout overrides documented above; the last generic rule in
+   that chain sets overflow-wrap:anywhere + word-break:break-word on every td,
+   which at desktop widths splits a 3-digit row number like "174" onto two lines
+   ("17" / "4"), doubling that row's height. This wins as the last declaration at
+   this specificity, the same "last one wins" resolution the rest of the chain
+   already relies on. The colspan exception above (empty-state row) still wins
+   for [colspan], since it is a more specific selector. */
+.tile-inline-tbl td:first-child{
+  white-space:nowrap!important;
+  overflow-wrap:normal!important;
+  word-break:normal!important;
+}

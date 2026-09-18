@@ -71,7 +71,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Attendance",
-   "link_count": 6,
+   "link_count": 7,
    "onboard": 0,
    "type": "Card Break"
   },
@@ -121,6 +121,16 @@
    "label": "Bulk Week Off",
    "link_count": 0,
    "link_to": "Bulk Week Off",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Holiday Assignment Tool",
+   "link_count": 0,
+   "link_to": "Holiday Assignment Tool",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"

@@ -485,20 +485,17 @@ def _month_day(year, month, day):
 	return getdate(f"{year}-{month:02d}-{min(int(day), last):02d}")
 
 
-def _default_payroll_range():
+def _default_payroll_range(company=None):
 	"""Payroll window rolls automatically each month from the configured day-of-month
-	values on Biometric Setting: `from` = start day taken in the PREVIOUS month,
-	`to` = end day taken in the CURRENT month (relative to today). Falls back to the
-	23rd of last month .. 22nd of this month when the days are not set."""
-	def _day(v):
-		try:
-			n = int(str(v).strip())
-			return n if 1 <= n <= 31 else None
-		except (ValueError, TypeError):
-			return None
+	values on Biometric Setting's per-company Payroll Dates table: `from` = start day
+	taken in the PREVIOUS month, `to` = end day taken in the CURRENT month (relative
+	to today). Falls back to the 23rd of last month .. 22nd of this month when the
+	days are not set for `company` (or no default row exists)."""
+	from upande_ta.upande_ta.doctype.biometric_setting.biometric_setting import (
+		get_payroll_period_days,
+	)
 
-	from_day = _day(frappe.db.get_single_value("Biometric Setting", "from"))
-	to_day = _day(frappe.db.get_single_value("Biometric Setting", "to"))
+	from_day, to_day = get_payroll_period_days(company)
 	today = getdate(nowdate())
 	py = today.year if today.month > 1 else today.year - 1
 	pm = today.month - 1 if today.month > 1 else 12
@@ -515,13 +512,13 @@ def get_ta_dashboard_employee_grid(employee, from_date=None, to_date=None):
 	emp = frappe.db.get_value(
 		"Employee", employee,
 		["name", "employee_name", "attendance_device_id", "designation",
-		 "default_shift", "holiday_list"],
+		 "default_shift", "holiday_list", "company"],
 		as_dict=True,
 	)
 	if not emp:
 		frappe.throw("Employee not found")
 
-	def_start, def_end = _default_payroll_range()
+	def_start, def_end = _default_payroll_range(emp.company)
 	start = getdate(from_date) if from_date else def_start
 	end = getdate(to_date) if to_date else def_end
 	if start > end:

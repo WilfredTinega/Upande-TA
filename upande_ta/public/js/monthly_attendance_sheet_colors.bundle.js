@@ -249,6 +249,51 @@ frappe.provide("frappe.views");
 		}
 	}
 
+	// Fetches the payroll period for `company` and fills the report's date
+	// filters. Dates are set before switching filter_based_on to "Date Range"
+	// so that mode's own refresh (validate_date_range) is the one that runs
+	// with both dates already present, instead of switching modes first and
+	// briefly refreshing with an incomplete range.
+	function applyPayrollDefaults(report) {
+		const company = report.get_filter_value("company");
+		if (!company) return;
+
+		frappe.call({
+			method:
+				"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.get_payroll_period",
+			args: { company },
+			callback: function (r) {
+				const data = (r && r.message) || {};
+				if (!data.start_date || !data.end_date) return;
+
+				report.set_filter_value({
+					start_date: data.start_date,
+					end_date: data.end_date,
+				});
+				report.set_filter_value("filter_based_on", "Date Range");
+			},
+		});
+	}
+
+	// Hooks the filter's own `on_change` (the property query_report.js actually
+	// checks at change time -- see setup_filters()), not `company.df.on_change`:
+	// df.onchange is a closure snapshotting f.on_change once at construction, so
+	// mutating df.on_change afterwards has no effect on an already-built filter.
+	function applyPayrollOnCompanyChange(report) {
+		try {
+			const company = report.get_filter && report.get_filter("company");
+			if (!company || company.__ta_payroll_hooked) return;
+			company.__ta_payroll_hooked = true;
+			const prior = company.on_change;
+			company.on_change = function () {
+				applyPayrollDefaults(report);
+				if (prior) return prior.apply(this, arguments);
+			};
+		} catch (e) {
+			console.warn("[MAS payroll]", e);
+		}
+	}
+
 	function addExtraFilters(settings) {
 		try {
 			if (!settings || !Array.isArray(settings.filters)) return;
@@ -302,7 +347,10 @@ frappe.provide("frappe.views");
 		QR.prototype.setup_filters = function () {
 			if (this.report_name === REPORT) addExtraFilters(this.report_settings);
 			const out = origSetupFilters.apply(this, arguments);
-			if (this.report_name === REPORT) clearUnitOnCompanyChange(this);
+			if (this.report_name === REPORT) {
+				clearUnitOnCompanyChange(this);
+				applyPayrollOnCompanyChange(this);
+			}
 			return out;
 		};
 

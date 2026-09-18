@@ -383,6 +383,10 @@ _SIDEBAR_LAYOUT = (
 	# Asked for at the top level rather than inside a group: it is run often
 	# enough that it should never be a click away behind a collapsed section.
 	{"type": "Link", "link_type": "DocType", "link_to": "Bulk Week Off", "label": "Bulk Week Off", "icon": "calendar-clock"},
+	# Directly under Bulk Week Off because it is the same job from the other
+	# end: Bulk Week Off moves a group onto a list permanently, this one moves
+	# them onto one for a date range and puts them back afterwards.
+	{"type": "Link", "link_type": "DocType", "link_to": "Holiday Assignment Tool", "label": "Holiday Assignment Tool", "icon": "calendar-plus"},
 
 	# Ordered the way overtime is actually worked: the bulk entry raises the
 	# slips, and the type master is the thing you touch least.
@@ -564,7 +568,7 @@ _DROP_WORKSPACE_CHARTS = ("Attendance Count",)
 # web page stays a sidebar-only entry.
 _WORKSPACE_CARD_LINKS = (
 	("Attendance", (("DocType", "Gate Pass"),)),
-	("Shifts", (("DocType", "Bulk Week Off"),)),
+	("Shifts", (("DocType", "Bulk Week Off"), ("DocType", "Holiday Assignment Tool"))),
 	("Overtime", (("DocType", "Bulk Overtime"),)),
 	("Biometrics", (
 		("DocType", "Biometric Logs"),
