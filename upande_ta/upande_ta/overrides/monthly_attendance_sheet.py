@@ -147,6 +147,46 @@ def get_allowed_employees(filters):
 	return set(frappe.get_all("Employee", filters=conditions, pluck="name"))
 
 
+# Biometric Setting table fieldname -> (the Link field on each row, the Employee
+# field it restricts on). Like EXTRA_FILTER_FIELDS above, the Employee field is
+# a custom field some sites don't carry, so every read is guarded behind
+# frappe.get_meta("Employee").has_field() rather than assumed to exist.
+DISABLED_VALUE_TABLES = {
+	"attendance_employment_type_filters": ("employment_type", "employment_type"),
+	"attendance_employee_category_filters": ("employee_category", "employee_category"),
+}
+
+
+def get_disabled_employee_names() -> set:
+	"""Employees excluded from the Monthly Attendance Sheet by Biometric
+	Setting's Attendance Filters tab: every row there with "Exclude from
+	Attendance Sheet" checked hides every employee carrying that Employment
+	Type or Employee Category. A row's Company narrows this to that company
+	only; left blank, the row applies to every company on the site. Empty set
+	when nothing is configured, or when the underlying Employee field doesn't
+	exist on this site."""
+	if not frappe.db.exists("DocType", "Biometric Setting"):
+		return set()
+
+	meta = frappe.get_meta("Employee")
+	settings = frappe.get_single("Biometric Setting")
+
+	disabled_names = set()
+	for table_field, (row_field, employee_field) in DISABLED_VALUE_TABLES.items():
+		if not meta.has_field(employee_field):
+			continue
+		for row in (settings.get(table_field) or []):
+			value = row.get(row_field)
+			if not value or not row.excluded:
+				continue
+			emp_filters = {employee_field: value}
+			if row.get("company"):
+				emp_filters["company"] = row.company
+			disabled_names.update(frappe.get_all("Employee", filters=emp_filters, pluck="name"))
+
+	return disabled_names
+
+
 def get_leave_abbr(leave_type: str) -> str:
 	if not leave_type:
 		return "L"
@@ -195,6 +235,10 @@ def get_attendance_records(filters):
 	if filters.employee:
 		query = query.where(Attendance.employee == filters.employee)
 
+	disabled_employees = get_disabled_employee_names()
+	if disabled_employees:
+		query = query.where(Attendance.employee.notin(list(disabled_employees)))
+
 	# The rows come from the Employee query, but the chart is built straight off
 	# these records -- so the same employee restrictions have to be applied here
 	# or the chart counts people the filters excluded.
@@ -231,11 +275,15 @@ def get_employee_related_details(filters):
 	emp_map, group_by_param_values = original(filters)
 
 	allowed = get_allowed_employees(filters)
-	if allowed is None:
+	disabled = get_disabled_employee_names()
+	if allowed is None and not disabled:
 		return emp_map, group_by_param_values
 
+	def keep(name):
+		return (allowed is None or name in allowed) and name not in disabled
+
 	if not filters.group_by:
-		return {name: emp for name, emp in emp_map.items() if name in allowed}, group_by_param_values
+		return {name: emp for name, emp in emp_map.items() if keep(name)}, group_by_param_values
 
 	# Grouped: emp_map is {group value: {employee: details}}. Drop the employees
 	# that were filtered out, then the groups left empty -- get_data iterates
@@ -243,7 +291,7 @@ def get_employee_related_details(filters):
 	pruned = {}
 	for parameter, employees in emp_map.items():
 		kept = frappe._dict(
-			{name: emp for name, emp in employees.items() if name in allowed}
+			{name: emp for name, emp in employees.items() if keep(name)}
 		)
 		if kept:
 			pruned[parameter] = kept
@@ -550,6 +598,49 @@ def build_summary_rows(data, columns):
 	return summary
 
 
+def add_company_column(columns, data):
+	"""Insert a Company column right after Employee Name, and stamp each row.
+
+	HRMS' own employee query already reads Employee.company per employee but
+	never surfaces it on the report -- multiple companies can appear together
+	whenever "Include Company Descendants" is checked, and the column is the
+	only way to tell them apart on screen.
+	"""
+	if any(c.get("fieldname") == "company" for c in columns):
+		return
+
+	insert_at = len(columns)
+	for i, c in enumerate(columns):
+		if c.get("fieldname") == "employee_name":
+			insert_at = i + 1
+			break
+
+	columns.insert(insert_at, {
+		"label": _("Company"),
+		"fieldname": "company",
+		"fieldtype": "Link",
+		"options": "Company",
+		"width": 140,
+	})
+
+	employees = {row.get("employee") for row in data if row.get("employee")}
+	if not employees:
+		return
+
+	company_by_employee = dict(
+		frappe.get_all(
+			"Employee",
+			filters={"name": ("in", list(employees))},
+			fields=["name", "company"],
+			as_list=1,
+		)
+	)
+	for row in data:
+		employee = row.get("employee")
+		if employee:
+			row["company"] = company_by_employee.get(employee, "")
+
+
 def execute(filters=None):
 	original = _hrms_execute
 	if original is None or original is execute:
@@ -559,6 +650,8 @@ def execute(filters=None):
 		frappe.throw(_("Monthly Attendance Sheet override is not correctly patched."))
 
 	columns, data, message, chart = original(filters)
+
+	add_company_column(columns, data)
 
 	# Shift holds long labels (e.g. "LOE/ECE SECURITY DAY SHIFT"); left-align it
 	# so the names read naturally instead of hugging the right edge.
