@@ -7,6 +7,11 @@
 // Column freezing/pinning is intentionally NOT handled here — frappe-datatable
 // now provides native "Freeze up to this column" / "Unfreeze columns", so a
 // custom implementation would only duplicate the header menu.
+//
+// Also wires the Company filter to the per-company payroll dates configured on
+// Biometric Setting > Attendance Filters > Payroll Dates: picking a Company
+// switches the report to Date Range mode and fills Start/End Date with that
+// company's payroll period (blank-Company row = the site default).
 
 frappe.provide("frappe.views");
 
@@ -119,6 +124,32 @@ frappe.provide("frappe.views");
 		}
 	}
 
+	// Fetches the payroll period for `company` and fills the report's date
+	// filters. Dates are set before switching filter_based_on to "Date Range"
+	// so that mode's own refresh (validate_date_range) is the one that runs
+	// with both dates already present, instead of switching modes first and
+	// briefly refreshing with an incomplete range.
+	function applyPayrollDefaults(report) {
+		const company = report.get_filter_value("company");
+		if (!company) return;
+
+		frappe.call({
+			method:
+				"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.get_payroll_period",
+			args: { company },
+			callback: function (r) {
+				const data = (r && r.message) || {};
+				if (!data.start_date || !data.end_date) return;
+
+				report.set_filter_value({
+					start_date: data.start_date,
+					end_date: data.end_date,
+				});
+				report.set_filter_value("filter_based_on", "Date Range");
+			},
+		});
+	}
+
 	function patchPrototype() {
 		const QR = frappe.views && frappe.views.QueryReport;
 		if (!QR || !QR.prototype) return false;
@@ -145,6 +176,32 @@ frappe.provide("frappe.views");
 				}, 50);
 			}
 			return out;
+		};
+
+		// setup_filters() re-reads report_settings.filters from scratch on every
+		// refresh_report(), so the Company filter's on_change is re-wrapped each
+		// time; the __ta_payroll_wrapped flag on the filter def keeps a single
+		// filter instance from having its on_change wrapped more than once.
+		const origSetupFilters = QR.prototype.setup_filters;
+		QR.prototype.setup_filters = function () {
+			try {
+				if (this.report_name === REPORT && this.report_settings) {
+					const companyFilter = (this.report_settings.filters || []).find(
+						(f) => f.fieldname === "company"
+					);
+					if (companyFilter && !companyFilter.__ta_payroll_wrapped) {
+						companyFilter.__ta_payroll_wrapped = true;
+						const originalOnChange = companyFilter.on_change;
+						companyFilter.on_change = function (report) {
+							applyPayrollDefaults(report);
+							if (originalOnChange) originalOnChange(report);
+						};
+					}
+				}
+			} catch (e) {
+				/* never break the report */
+			}
+			return origSetupFilters.apply(this, arguments);
 		};
 
 		QR.prototype.__ta_mas_patched = true;

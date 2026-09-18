@@ -31,6 +31,73 @@ TASK_WORKER_EMPLOYMENT_TYPE = "Temporary"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Company access control.
+#
+# This whole module used to trust the client's `company` request param
+# outright, and every query that runs with no company picked scanned every
+# company on the site with no filter at all -- so a "Karen" user could see
+# (and, worse, mark/cancel attendance for) "Kaitet Ltd." data just by
+# choosing it in the picker, or by leaving the picker blank. Scoping is via
+# the standard Frappe "User Permission" doctype (allow="Company"): a user
+# with no such rows is unrestricted (Frappe's own convention), matching
+# today's behaviour for anyone not deliberately restricted.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_allowed_companies():
+	"""Companies the current user may see/act on, or None for unrestricted."""
+	user = frappe.session.user
+	if user == "Administrator":
+		return None
+	companies = frappe.get_all(
+		"User Permission",
+		filters={"user": user, "allow": "Company"},
+		pluck="for_value",
+	)
+	return companies or None
+
+
+def enforce_company_access(company):
+	"""Throw if `company` is set and the caller isn't permitted to see it."""
+	if not company:
+		return
+	allowed = get_allowed_companies()
+	if allowed and company not in allowed:
+		frappe.throw(
+			frappe._("You are not permitted to view attendance data for {0}").format(company),
+			frappe.PermissionError,
+		)
+
+
+def company_where(company, allowed, alias, param_key):
+	"""(condition, params) restricting `alias`.company for the caller, or
+	("", {}) when there is nothing to restrict. `condition` carries no
+	leading " AND " -- callers splice it into their own WHERE however it is
+	built (string concatenation or a list of conditions).
+
+	An explicit `company` (already checked by enforce_company_access) always
+	wins. With nothing picked, a restricted user (`allowed` is not None) is
+	scoped to their permitted companies instead of every company on the site.
+	"""
+	if company:
+		return f"{alias}.company = %({param_key})s", {param_key: company}
+	if allowed:
+		return f"{alias}.company IN %({param_key}s)s", {f"{param_key}s": tuple(allowed)}
+	return "", {}
+
+
+def filter_companies(values, allowed):
+	"""Keep only the companies in `values` (a list, or a dict keyed by
+	company) that the caller may see. Returns `values` unchanged when
+	`allowed` is None (unrestricted)."""
+	if allowed is None:
+		return values
+	allowed_set = set(allowed)
+	if isinstance(values, dict):
+		return {k: v for k, v in values.items() if k in allowed_set}
+	return [v for v in values if v in allowed_set]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Server Script: attendance_dashboard_data  (type: API, api_method: attendance_dashboard_data)
 # REWRITE — v3  (PERFORMANCE)
 #
@@ -60,6 +127,9 @@ def attendance_dashboard_data():
 	company = (fd.get("company") or "").strip()
 	emptype = (fd.get("employment_type") or "").strip()
 
+	enforce_company_access(company)
+	allowed_companies = get_allowed_companies()
+
 	# clamp range to max 366 days, never inverted
 	start_d = frappe.utils.getdate(from_date)
 	end_d = frappe.utils.getdate(to_date)
@@ -85,8 +155,10 @@ def attendance_dashboard_data():
 	econd = ""
 	if farm:
 		econd = econd + " AND e.custom_farm = %(farm)s"
-	if company:
-		econd = econd + " AND e.company = %(company)s"
+	_cond, _cparams = company_where(company, allowed_companies, "e", "company")
+	if _cond:
+		econd = econd + " AND " + _cond
+		params.update(_cparams)
 	if emptype:
 		econd = econd + " AND FIND_IN_SET(e.employment_type, " + frappe.db.escape(emptype) + ")"
 
@@ -102,8 +174,10 @@ def attendance_dashboard_data():
 	early_expr = "GREATEST(0, TIMESTAMPDIFF(MINUTE, c.time, DATE_SUB(" + shift_end_dt + ", INTERVAL " + grace_out + " MINUTE)))"
 
 	# ── filter dropdowns ─────────────────────────────────────────────────────────
+	# Scoped to the caller's permitted companies so a restricted user never even
+	# sees another company's name, farm or employment type in a picker.
 	farm_list = []
-	frows = frappe.db.sql("SELECT DISTINCT e.custom_farm AS f FROM `tabEmployee` e WHERE e.status = 'Active' AND IFNULL(e.custom_farm, '') != '' ORDER BY e.custom_farm", as_dict=1)
+	frows = frappe.db.sql("SELECT DISTINCT e.custom_farm AS f FROM `tabEmployee` e WHERE e.status = 'Active' AND IFNULL(e.custom_farm, '') != ''" + econd + " ORDER BY e.custom_farm", params, as_dict=1)
 	for fr in frows:
 		farm_list.append(fr["f"])
 
@@ -111,6 +185,7 @@ def attendance_dashboard_data():
 	crows = frappe.db.sql("SELECT DISTINCT e.company AS co FROM `tabEmployee` e WHERE e.status = 'Active' AND IFNULL(e.company, '') != '' ORDER BY e.company", as_dict=1)
 	for cr in crows:
 		company_list.append(cr["co"])
+	company_list = filter_companies(company_list, allowed_companies)
 
 	# ── company → unit/division (farm) hierarchy, for the floating sidebar ──
 	company_farms = {}
@@ -119,18 +194,22 @@ def attendance_dashboard_data():
 		company_farms.setdefault(cr["co"], [])
 		if cr["f"] not in company_farms[cr["co"]]:
 			company_farms[cr["co"]].append(cr["f"])
+	company_farms = filter_companies(company_farms, allowed_companies)
 
 	emp_type_list = []
-	etrows = frappe.db.sql("SELECT DISTINCT e.employment_type AS et FROM `tabEmployee` e WHERE e.status = 'Active' AND IFNULL(e.employment_type,'') != '' ORDER BY e.employment_type", as_dict=1)
+	etrows = frappe.db.sql("SELECT DISTINCT e.employment_type AS et FROM `tabEmployee` e WHERE e.status = 'Active' AND IFNULL(e.employment_type,'') != ''" + econd + " ORDER BY e.employment_type", params, as_dict=1)
 	for er in etrows:
 		emp_type_list.append(er["et"])
 
 	# per-company/per-farm split: task workers vs the rest
 	company_farm_counts = {}
-	cfcrows = frappe.db.sql("SELECT e.company AS co, e.custom_farm AS f, SUM(CASE WHEN e.employment_type=%(tw_type)s THEN 1 ELSE 0 END) AS tw, SUM(CASE WHEN COALESCE(e.employment_type,'')<>%(tw_type)s THEN 1 ELSE 0 END) AS rest FROM `tabEmployee` e WHERE e.status='Active' AND IFNULL(e.company,'')<>'' AND IFNULL(e.custom_farm,'')<>'' GROUP BY e.company, e.custom_farm", {"tw_type": TASK_WORKER_EMPLOYMENT_TYPE}, as_dict=1)
+	cfc_params = dict(params)
+	cfc_params["tw_type"] = TASK_WORKER_EMPLOYMENT_TYPE
+	cfcrows = frappe.db.sql("SELECT e.company AS co, e.custom_farm AS f, SUM(CASE WHEN e.employment_type=%(tw_type)s THEN 1 ELSE 0 END) AS tw, SUM(CASE WHEN COALESCE(e.employment_type,'')<>%(tw_type)s THEN 1 ELSE 0 END) AS rest FROM `tabEmployee` e WHERE e.status='Active' AND IFNULL(e.company,'')<>'' AND IFNULL(e.custom_farm,'')<>''" + econd + " GROUP BY e.company, e.custom_farm", cfc_params, as_dict=1)
 	for cr in cfcrows:
 		company_farm_counts.setdefault(cr["co"], {})
 		company_farm_counts[cr["co"]][cr["f"]] = {"tw": int(cr["tw"] or 0), "rest": int(cr["rest"] or 0)}
+	company_farm_counts = filter_companies(company_farm_counts, allowed_companies)
 
 	# ── active headcount under the current filter ────────────────────────────────
 	active_total = frappe.db.sql("SELECT COUNT(*) FROM `tabEmployee` e WHERE e.status = 'Active'" + econd, params)[0][0]
@@ -418,6 +497,9 @@ def attendance_register():
 		company = (frappe.form_dict.get("company") or "").strip()
 		emptype = (frappe.form_dict.get("employment_type") or "").strip()
 
+		enforce_company_access(company)
+		allowed_companies = get_allowed_companies()
+
 		# ── TREND MODE (trend=1): per-farm daily present headcount, then return early.
 		# Piggybacked here because new api_methods don't register reliably on Frappe
 		# Cloud (HTTP 417); the flag keeps normal register loads unaffected. ──
@@ -430,9 +512,10 @@ def attendance_register():
 			if farm:
 				t_where += " AND TRIM(e.custom_farm) = TRIM(%(farm)s)"
 				t_params["farm"] = farm
-			if company:
-				t_where += " AND e.company = %(company)s"
-				t_params["company"] = company
+			_cond, _cparams = company_where(company, allowed_companies, "e", "company")
+			if _cond:
+				t_where += " AND " + _cond
+				t_params.update(_cparams)
 			if emptype:
 				t_where += " AND FIND_IN_SET(e.employment_type, %(employment_type)s)"
 				t_params["employment_type"] = emptype
@@ -501,9 +584,10 @@ def attendance_register():
 			if farm:
 				l_where += " AND TRIM(e.custom_farm) = TRIM(%(l_farm)s)"
 				l_params["l_farm"] = farm
-			if company:
-				l_where += " AND e.company = %(l_company)s"
-				l_params["l_company"] = company
+			_cond, _cparams = company_where(company, allowed_companies, "e", "l_company")
+			if _cond:
+				l_where += " AND " + _cond
+				l_params.update(_cparams)
 			if emptype:
 				l_where += " AND FIND_IN_SET(e.employment_type, %(l_emptype)s)"
 				l_params["l_emptype"] = emptype
@@ -905,9 +989,10 @@ def attendance_register():
 		if farm:
 			emp_where.append("TRIM(emp.custom_farm) = TRIM(%(farm)s)")
 			emp_params["farm"] = farm
-		if company:
-			emp_where.append("emp.company = %(company)s")
-			emp_params["company"] = company
+		_cond, _cparams = company_where(company, allowed_companies, "emp", "company")
+		if _cond:
+			emp_where.append(_cond)
+			emp_params.update(_cparams)
 		if emptype:
 			emp_where.append("FIND_IN_SET(emp.employment_type, %(employment_type)s)")
 			emp_params["employment_type"] = emptype
@@ -930,9 +1015,10 @@ def attendance_register():
 		if farm:
 			sa_extra += " AND TRIM(emp.custom_farm) = TRIM(%(sa_farm)s)"
 			sa_params["sa_farm"] = farm
-		if company:
-			sa_extra += " AND emp.company = %(sa_company)s"
-			sa_params["sa_company"] = company
+		_cond, _cparams = company_where(company, allowed_companies, "emp", "sa_company")
+		if _cond:
+			sa_extra += " AND " + _cond
+			sa_params.update(_cparams)
 		sa_rows = frappe.db.sql("""
 			SELECT sa.employee, sa.shift_type
 			FROM `tabShift Assignment` sa
@@ -956,9 +1042,10 @@ def attendance_register():
 		if farm:
 			ci_extra += " AND TRIM(emp.custom_farm) = TRIM(%(ci_farm)s)"
 			ci_params["ci_farm"] = farm
-		if company:
-			ci_extra += " AND emp.company = %(ci_company)s"
-			ci_params["ci_company"] = company
+		_cond, _cparams = company_where(company, allowed_companies, "emp", "ci_company")
+		if _cond:
+			ci_extra += " AND " + _cond
+			ci_params.update(_cparams)
 		biometric_rows = frappe.db.sql("""
 			SELECT ec.employee,
 				MIN(CASE WHEN ec.log_type='IN' THEN ec.`time` END) AS in_time,
@@ -1049,9 +1136,10 @@ def attendance_register():
 		if farm:
 			att_extra += " AND TRIM(emp.custom_farm) = TRIM(%(att_farm)s)"
 			att_params["att_farm"] = farm
-		if company:
-			att_extra += " AND emp.company = %(att_company)s"
-			att_params["att_company"] = company
+		_cond, _cparams = company_where(company, allowed_companies, "emp", "att_company")
+		if _cond:
+			att_extra += " AND " + _cond
+			att_params.update(_cparams)
 		att_rows = frappe.db.sql("""
 			SELECT a.employee, a.status AS att_status, a.in_time, a.out_time,
 				   a.shift AS att_shift, a.custom_marking_reason AS marking_reason
@@ -1071,9 +1159,10 @@ def attendance_register():
 		if farm:
 			lv_where.append("TRIM(emp.custom_farm) = TRIM(%(lv_farm)s)")
 			lv_params["lv_farm"] = farm
-		if company:
-			lv_where.append("emp.company = %(lv_company)s")
-			lv_params["lv_company"] = company
+		_cond, _cparams = company_where(company, allowed_companies, "emp", "lv_company")
+		if _cond:
+			lv_where.append(_cond)
+			lv_params.update(_cparams)
 		leave_rows = frappe.db.sql("""
 			SELECT la.employee, la.leave_type
 			FROM `tabLeave Application` la
@@ -1334,11 +1423,15 @@ def attendance_register():
 			dev_list.append({"sn": dv["device_sn"], "location": dv["device_location"],
 							 "status": st, "last_seen": str(dv["last_seen"]) if dv["last_seen"] else None})
 
-		# ── payroll period from Biometric Setting (day-of-month boundaries, e.g. 21 -> 20) ──
-		ps_rows = frappe.db.sql("SELECT field, value FROM `tabSingles` WHERE doctype='Biometric Setting' AND field IN ('from','to')", as_dict=True)
-		ps_map = {r["field"]: r["value"] for r in ps_rows}
-		p_from_day = frappe.utils.cint(ps_map.get("from") or 21) or 21
-		p_to_day = frappe.utils.cint(ps_map.get("to") or 20) or 20
+		# ── payroll period from Biometric Setting's per-company Payroll Dates
+		# table (day-of-month boundaries, e.g. 21 -> 20). Company-specific when
+		# the register's Company filter is set, else the blank-Company default row. ──
+		from upande_ta.upande_ta.doctype.biometric_setting.biometric_setting import (
+			get_payroll_period_days,
+		)
+		p_from_day, p_to_day = get_payroll_period_days(company or None)
+		p_from_day = p_from_day or 21
+		p_to_day = p_to_day or 20
 		rd = frappe.utils.getdate(reg_date)
 		if rd.day >= p_from_day:
 			payroll_start = rd.replace(day=p_from_day)
@@ -1347,16 +1440,25 @@ def attendance_register():
 			payroll_start = frappe.utils.add_months(rd, -1).replace(day=p_from_day)
 			payroll_end = rd.replace(day=p_to_day)
 
+		sb_params = {"tw_type": TASK_WORKER_EMPLOYMENT_TYPE}
+		sb_cond = ""
+		if company:
+			sb_cond = " AND company = %(sb_company)s"
+			sb_params["sb_company"] = company
+		elif allowed_companies:
+			sb_cond = " AND company IN %(sb_companies)s"
+			sb_params["sb_companies"] = tuple(allowed_companies)
+
 		sbfarms = {}
 		sbcounts = {}
-		sbrows = frappe.db.sql("SELECT company AS co, custom_farm AS f, SUM(CASE WHEN employment_type=%(tw_type)s THEN 1 ELSE 0 END) AS tw, SUM(CASE WHEN COALESCE(employment_type,'')<>%(tw_type)s THEN 1 ELSE 0 END) AS rest FROM `tabEmployee` WHERE status='Active' AND IFNULL(company,'')<>'' AND IFNULL(custom_farm,'')<>'' GROUP BY company, custom_farm ORDER BY company, custom_farm", {"tw_type": TASK_WORKER_EMPLOYMENT_TYPE}, as_dict=True)
+		sbrows = frappe.db.sql("SELECT company AS co, custom_farm AS f, SUM(CASE WHEN employment_type=%(tw_type)s THEN 1 ELSE 0 END) AS tw, SUM(CASE WHEN COALESCE(employment_type,'')<>%(tw_type)s THEN 1 ELSE 0 END) AS rest FROM `tabEmployee` WHERE status='Active' AND IFNULL(company,'')<>'' AND IFNULL(custom_farm,'')<>''" + sb_cond + " GROUP BY company, custom_farm ORDER BY company, custom_farm", sb_params, as_dict=True)
 		for rr in sbrows:
 			sbfarms.setdefault(rr["co"], [])
 			if rr["f"] not in sbfarms[rr["co"]]:
 				sbfarms[rr["co"]].append(rr["f"])
 			sbcounts.setdefault(rr["co"], {})
 			sbcounts[rr["co"]][rr["f"]] = {"tw": int(rr["tw"] or 0), "rest": int(rr["rest"] or 0)}
-		sbet = [x["et"] for x in frappe.db.sql("SELECT DISTINCT employment_type AS et FROM `tabEmployee` WHERE status='Active' AND IFNULL(employment_type,'')<>'' ORDER BY employment_type", as_dict=True)]
+		sbet = [x["et"] for x in frappe.db.sql("SELECT DISTINCT employment_type AS et FROM `tabEmployee` WHERE status='Active' AND IFNULL(employment_type,'')<>''" + sb_cond + " ORDER BY employment_type", sb_params, as_dict=True)]
 		# ── LATE-IN / EARLY-OUT for this date (moved off attendance_dashboard_data,
 		# which took up to 33s and made the browser fetch fail). Single indexed
 		# day-range query; night shifts (end<=start) are skipped because their
@@ -1375,9 +1477,10 @@ def attendance_register():
 		if farm:
 			le_extra += " AND TRIM(e.custom_farm) = TRIM(%(le_farm)s)"
 			le_params["le_farm"] = farm
-		if company:
-			le_extra += " AND e.company = %(le_company)s"
-			le_params["le_company"] = company
+		_cond, _cparams = company_where(company, allowed_companies, "e", "le_company")
+		if _cond:
+			le_extra += " AND " + _cond
+			le_params.update(_cparams)
 		if emptype:
 			le_extra += " AND FIND_IN_SET(e.employment_type, %(le_emptype)s)"
 			le_params["le_emptype"] = emptype
@@ -1471,6 +1574,9 @@ def att_rows():
 	company = (fd.get("company") or "").strip()
 	emptype = (fd.get("employment_type") or "").strip()
 
+	enforce_company_access(company)
+	allowed_companies = get_allowed_companies()
+
 	start_d = frappe.utils.getdate(from_date)
 	end_d = frappe.utils.getdate(to_date)
 	if end_d < start_d:
@@ -1492,8 +1598,10 @@ def att_rows():
 	econd = ""
 	if farm:
 		econd = econd + " AND e.custom_farm = %(farm)s"
-	if company:
-		econd = econd + " AND e.company = %(company)s"
+	_cond, _cparams = company_where(company, allowed_companies, "e", "company")
+	if _cond:
+		econd = econd + " AND " + _cond
+		params.update(_cparams)
 	if emptype:
 		econd = econd + " AND e.employment_type = " + frappe.db.escape(emptype)
 
@@ -1543,6 +1651,9 @@ def attendance_on_leave():
 		emptype = args.get("employment_type") or ""
 		include_open = args.get("include_open") in ("1", "true", "True", 1, True)
 
+		enforce_company_access(company)
+		allowed_companies = get_allowed_companies()
+
 		la_filters = {
 			"docstatus": ["<", 2],
 			"from_date": ["<=", on_date],
@@ -1550,6 +1661,8 @@ def attendance_on_leave():
 		}
 		if company:
 			la_filters["company"] = company
+		elif allowed_companies:
+			la_filters["company"] = ["in", allowed_companies]
 
 		la_rows = frappe.get_all(
 			"Leave Application",
@@ -1647,9 +1760,13 @@ def attendance_employee_list():
 	farm	= frappe.form_dict.get("farm")	or ""
 	company = frappe.form_dict.get("company") or ""
 
+	enforce_company_access(company)
+	allowed_companies = get_allowed_companies()
+
 	emp_filters = [["status", "=", "Active"]]
 	if farm:	emp_filters.append(["custom_farm", "=", farm])
 	if company: emp_filters.append(["company",	 "=", company])
+	elif allowed_companies: emp_filters.append(["company", "in", allowed_companies])
 
 	employees = frappe.get_all("Employee",
 		fields=["name", "employee_name", "designation", "custom_farm",
@@ -1692,6 +1809,12 @@ def attendance_employee_history():
 		frappe.response["message"] = {"error": "Employee not found"}
 		return
 	emp_meta = emp_meta[0]
+
+	try:
+		enforce_company_access(emp_meta.get("company"))
+	except frappe.PermissionError as e:
+		frappe.response["message"] = {"error": str(e)}
+		return
 
 	OT_SEC = 30 * 60
 	OT_EXPR = """
@@ -1856,6 +1979,8 @@ def attendance_mark():
 	status	  = frappe.form_dict.get("status")   or "Present"
 	reason	  = (frappe.form_dict.get("reason")  or "").strip()
 
+	allowed_companies = get_allowed_companies()
+
 	valid_reasons = ["Away Assignment", "Pending Off", "Pending Holiday"]
 	if reason and reason not in valid_reasons:
 		reason = ""
@@ -1885,9 +2010,15 @@ def attendance_mark():
 		o_farm = (frappe.form_dict.get("farm") or "").strip()
 		o_etype = (frappe.form_dict.get("employment_type") or "").strip()
 		o_emps = (frappe.form_dict.get("emp_ids") or "").strip()
-		if o_company:
-			o_where += " AND e.company = %(o_company)s"
-			o_params["o_company"] = o_company
+		try:
+			enforce_company_access(o_company)
+		except frappe.PermissionError as e:
+			frappe.response["message"] = {"error": str(e)}
+			return
+		_cond, _cparams = company_where(o_company, allowed_companies, "e", "o_company")
+		if _cond:
+			o_where += " AND " + _cond
+			o_params.update(_cparams)
 		if o_farm:
 			o_where += " AND TRIM(e.custom_farm) = TRIM(%(o_farm)s)"
 			o_params["o_farm"] = o_farm
@@ -2026,6 +2157,12 @@ def attendance_mark():
 						"error": "not submitted (docstatus " + str(cur.get("docstatus")) + ")"})
 					c_err = c_err + 1
 					continue
+				try:
+					enforce_company_access(frappe.db.get_value("Employee", cur.get("employee"), "company"))
+				except frappe.PermissionError as pe:
+					c_results.append({"name": nm, "ok": False, "error": str(pe)})
+					c_err = c_err + 1
+					continue
 				c_doc = frappe.get_doc("Attendance", nm)
 				c_doc.flags.ignore_permissions = True
 				c_doc.cancel()
@@ -2056,16 +2193,35 @@ def attendance_mark():
 		if span > 61:
 			span = 61
 			g_to = frappe.utils.add_days(g_from, 61)
-		g_ids = [e.strip() for e in (frappe.form_dict.get("emp_ids") or "").split(",") if e.strip()]
+		g_company = (frappe.form_dict.get("company") or "").strip()
+		try:
+			enforce_company_access(g_company)
+		except frappe.PermissionError as e:
+			frappe.response["message"] = {"error": str(e)}
+			return
+
+		g_ids_raw = [e.strip() for e in (frappe.form_dict.get("emp_ids") or "").split(",") if e.strip()]
+		g_ids = g_ids_raw
+		if g_ids and allowed_companies is not None:
+			# an explicit employee list from a restricted user: drop anyone outside
+			# their permitted companies rather than falling through to the "scan
+			# everyone" branch below, which would defeat the point of the filter.
+			_allowed_ids = set(frappe.get_all(
+				"Employee",
+				filters={"name": ["in", g_ids], "company": ["in", allowed_companies]},
+				pluck="name",
+			))
+			g_ids = [e for e in g_ids if e in _allowed_ids]
 		g_meta = {}
-		if not g_ids:
+		if not g_ids_raw:
 			# nobody ticked: scan the whole filtered population so employees who were
 			# absent EARLIER in the range (but not today) are still found and offered.
 			gp_where = ["e.status = 'Active'"]
 			gp = {}
-			if (frappe.form_dict.get("company") or "").strip():
-				gp_where.append("e.company = %(company)s")
-				gp["company"] = frappe.form_dict.get("company").strip()
+			_cond, _cparams = company_where(g_company, allowed_companies, "e", "company")
+			if _cond:
+				gp_where.append(_cond)
+				gp.update(_cparams)
 			if (frappe.form_dict.get("farm") or "").strip():
 				gp_where.append("TRIM(e.custom_farm) = TRIM(%(farm)s)")
 				gp["farm"] = frappe.form_dict.get("farm").strip()
@@ -2252,6 +2408,33 @@ def attendance_mark():
 		frappe.response["message"] = {"error": "emp_ids was empty after split"}
 		return
 
+	# Drop any employee outside the caller's permitted companies before doing
+	# anything else -- emp_ids never reaches the shift-assignment lookup, the
+	# marking loop, or an Attendance insert. Each dropped id is reported back
+	# as its own failed result instead of silently disappearing.
+	denied_results = []
+	if allowed_companies is not None:
+		_allowed_ids = set(frappe.get_all(
+			"Employee",
+			filters={"name": ["in", emp_ids], "company": ["in", allowed_companies]},
+			pluck="name",
+		))
+		denied_results = [
+			{"employee": e, "date": att_date, "ok": False,
+			 "error": "You are not permitted to mark attendance for this employee"}
+			for e in emp_ids if e not in _allowed_ids
+		]
+		emp_ids = [e for e in emp_ids if e in _allowed_ids]
+		if not emp_ids:
+			frappe.response["message"] = {
+				"results": denied_results,
+				"ok_count": 0,
+				"err_count": len(denied_results),
+				"replaced_count": 0, "off_skipped": 0, "off_marked": 0,
+				"allow_off": 1 if allow_off else 0,
+			}
+			return
+
 	# ── resolve the active Shift Assignment per employee covering att_date.
 	# It wins over Employee.default_shift, which is stale on most records. ──
 	assigned_shift_map = {}
@@ -2286,7 +2469,7 @@ def attendance_mark():
 		""", {"ids": tuple(emp_ids), "dates": tuple(mark_dates)}, as_dict=True):
 			off_map[str(r["emp"]) + "|" + str(r["d"])] = int(r["wo"] or 0)
 
-	results = []
+	results = list(denied_results)
 
 	for mark_date in mark_dates:
 	  for emp_id in emp_ids:

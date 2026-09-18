@@ -1173,12 +1173,17 @@
     // not due on shift yet, or are on it right now.
     var nightPending=(reg.night_pending||[]).map(function(r){ r.pending_night=true; return r; });
     night = night.concat(nightPending);
-    // tag each row with its bucket so the combined (all) view can show a Status
+    // tag each row with its bucket so the combined (all) view can show a Status.
+    // nightPending is disjoint from present/absent/onLeave/off (the backend's
+    // bucket loop is an if/elif chain, one bucket per employee) and was missing
+    // from allEmp entirely, so "ALL EMPLOYEES" undercounted the Total Employees
+    // tile by exactly the Night Shift-pending headcount.
     present.forEach(function(r){ r.bucket='Present' });
     absent.forEach(function(r){ r.bucket='Absent' });
     onLeave.forEach(function(r){ r.bucket='On Leave' });
     off.forEach(function(r){ r.bucket='Week Off' });
-    var allEmp = present.concat(absent, onLeave, off);
+    nightPending.forEach(function(r){ r.bucket='Night Shift' });
+    var allEmp = present.concat(absent, onLeave, off, nightPending);
     var expectedList = present.concat(absent);
     window._tileLists = {total:allEmp, expected:expectedList, present:present, manual:manualRows, absent:absent, off:off, nocheckout:noCheckout, leaves:onLeave, night:night, late:topLate, early:topEarly, lateearly:topLate};
     var items=[
