@@ -556,7 +556,29 @@
       pass.d=d; lastCards=d;
       document.body.classList.remove('att-loading');
       $('r-status').innerHTML='';
-      if(!optsLoaded){populateOptions(d.farms,d.companies);populateEmpTypes(d.employment_types||[]);if(d.company_farms&&Object.keys(d.company_farms).length){buildSidebar(d.company_farms, d.company_farm_counts||{});}optsLoaded=true}
+      if(!optsLoaded){populateOptions(d.farms,d.companies);populateEmpTypes(d.employment_types||[]);
+        // The pre-load seed (bottom of this script) already puts the
+        // persisted Company into #r-company and populateOptions() above
+        // already re-affirms it once the real option list lands, so by this
+        // point coSel.value is already correct in the normal case -- no
+        // extra load() here. An earlier version fired a second load() when it
+        // detected a mismatch, but two load() calls close together race on
+        // the same staleness token (see load()'s `stale()`/load._t), and for
+        // a large company the second fetch could invalidate the first's
+        // in-flight request before either one finished rendering, leaving the
+        // KPI tiles stuck at their empty/zero state. Simplest fix: don't.
+        try{
+          var savedCo=localStorage.getItem('att_company')||'';
+          var coSel=$('r-company');
+          if(savedCo && coSel && coSel.value!==savedCo){
+            var hasOpt=Array.prototype.some.call(coSel.options,function(o){return o.value===savedCo});
+            if(hasOpt) coSel.value=savedCo;
+          }
+        }catch(e){}
+        syncCompanyLabel();
+        if(d.company_farms&&Object.keys(d.company_farms).length){buildSidebar(d.company_farms, d.company_farm_counts||{});}
+        optsLoaded=true;
+      }
       var _rm=$('rpt-meta'); if(_rm) _rm.textContent=d.from_date+' → '+d.to_date+' · '+fmt(d.cards.unique)+' scanned · '+fmt(d.cards.total)+' logs';
       maybeKPI();
       destroyCharts();
@@ -620,10 +642,22 @@
   }
 
   function populateOptions(farms,companies){
+    // r-company may already carry the one temporary option seeded from
+    // localStorage before the first load() -- drop it here so the real list
+    // doesn't end up with that company listed twice, then restore whichever
+    // value was selected once the real option backing it exists.
+    var coSel=$('r-company');
+    var wantCo=coSel?coSel.value:'';
+    if(coSel) coSel.innerHTML='';
     [['r-farm',farms],['r-company',companies]].forEach(function(p){
       var sel=$(p[0]);
       (p[1]||[]).forEach(function(v){if(!v)return;var o=document.createElement('option');o.value=v;o.textContent=v;sel.appendChild(o)});
     });
+    if(coSel && wantCo){
+      var hasOpt=Array.prototype.some.call(coSel.options,function(o){return o.value===wantCo});
+      if(hasOpt) coSel.value=wantCo;
+    }
+    syncCompanyLabel();
   }
 
   // ── Floating companies → unit/division sidebar ──
@@ -727,7 +761,22 @@
     if(cff){ var it2=body.querySelector('.att-sb-farm[data-co="'+cco+'"][data-farm="'+cff+'"]'); if(it2)it2.classList.add('active'); }
     else { var ch=body.querySelector('.att-sb-co-head[data-co="'+cco+'"]'); if(ch)ch.classList.add('active'); }
   }
-  function _sbSetSelect(id,val){var s=$(id);if(!s)return;var f=false;for(var i=0;i<s.options.length;i++){if(s.options[i].value===val){f=true;break;}}if(!f){var o=document.createElement('option');o.value=val;o.textContent=val;s.appendChild(o);}s.value=val;}
+  // The visible company name is a separate overlay span, not the native
+  // <select>'s own (unreliably-stylable) text -- see the CSS on
+  // .r-company-label. Every place that sets #r-company's value must call
+  // this afterward, since a programmatic .value= assignment fires no
+  // 'change' event for the label to hook into.
+  function syncCompanyLabel(){
+    try{
+      var sel=$('r-company'), lbl=$('r-company-label');
+      if(!lbl) return;
+      lbl.textContent = sel ? (sel.value || '') : '';
+    }catch(e){}
+  }
+
+  function _sbSetSelect(id,val){var s=$(id);if(!s)return;var f=false;for(var i=0;i<s.options.length;i++){if(s.options[i].value===val){f=true;break;}}if(!f){var o=document.createElement('option');o.value=val;o.textContent=val;s.appendChild(o);}s.value=val;
+    if(id==='r-company'){ try{ localStorage.setItem('att_company', val||''); }catch(e){} syncCompanyLabel(); }
+  }
   function closeSidebar(){var sb=$('att-sidebar');if(sb)sb.classList.remove('open');}
   function sidebarSkeleton(){
     var body=$('att-sb-body'); if(!body) return;
@@ -740,14 +789,26 @@
     body.innerHTML=h;
   }
   var SB_COUNTS={};
+  var SB_ALL_COMPANY_FARMS={};
   function buildSidebar(cf, counts){
     if(counts) SB_COUNTS=counts; counts=SB_COUNTS||{};
+    // cf always arrives as the caller's FULL permitted company set (the
+    // backend deliberately never scopes it to the currently selected company
+    // -- otherwise switching company would also erase the other companies
+    // from view, which is its own bug). Cache the full set here and narrow
+    // it to just the selected company for DISPLAY only, so the sidebar tree
+    // still shows one company's farms once you've picked it, without ever
+    // hiding the other companies from the picker itself.
+    if(cf) SB_ALL_COMPANY_FARMS=cf; cf=SB_ALL_COMPANY_FARMS||{};
+    var selCo=(($('r-company')||{}).value||'').trim();
+    var scoped=selCo?{}:cf;
+    if(selCo) scoped[selCo]=cf[selCo]||[];
     var body=$('att-sb-body'); if(!body) return;
     body.innerHTML='';
-    var cos=Object.keys(cf||{});
+    var cos=Object.keys(scoped||{});
     if(!cos.length){body.innerHTML='<div class="att-sb-empty">No data</div>';return;}
     cos.forEach(function(co){
-      var farms=cf[co]||[];
+      var farms=scoped[co]||[];
       var grp=document.createElement('div'); grp.className='att-sb-company';
       var h=document.createElement('div'); h.className='att-sb-co-head';
       h.innerHTML='<span class="att-sb-caret">&#9662;</span><span class="att-sb-co-name"></span><span class="att-sb-co-cnt"></span>';
@@ -1750,7 +1811,7 @@ function renderAvgHours(serverSeries){
       parts.push('NIGHT SHIFT \u2014 starts '+((kpi.shift_start||'').slice(0,5)||'evening')+' (runs past midnight)');
     }
     $('dr-sub').textContent=parts.join(' · ');
-    var pivoted=pivotDrawerRows(rows);
+    var pivoted=pivotDrawerRows(rows,d.leaves,d.from_date,d.to_date);
     // "Days in Range" is the CALENDAR span of the FROM -> TO filter, not the number
     // of rows returned. Those are different questions, and the row count is already
     // reported as "N day records" just below -- showing it twice hid the fact that a
@@ -1783,6 +1844,7 @@ function renderAvgHours(serverSeries){
       if(!flags.length){
         if(r.in_time&&r.out_time)flags.push('<span class="pill pill-ok">on time</span>');
         else if(r.in_time)flags.push('<span class="pill" style="background:#fef3c7;color:#92400e">no OUT</span>');
+        else if(r.on_leave)flags.push('<span class="pill pill-leave">On Leave'+(r.leave_type?' ('+esc(r.leave_type)+')':'')+' · '+esc(r.leave_from)+' → '+esc(r.leave_to)+'</span>');
         else flags.push('<span class="pill pill-late">absent</span>');
       }
       return '<tr>'+
@@ -1820,7 +1882,7 @@ function renderAvgHours(serverSeries){
 
   function drKpi(lbl,val){return '<div class="dr-kpi"><div class="lbl">'+lbl+'</div><div class="val">'+fmt(val)+'</div></div>'}
 
-  function pivotDrawerRows(raw){
+  function pivotDrawerRows(raw,leaves,rangeFrom,rangeTo){
     var byKey={};
     raw.forEach(function(r){
       var date=String(r.time||'').slice(0,10);if(!date)return;
@@ -1832,6 +1894,27 @@ function renderAvgHours(serverSeries){
     Object.keys(byKey).forEach(function(k){
       var row=byKey[k];
       if(row.in_time&&row.out_time){var t1=new Date(String(row.in_time).replace(' ','T')),t2=new Date(String(row.out_time).replace(' ','T'));row.hours_worked=(!isNaN(t1)&&!isNaN(t2)&&t2>t1)?(t2-t1)/3600000:null}
+    });
+    // A leave day has no check-in, so it never got a row above. Fill in the
+    // gap for each day the leave application covers (clamped to the query
+    // range) with the leave's own full from -> to span attached, so the table
+    // reads "on leave, part of a 12 Sep -> 15 Sep block" instead of either
+    // being missing or misread as an unexplained absence. A day that DOES have
+    // a check-in keeps its check-in row untouched.
+    (leaves||[]).forEach(function(lv){
+      var from=lv.from_date<rangeFrom?rangeFrom:lv.from_date;
+      var to=lv.to_date>rangeTo?rangeTo:lv.to_date;
+      var d=fromISO(from);
+      var guard=0;
+      while(d<=fromISO(to) && guard<400){
+        var dk=isoDate(d);
+        if(!byKey[dk]){
+          byKey[dk]={date:dk,shift:null,in_time:null,out_time:null,minutes_late:null,minutes_early:null,hours_worked:null,
+            on_leave:true,leave_type:lv.leave_type,leave_from:lv.from_date,leave_to:lv.to_date,leave_status:lv.status};
+        }
+        d=new Date(d.getTime()+86400000);
+        guard++;
+      }
     });
     return Object.keys(byKey).sort(function(a,b){return a<b?1:-1}).map(function(k){return byKey[k]});
   }
@@ -1920,7 +2003,16 @@ function renderAvgHours(serverSeries){
 
   /* date-picker change handler wired in initDateCtl */
   $('r-farm').addEventListener('change',function(){load();scheduleAutoRefresh()});
-  $('r-company').addEventListener('change',function(){load();scheduleAutoRefresh()});
+  $('r-company').addEventListener('change',function(){
+    try{ localStorage.setItem('att_company', this.value||''); }catch(e){}
+    // A farm from the PREVIOUS company is meaningless for the new one (and
+    // silently returns zero employees rather than erroring) -- the sidebar's
+    // own company-header click already clears it via _sbSetSelect, this is
+    // the same rule for the top-right picker.
+    var farmSel=$('r-farm'); if(farmSel) farmSel.value='';
+    syncCompanyLabel();
+    load();scheduleAutoRefresh();
+  });
   $('r-emptype').addEventListener('change',function(){load();scheduleAutoRefresh()});
   $('r-search').addEventListener('input',renderTable);
 
@@ -3063,6 +3155,34 @@ function _fitTopbar(){ try{
 }catch(e){} }
   window.addEventListener('resize',_fitTopbar); _fitTopbar(); setTimeout(_fitTopbar,250); setTimeout(_fitTopbar,900); setTimeout(_fitTopbar,1800);
   try{ if(window.ResizeObserver){ var _hro=new ResizeObserver(function(){_fitTopbar()}); var _hrb=document.querySelector('.topbar'); if(_hrb)_hro.observe(_hrb); } }catch(e){}
+  // Seed the persisted Company into the picker BEFORE the very first load():
+  // the <select> has no <option>s yet (they only arrive with the dashboard
+  // response), so with nothing here it renders visibly blank the instant the
+  // page paints -- and without this, the first fetch itself would also go out
+  // unscoped (blank company), showing the wrong data before a follow-up
+  // request corrected it. A temporary option makes both the label and the
+  // very first request correct from the start; populateOptions() below
+  // replaces it with the real list once that arrives.
+  try{
+    var _savedCo=localStorage.getItem('att_company')||'';
+    var _coSel=$('r-company');
+    if(_savedCo && _coSel && !_coSel.options.length){
+      var _o=document.createElement('option');
+      _o.value=_savedCo; _o.textContent=_savedCo;
+      _coSel.appendChild(_o);
+      _coSel.value=_savedCo;
+    }
+  }catch(e){}
+  // Some browsers restore a <select>'s previously-picked value across a hard
+  // reload on their own (form-state restoration), independent of anything
+  // this script does. Farm isn't meant to persist at all -- it's scoped to
+  // whatever company/sidebar-drill-down set it last -- and a farm left over
+  // from a DIFFERENT company silently returns zero employees for the new one
+  // rather than erroring, which is exactly what made Kaitet Ltd. show "0
+  // employees" while the sidebar (company-scoped only, unaffected by farm)
+  // still looked correct. Force it blank before the first request goes out.
+  try{ var _farmSel=$('r-farm'); if(_farmSel) _farmSel.value=''; }catch(e){}
+  syncCompanyLabel();
   load();
   scheduleAutoRefresh();
 
@@ -3072,32 +3192,32 @@ function _fitTopbar(){ try{
 
 (function () {
   function cookie(n){ var m=document.cookie.match("(^|;)\\s*"+n+"\\s*=\\s*([^;]+)"); return m?decodeURIComponent(m[2]):""; }
-  var btn=document.getElementById("wm-avatar");
-  var menu=document.getElementById("wm-account-menu");
-  if(!btn||!menu) return;
+  // Static identity block: avatar initials + full name + email. No dropdown --
+  // the only thing it ever offered (Open Desk) is now the Home button in the
+  // sidebar header, so clicking here does nothing by design.
+  var box=document.getElementById("wm-avatar");
+  if(!box) return;
   var user=cookie("user_id")||"Guest";
-  var idbox=document.getElementById("wm-account-id");
+  var full=cookie("full_name")||"";
   var login=document.getElementById("wm-account-login");
-  var logout=document.getElementById("wm-account-logout");
-  var me=document.getElementById("wm-account-me");
-  if(user==="Guest"||!user){
-    if(idbox) idbox.parentElement.firstElementChild.textContent="Not signed in";
-    if(idbox) idbox.textContent="Log in to work here";
-    var _ini=document.getElementById("wm-ini"),_uid=document.getElementById("wm-uid"); if(_ini)_ini.textContent="\u2192"; if(_uid)_uid.textContent="Not signed in";
-    if(login){ login.style.display=""; login.href="/login?redirect-to="+encodeURIComponent(location.pathname); }
-    if(logout) logout.style.display="none";
-    if(me) me.style.display="none";
-  } else {
-    if(idbox) idbox.textContent=user;
-    var _ini=document.getElementById("wm-ini"),_uid=document.getElementById("wm-uid"); if(_ini)_ini.textContent=user.replace(/@.*$/,"").split(/[._ -]/).filter(Boolean).slice(0,2).map(function(p){return p[0].toUpperCase();}).join(""); if(_uid)_uid.textContent=user;
+  var ini=document.getElementById("wm-ini");
+  var nameEl=document.getElementById("wm-name");
+  var uidEl=document.getElementById("wm-uid");
+  function initials(s){
+    return String(s||"").replace(/@.*$/,"").split(/[._ -]/).filter(Boolean)
+      .slice(0,2).map(function(p){return p[0].toUpperCase();}).join("");
   }
-  function close(){ menu.classList.remove("on"); btn.setAttribute("aria-expanded","false"); }
-  btn.addEventListener("click", function(e){
-    e.stopPropagation();
-    var on=!menu.classList.contains("on");
-    menu.classList.toggle("on", on);
-    btn.setAttribute("aria-expanded", on?"true":"false");
-  });
-  document.addEventListener("click", function(e){ if(!menu.contains(e.target)) close(); });
-  document.addEventListener("keydown", function(e){ if(e.key==="Escape") close(); });
+  if(user==="Guest"||!user){
+    if(ini) ini.textContent="\u2192";
+    if(nameEl) nameEl.textContent="Not signed in";
+    if(uidEl) uidEl.textContent="";
+    if(login){ login.style.display=""; login.href="/login?redirect-to="+encodeURIComponent(location.pathname); }
+  } else {
+    // Administrator has no separate full_name, so the email line would just
+    // repeat the name -- show it once in that case rather than twice.
+    var name=full||user;
+    if(ini) ini.textContent=initials(full||user);
+    if(nameEl) nameEl.textContent=name;
+    if(uidEl) uidEl.textContent=(user===name)?"":user;
+  }
 })();
