@@ -1,144 +1,127 @@
 // Copyright (c) 2026, Upande LTD and Contributors
 // See license.txt
 
+const PAYROLL_PERIOD_METHOD = "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.get_payroll_period";
+
+const STATUS_INDICATOR = {
+	Matched: "green",
+	"Capped at Request": "blue",
+	"Worked Less": "orange",
+	"No Clock-Out": "red",
+	"No Attendance": "red",
+};
+
 frappe.ui.form.on("Bulk Overtime", {
 	setup(frm) {
-		// Restrict Department dropdown to the selected company
-		frm.set_query("department", () => ({
-			filters: { company: frm.doc.company },
-		}));
+		frm.set_query("custom_farm", () => ({ filters: { company: frm.doc.company } }));
 
-		// Restrict Shift Approver to users with approver-related roles
-		frm.events.setup_shift_approver_query(frm);
-
-		// Restrict Employee in child table to selected department/group
-		frm.set_query("employee", "bulk_overtime_entries", () => ({
-			filters: {
-				company: frm.doc.company,
-				...(frm.doc.department && { department: frm.doc.department }),
-				...(frm.doc.designation && { designation: frm.doc.designation }),
-				status: "Active"
-			}
-		}));
+		frm.set_indicator_formatter("employee", (row) => STATUS_INDICATOR[row.status] || "gray");
 	},
 
-	setup_shift_approver_query(frm) {
-		const default_approver_roles = [
-			"Expense Approver",
-			"Leave Approver",
-			"Wiki Approver",
-			"General Manager",
-			"HOD",
-			"HR Manager",
-			"System Manager",
-		];
-
-		// Use the default approver roles (field removed)
-		const roles_to_use = default_approver_roles;
-
-		frappe.db.get_list("Has Role", {
-			filters: { role: ["in", roles_to_use] },
-			fields: ["parent"],
-			limit_page_length: 0,
-		}).then((users) => {
-			const approver_users = [...new Set(users.map((user) => user.parent))];
-
-			const name_filter = approver_users.length
-				? approver_users
-				: ["__no_match__"];
-
-			frm.set_query("shift_approver", () => ({
-				filters: {
-					enabled: 1,
-					user_type: "System User",
-					name: ["in", name_filter],
-				},
-			}));
-		}).catch(() => {
-			frm.set_query("shift_approver", () => ({
-				filters: {
-					enabled: 1,
-					user_type: "System User",
-					name: ["in", ["__no_match__"]],
-				},
-			}));
-			frappe.show_alert({
-				message: __("Could not load approver list. Shift Approver field has been restricted."),
-				indicator: "orange",
-			}, 5);
-		});
+	onload(frm) {
+		if (frm.is_new() && frm.doc.company && !frm.doc.from_date) frm.events.set_payroll_period(frm);
 	},
 
-	// Employees are fetched automatically whenever a scoping filter changes (once the
-	// mandatory Company + dates are set) — no manual "Get Employees" button.
-	company(frm) { frm.events.auto_fetch(frm); },
-	branch(frm) { frm.events.auto_fetch(frm); },
-	department(frm) { frm.events.auto_fetch(frm); },
-	designation(frm) { frm.events.auto_fetch(frm); },
-	grade(frm) { frm.events.auto_fetch(frm); },
-	from_date(frm) { frm.events.auto_fetch(frm); },
-	to_date(frm) { frm.events.auto_fetch(frm); },
+	refresh(frm) {
+		// rows only come from Get Overtime
+		frm.set_df_property("bulk_overtime_entries", "cannot_add_rows", 1);
+		frm.toggle_display("get_overtime", frm.doc.docstatus === 0);
 
-	auto_fetch(frm) {
-		if (frm.doc.docstatus !== 0) return;
-
-		// Need company + date range before we can compute overtime.
-		if (!frm.doc.company || !frm.doc.from_date || !frm.doc.to_date) {
-			frm.events.clear_entries(frm);
-			return;
+		if (frm.doc.docstatus === 1) {
+			frm.add_custom_button(__("Overtime Slips"), () =>
+				frappe.set_route("List", "Overtime Slip", { custom_bulk_overtime: frm.doc.name }),
+			);
 		}
+	},
 
-		// Debounce rapid successive filter changes into a single fetch.
-		if (frm._ot_fetch_timer) clearTimeout(frm._ot_fetch_timer);
-		frm._ot_fetch_timer = setTimeout(() => {
-			frappe.call({
-				doc: frm.doc,
-				method: "fill_employee_details",
-				freeze: true,
-				freeze_message: __("Fetching Employees…"),
-			}).then(() => {
-				frm.refresh_field("bulk_overtime_entries");
-				frm.refresh_field("number_of_employees");
-			});
-		}, 300);
+	company(frm) {
+		frm.set_value("custom_farm", "");
+		frm.events.set_payroll_period(frm);
+		frm.events.clear_entries(frm);
+	},
+
+	custom_farm(frm) {
+		frm.events.clear_entries(frm);
+	},
+
+	from_date(frm) {
+		frm.events.clear_entries(frm);
+	},
+
+	to_date(frm) {
+		frm.events.clear_entries(frm);
+	},
+
+	/** Default the period to the company's payroll dates (Biometric Setting → Attendance Filters). */
+	set_payroll_period(frm) {
+		if (!frm.doc.company || frm.doc.docstatus !== 0) return;
+		frappe.call({ method: PAYROLL_PERIOD_METHOD, args: { company: frm.doc.company } }).then((r) => {
+			const period = r.message || {};
+			if (!period.start_date || !period.end_date) return;
+			// overtime is paid once worked: never default past today
+			const end = period.end_date > frappe.datetime.get_today() ? frappe.datetime.get_today() : period.end_date;
+			frm.set_value({ from_date: period.start_date, to_date: end });
+		});
 	},
 
 	clear_entries(frm) {
+		if (frm.doc.docstatus !== 0 || !(frm.doc.bulk_overtime_entries || []).length) return;
 		frm.clear_table("bulk_overtime_entries");
-		frm.set_value("number_of_employees", 0);
 		frm.refresh_field("bulk_overtime_entries");
 	},
 
-	apply_default_requested_hours(frm, show_message = true) {
-		const entries = frm.doc.bulk_overtime_entries || [];
-		if (!entries.length) {
-			if (show_message) frappe.msgprint(__("No employees in the table. Click Get Employees first."));
+	get_overtime(frm) {
+		if (!frm.doc.company || !frm.doc.from_date || !frm.doc.to_date) {
+			frappe.msgprint({
+				title: __("Missing Details"),
+				indicator: "red",
+				message: __("Set the <b>Company</b>, <b>From Date</b> and <b>To Date</b> first."),
+			});
 			return;
 		}
 
-		const value = flt(frm.doc.default_requested_hours);
-		if (!value) {
-			if (show_message) {
-				frappe.msgprint(__("Set Default Requested Hours first."));
+		frm.call({
+			doc: frm.doc,
+			method: "get_overtime",
+			freeze: true,
+			freeze_message: __("Checking requests against attendance..."),
+		}).then((r) => {
+			frm.dirty();
+			frm.refresh_fields();
+			const result = r.message || {};
+
+			if (!result.rows && !(result.left_out || []).length) {
+				frappe.msgprint({
+					title: __("Nothing to Pay"),
+					indicator: "orange",
+					message: __("No approved Overtime Requests in this period."),
+				});
+				return;
 			}
-			return;
-		}
-
-		entries.forEach((row) => {
-			row.hours_requested = value;
+			if ((result.left_out || []).length) {
+				const shown = result.left_out.slice(0, 20);
+				if (result.left_out.length > shown.length) {
+					shown.push(__("... and {0} more", [result.left_out.length - shown.length]));
+				}
+				frappe.msgprint({
+					title: __("Left Out"),
+					indicator: "orange",
+					message: __("{0} request row(s) were left out, because they are already being paid:", [
+						result.left_out.length,
+					]) + `<br><br>${shown.join("<br>")}`,
+				});
+				return;
+			}
+			frappe.show_alert({ message: __("{0} row(s) loaded.", [result.rows]), indicator: "green" });
 		});
+	},
+});
 
-		frm.refresh_field("bulk_overtime_entries");
-		frm.dirty();
-
-		if (show_message) {
-			frappe.show_alert(
-				{
-					message: __("Applied {0} requested hours to {1} employees.", [value, entries.length]),
-					indicator: "green",
-				},
-				5
-			);
+frappe.ui.form.on("Bulk Overtime Entry", {
+	manual_override(frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		if (!row.manual_override) {
+			frappe.model.set_value(cdt, cdn, "override_reason", "");
 		}
 	},
 });

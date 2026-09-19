@@ -4,46 +4,26 @@
 """End-to-end tests for Holiday Assignment Tool, against the real HRMS resolver.
 
 ``test_holiday_assignment_tool.py`` next door tests ``plan_segments`` in
-isolation: it proves the *rule* produces the right boundaries, and it needs no
-site. It cannot prove the thing the user actually cares about, which is that
-those boundaries, once written as Holiday List Assignment records, make
-``hrms.utils.holiday_list.get_assigned_holiday_list`` — the single function
-every attendance, leave and payroll path in HRMS goes through to find an
-employee's holidays — return the expected list on each date.
-
-That is what this file asserts, by asking HRMS itself rather than by inspecting
-what we wrote:
+isolation. This file asks ``hrms.utils.holiday_list.get_assigned_holiday_list``
+— the function every attendance, leave and payroll path in HRMS goes through —
+which list is in force on each date after a run:
 
     employee is on list A
-      run the Holiday Assignment Tool: base list B, D1 .. D2,
-      one exception list C on date X inside the range
+      run the tool: list B, D1 .. D2
 
     as_on D1          -> B
-    as_on X           -> C     the carve-out; the whole point of the tool
-    as_on X + 1       -> B
     as_on D2          -> B
     as_on D2 + 1      -> A     the restore
 
-    undo the assignment, and every one of those dates is A again.
-
-The tool is a Single, so there is nothing to submit and nothing to cancel: the
-two halves of the write side are the whitelisted document methods
-``assign_holidays()`` and ``undo_assignment()``, which is what the desk form's
-primary action calls and what these tests call directly.
+    run it again over the same window with list C, and C replaces B: the
+    earlier records are cancelled, D2 + 1 is still A.
 
 These need a database, so the whole class is skipped when this process is not
-attached to a site (see :func:`_site_connected`) — the module still imports,
-and a bare ``python -m unittest`` run reports skips rather than errors.
-
-The base class is resolved defensively for the same reason the phase-1 file
-does it: ``frappe.tests.IntegrationTestCase`` is v16+,
-``frappe.tests.utils.FrappeTestCase`` is v15 (and v17 removed it), and neither
-exists when frappe is not importable at all.
+attached to a site (see :func:`_site_connected`).
 
 Naming note: this module is *not* ``test_holiday_assignment_tool``, so
 ``bench run-tests --doctype "Holiday Assignment Tool"`` will not pick it up;
-``--app upande_ta`` and ``--module`` will. That is deliberate — the pure suite
-keeps the canonical name so it stays the fast, site-free default.
+``--app upande_ta`` and ``--module`` will.
 """
 
 import unittest
@@ -83,8 +63,8 @@ PREFIX = "_Test BHA"
 LIST_A = f"{PREFIX} Prior List"
 #: The list the document moves everyone onto for the period.
 LIST_B = f"{PREFIX} Override List"
-#: The one-day carve-out inside that period.
-LIST_C = f"{PREFIX} Exception List"
+#: A second list, for the re-run that replaces the first.
+LIST_C = f"{PREFIX} Replacement List"
 
 
 def _site_connected() -> bool:
@@ -146,7 +126,6 @@ class IntegrationTestHolidayAssignmentToolEndToEnd(_TestCase):
 		cls.d1 = add_days(today, 30)
 		cls.d2 = add_days(today, 44)
 		cls.x = add_days(today, 37)
-		cls.x_plus_1 = add_days(cls.x, 1)
 		cls.d2_plus_1 = add_days(cls.d2, 1)
 
 		# Every list must span every boundary, including the restore at
@@ -163,8 +142,9 @@ class IntegrationTestHolidayAssignmentToolEndToEnd(_TestCase):
 
 		# The prior state the tool has to restore. Dated before the document's
 		# period so it is the list in force on every date until D1.
+		cls.prior_assignment_date = add_days(today, -10)
 		cls.prior_assignment = cls._assign_holiday_list(
-			cls.employee, cls.list_a, add_days(today, -10)
+			cls.employee, cls.list_a, cls.prior_assignment_date
 		)
 
 	@classmethod
@@ -264,133 +244,95 @@ class IntegrationTestHolidayAssignmentToolEndToEnd(_TestCase):
 
 		return get_assigned_holiday_list(self.employee, as_on=as_on)
 
-	def make_document(self, with_exception: bool = True):
+	def make_document(self, holiday_list=None, from_date=None, to_date=None):
 		"""Load the Single, fill it in for the one employee, and run it.
 
-		``assign_holidays`` saves the document itself — that is how the child
-		rows get the database identity ``assignments_json`` is written back onto
-		— so nothing here inserts or submits anything.
-
-		The previous run's rows are cleared first: a Single is re-used, and
-		although each test rolls back to its own savepoint, being explicit costs
-		nothing and makes the fixture readable.
-
-		One employee is below BATCH_THRESHOLD, so ``assign_holidays`` runs
-		``create_assignments`` inline, in this transaction — no worker, and no
-		need for the test to wait on anything.
+		One employee is below BATCH_THRESHOLD, so ``assign_holidays`` runs inline,
+		in this transaction — no worker to wait on.
 		"""
 		doc = frappe.get_single("Holiday Assignment Tool")
-		doc.action = "Assign Holidays"
 		doc.company = self.company
-		doc.holiday_list = self.list_b
-		doc.from_date = self.d1
-		doc.to_date = self.d2
+		doc.holiday_list = holiday_list or self.list_b
+		doc.from_date = from_date or self.d1
+		doc.to_date = to_date or self.d2
 
 		doc.set("employees", [])
-		doc.append(
-			"employees",
-			{
-				"employee": self.employee,
-				# What the desk fetch stamps on the row, and what the restore
-				# boundary is built from.
-				"prior_holiday_list": self.list_a,
-			},
-		)
-
-		doc.set("exceptions", [])
-		if with_exception:
-			doc.append("exceptions", {"exception_date": self.x, "holiday_list": self.list_c})
+		doc.append("employees", {"employee": self.employee, "prior_holiday_list": self.list_a})
 
 		doc.assign_holidays()
 		return doc
 
-	def undo(self, doc):
-		"""The reversal action, as the desk form's primary button calls it."""
-		doc.action = "Undo Assignment"
-		doc.undo_assignment()
-
-	def assert_override_in_force(self):
-		"""The five dates that define the feature."""
-		self.assertEqual(self.resolved_list(self.d1), self.list_b, "period start must use the base list")
-		self.assertEqual(self.resolved_list(self.x), self.list_c, "the exception date must use its own list")
-		self.assertEqual(
-			self.resolved_list(self.x_plus_1), self.list_b, "the base list must resume the day after"
+	def active_assignments(self):
+		return frappe.get_all(
+			"Holiday List Assignment",
+			filters={"assigned_to": self.employee, "docstatus": 1},
+			fields=["from_date", "holiday_list"],
+			order_by="from_date asc",
 		)
-		self.assertEqual(self.resolved_list(self.d2), self.list_b, "the last day is still the base list")
-		self.assertEqual(
-			self.resolved_list(self.d2_plus_1), self.list_a, "the day after must restore the prior list"
-		)
-
-	def assert_restored_to_prior(self):
-		for as_on in (self.d1, self.x, self.x_plus_1, self.d2, self.d2_plus_1):
-			self.assertEqual(
-				self.resolved_list(as_on),
-				self.list_a,
-				f"after the undo {as_on} must resolve back to the prior list",
-			)
 
 	# ──────────────────────────────────────────────────────────────────────
 	# Tests
 	# ──────────────────────────────────────────────────────────────────────
 
-	def test_prior_list_is_in_force_before_the_document(self):
-		"""The baseline the other tests are measured against: with no Bulk
-		Holiday Assignment in play, every date in the window resolves to A."""
+	def test_prior_list_is_in_force_before_the_run(self):
 		for as_on in (self.d1, self.x, self.d2_plus_1):
 			self.assertEqual(self.resolved_list(as_on), self.list_a)
 
-	def test_assign_applies_base_list_exception_and_restore(self):
-		"""Run the tool, then ask HRMS about each of the five dates."""
+	def test_assign_applies_list_and_restores(self):
 		self.make_document()
-		self.assert_override_in_force()
 
-	def test_assign_records_its_assignments_on_the_row(self):
-		"""``assignments_json`` is the backlink the undo path unwinds from, so it
-		has to survive a reload — it is written with db_set, not by save()."""
-		import json
-
-		doc = self.make_document()
-		doc.reload()
-
-		names = json.loads(doc.employees[0].assignments_json or "[]")
-		# from_date, the exception, the day after the exception, the restore.
-		self.assertEqual(len(names), 4, f"expected four boundaries, got {names}")
-		for name in names:
-			self.assertEqual(frappe.db.get_value("Holiday List Assignment", name, "docstatus"), 1)
-
-	def test_undo_restores_every_date_to_the_prior_list(self):
-		"""The whole run unwinds: nothing it created is left in force."""
-		doc = self.make_document()
-		self.assert_override_in_force()
-
-		self.undo(doc)
-
-		self.assert_restored_to_prior()
-
-		# The prior assignment must not have been collateral damage.
+		self.assertEqual(self.resolved_list(self.d1), self.list_b, "period start must use the new list")
+		self.assertEqual(self.resolved_list(self.x), self.list_b)
+		self.assertEqual(self.resolved_list(self.d2), self.list_b, "the last day is still the new list")
 		self.assertEqual(
-			frappe.db.get_value("Holiday List Assignment", self.prior_assignment, "docstatus"), 1
+			self.resolved_list(self.d2_plus_1), self.list_a, "the day after must restore the prior list"
 		)
 
-	def test_undo_clears_the_backlinks(self):
-		"""An undone row must not keep pointing at records it no longer owns —
-		the Single is re-used, and a second undo would otherwise try to unwind
-		them twice."""
-		doc = self.make_document()
-		self.undo(doc)
-		doc.reload()
+	def test_employees_table_is_cleared_after_the_run(self):
+		"""The work list is emptied so the next run starts blank."""
+		self.make_document()
 
-		self.assertFalse((doc.employees[0].assignments_json or "").strip())
+		self.assertFalse(frappe.get_single("Holiday Assignment Tool").employees)
+		self.assertFalse(
+			frappe.db.count("Holiday Assignment Tool Employee", {"parent": "Holiday Assignment Tool"})
+		)
 
-	def test_without_exceptions_the_carve_out_is_absent(self):
-		"""The control case: no exception row means the exception date is just
-		another day on the base list. Proves the C result above comes from the
-		exception and not from the ordering of two identical assignments."""
-		self.make_document(with_exception=False)
+	def test_rerun_replaces_the_earlier_run(self):
+		"""Running again over the same window swaps the list — no undo needed.
+		The earlier records are cancelled, not deleted, and the restore after the
+		window is not duplicated."""
+		self.make_document()
+		self.make_document(holiday_list=self.list_c)
+
+		for as_on in (self.d1, self.x, self.d2):
+			self.assertEqual(self.resolved_list(as_on), self.list_c)
+		self.assertEqual(self.resolved_list(self.d2_plus_1), self.list_a)
+
+		self.assertEqual(
+			[(row.from_date, row.holiday_list) for row in self.active_assignments()],
+			[
+				(frappe.utils.getdate(self.prior_assignment_date), self.list_a),
+				(self.d1, self.list_c),
+				(self.d2_plus_1, self.list_a),
+			],
+		)
+		self.assertEqual(
+			frappe.db.count(
+				"Holiday List Assignment",
+				{"assigned_to": self.employee, "docstatus": 2, "holiday_list": self.list_b},
+			),
+			1,
+		)
+
+	def test_single_day_inside_an_earlier_run(self):
+		"""A one-day run inside an earlier, longer one: that day switches, and
+		the employee goes back to the earlier run's list the day after."""
+		self.make_document()
+		self.make_document(holiday_list=self.list_c, from_date=self.x, to_date=self.x)
 
 		self.assertEqual(self.resolved_list(self.d1), self.list_b)
-		self.assertEqual(self.resolved_list(self.x), self.list_b)
-		self.assertEqual(self.resolved_list(self.d2), self.list_b)
+		self.assertEqual(self.resolved_list(self.x), self.list_c)
+		self.assertEqual(self.resolved_list(frappe.utils.add_days(self.x, 1)), self.list_b)
 		self.assertEqual(self.resolved_list(self.d2_plus_1), self.list_a)
 
 

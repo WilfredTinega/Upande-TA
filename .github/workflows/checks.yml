@@ -1,5 +1,22 @@
-name: upande_ta No Claude Attribution
+name: upande_ta Checks
 
+# Every check besides the deploy simulation (ci.yml), in one workflow:
+#
+#   commitlint  - (PR) the PR title is a Conventional Commit
+#   sanitize    - (PR) no Claude attribution on the branch commits
+#   verify-main - (push to main) no Claude attribution landed on main
+#
+# COMMITLINT
+# ----------
+# Lints the PULL REQUEST TITLE as a Conventional Commit (feat:, fix:, chore:, ...).
+# semantic-release (see .releaserc.json) computes the next version from commit
+# messages on `main`; if you squash-merge with the PR title as the commit
+# subject, that single conventional title is what it reads - so individual
+# work-in-progress commits ("update", "wip") no longer need to be conventional,
+# only the PR title does.
+#
+# SANITIZE
+# --------
 # Keeps `Co-Authored-By: Claude ...` out of `main`, entirely in CI - nothing to
 # install locally, no git hooks on anyone's machine.
 #
@@ -35,7 +52,7 @@ name: upande_ta No Claude Attribution
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, edited, synchronize, reopened]
   push:
     branches:
       - main
@@ -54,11 +71,33 @@ on:
 permissions:
   contents: read
 
+# Not cancel-in-progress: sanitize force-pushes, and cancelling it between the
+# rewrite and the push would leave the branch half-checked.
 concurrency:
-  group: no-claude-attribution-${{ github.event.pull_request.number || inputs.branch || github.ref }}
+  group: checks-upande_ta-${{ github.event.pull_request.number || inputs.branch || github.ref }}
   cancel-in-progress: false
 
 jobs:
+  commitlint:
+    name: Check PR Title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          check-latest: true
+
+      - name: Check PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          npm install @commitlint/cli @commitlint/config-conventional
+          echo "$PR_TITLE" | npx commitlint --verbose
+
   sanitize:
     name: Sanitize branch commits
     if: github.event_name != 'push'

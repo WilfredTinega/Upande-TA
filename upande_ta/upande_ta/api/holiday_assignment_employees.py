@@ -34,7 +34,6 @@ from erpnext.accounts.utils import build_qb_match_conditions
 from frappe import _
 from frappe.query_builder import Criterion
 from frappe.query_builder.functions import Count
-from frappe.query_builder.terms import SubQuery
 from frappe.utils import add_days, cint, getdate
 
 #: Rows returned in one fetch unless the caller asks for fewer/more.
@@ -107,32 +106,10 @@ def _build_employee_query(
 	if to_date:
 		query = query.where((Employee.relieving_date >= to_date) | (Employee.relieving_date.isnull()))
 
-	# Employees who already hold a submitted Holiday List Assignment starting on
-	# exactly this date. HRMS keys uniqueness on {assigned_to, from_date,
-	# docstatus: 1} and throws DuplicateAssignment on the second insert, so
-	# offering these employees at all would only produce a row that fails on
-	# submit. Excluded in SQL (the way the shift tool excludes employees who
-	# already have a shift) rather than filtered out afterwards, so the cap and
-	# the reported total both count only assignable employees.
-	query = query.where(Employee.name.notin(SubQuery(_query_for_already_assigned(from_date))))
-
+	# Employees who already hold an assignment on from_date are *not* excluded:
+	# the tool replaces whatever starts inside its window, so re-running it is
+	# how a run is changed.
 	return query.where(Criterion.all(build_qb_match_conditions("Employee")))
-
-
-def _query_for_already_assigned(from_date):
-	HLA = frappe.qb.DocType("Holiday List Assignment")
-	return (
-		frappe.qb.from_(HLA)
-		.select(HLA.assigned_to)
-		.distinct()
-		.where(
-			(HLA.docstatus == 1)
-			& (HLA.from_date == from_date)
-			# assigned_to is a Dynamic Link that also carries Company rows; only
-			# the Employee ones can collide with what this tool creates.
-			& (HLA.applicable_for == "Employee")
-		)
-	)
 
 
 def _resolve_prior_holiday_lists(employees: list[dict], from_date) -> None:
@@ -181,19 +158,22 @@ def get_holiday_assignment_employees(
 	department: str | None = None,
 	designation: str | None = None,
 	limit: int | str | None = None,
+	with_holiday_list: int | str = 1,
 ) -> dict:
 	"""Active employees matching the Holiday Assignment Tool filters.
 
 	Args:
 	        company: required. Everything else narrows within it.
 	        from_date: required. The date the holiday override starts; it defines
-	                the employment window, the prior-holiday-list lookup and the
-	                duplicate-assignment exclusion.
+	                the employment window and the prior-holiday-list lookup.
 	        to_date: optional end of the window. When given, employees relieved
 	                before it are dropped too.
 	        custom_farm: optional Unit/Division (``Employee.custom_farm``).
 	                Ignored on sites without that custom field.
 	        department, designation: optional.
+	        with_holiday_list: 0 skips the prior-holiday-list lookup (one query
+	                per employee) for callers that do not show it, such as
+	                Overtime Request.
 	        limit: page size, default :data:`DEFAULT_LIMIT`, capped at
 	                :data:`MAX_LIMIT`.
 
@@ -267,7 +247,11 @@ def get_holiday_assignment_employees(
 		for row in employees:
 			row["custom_farm"] = None
 
-	_resolve_prior_holiday_lists(employees, from_date)
+	if cint(with_holiday_list):
+		_resolve_prior_holiday_lists(employees, from_date)
+	else:
+		for row in employees:
+			row.pop("default_holiday_list", None)
 
 	return {
 		"employees": employees,
