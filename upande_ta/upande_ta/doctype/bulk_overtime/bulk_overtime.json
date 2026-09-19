@@ -1,28 +1,29 @@
 {
  "actions": [],
- "allow_import": 1,
- "autoname": "naming_series:",
  "creation": "2026-04-14 00:00:00",
  "doctype": "DocType",
- "document_type": "Document",
  "engine": "InnoDB",
  "field_order": [
   "naming_series",
   "company",
-  "shift_approver",
-  "column_break_control_1",
+  "custom_farm",
+  "column_break_period",
   "from_date",
   "to_date",
-  "number_of_employees",
-  "request_details_column",
-  "reason_for_overtime",
-  "section_filters",
-  "department",
-  "column_break_filters_1",
-  "grade",
-  "section_entries",
+  "column_break_title",
+  "bulk_overtime_title",
+  "section_break_entries",
+  "get_overtime",
   "bulk_overtime_entries",
-  "section_notes",
+  "section_break_totals",
+  "number_of_employees",
+  "column_break_totals_1",
+  "total_requested_hours",
+  "column_break_totals_2",
+  "total_biometric_hours",
+  "column_break_totals_3",
+  "total_approved_hours",
+  "section_break_notes",
   "remarks",
   "amended_from"
  ],
@@ -31,97 +32,116 @@
    "fieldname": "naming_series",
    "fieldtype": "Select",
    "label": "Series",
-   "no_copy": 1,
    "options": "HR-BOT-.YYYY.-",
+   "default": "HR-BOT-.YYYY.-",
    "reqd": 1,
-   "set_only_once": 1
+   "hidden": 1
   },
   {
    "fieldname": "company",
    "fieldtype": "Link",
-   "in_standard_filter": 1,
    "label": "Company",
    "options": "Company",
-   "remember_last_selected_value": 1,
-   "reqd": 1
-  },
-  {
-   "fieldname": "column_break_control_1",
-   "fieldtype": "Column Break",
-   "label": "Period"
-  },
-  {
-   "fieldname": "shift_approver",
-   "fieldtype": "Link",
-   "label": "Shift Approver",
-   "options": "User"
-  },
-  {
-   "fieldname": "section_filters",
-   "fieldtype": "Section Break",
-   "label": "Filter Employees"
-  },
-  {
-   "fieldname": "department",
-   "fieldtype": "Link",
+   "reqd": 1,
    "in_standard_filter": 1,
-   "label": "Department",
-   "options": "Department",
-   "reqd": 1
+   "remember_last_selected_value": 1
   },
   {
-   "fieldname": "column_break_filters_1",
+   "fieldname": "custom_farm",
+   "fieldtype": "Link",
+   "label": "Unit/Division",
+   "options": "Farm",
+   "description": "Leave blank for every approved request in the company."
+  },
+  {
+   "fieldname": "column_break_period",
    "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "number_of_employees",
-   "fieldtype": "Int",
-   "label": "Number of Employees",
-   "read_only": 1
   },
   {
    "fieldname": "from_date",
    "fieldtype": "Date",
-   "in_list_view": 1,
    "label": "From Date",
-   "reqd": 1
+   "reqd": 1,
+   "in_list_view": 1
   },
   {
    "fieldname": "to_date",
    "fieldtype": "Date",
-   "in_list_view": 1,
    "label": "To Date",
-   "reqd": 1
+   "reqd": 1,
+   "in_list_view": 1
   },
   {
-   "depends_on": "eval:doc.purpose === 'Request'",
-   "fieldname": "reason_for_overtime",
-   "fieldtype": "Small Text",
-   "label": "Reason for Overtime",
-   "reqd": 1
+   "fieldname": "column_break_title",
+   "fieldtype": "Column Break"
   },
   {
-   "description": "Set once to fill Hours Requested for fetched employees in request stage.",
-   "fieldname": "default_requested_hours",
-   "fieldtype": "Float",
-   "label": "Default Requested Hours",
-   "precision": "1"
+   "fieldname": "bulk_overtime_title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "read_only": 1
   },
   {
-   "fieldname": "section_entries",
+   "fieldname": "section_break_entries",
    "fieldtype": "Section Break",
-   "label": "Entries"
+   "label": "Overtime"
+  },
+  {
+   "fieldname": "get_overtime",
+   "fieldtype": "Button",
+   "label": "Get Overtime",
+   "description": "Pulls every approved Overtime Request in the period and checks it against attendance."
   },
   {
    "fieldname": "bulk_overtime_entries",
    "fieldtype": "Table",
-   "label": "Bulk Overtime Entries",
+   "label": "Entries",
    "options": "Bulk Overtime Entry"
   },
   {
-   "fieldname": "section_notes",
-   "fieldtype": "Section Break",
-   "label": "Notes"
+   "fieldname": "section_break_totals",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "number_of_employees",
+   "fieldtype": "Int",
+   "label": "Employees",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_totals_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_requested_hours",
+   "fieldtype": "Float",
+   "label": "Requested Hours",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_totals_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_biometric_hours",
+   "fieldtype": "Float",
+   "label": "Biometric Hours",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_totals_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_approved_hours",
+   "fieldtype": "Float",
+   "label": "Approved Hours",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "section_break_notes",
+   "fieldtype": "Section Break"
   },
   {
    "fieldname": "remarks",
@@ -131,37 +151,20 @@
   {
    "fieldname": "amended_from",
    "fieldtype": "Link",
-   "ignore_user_permissions": 1,
    "label": "Amended From",
-   "no_copy": 1,
    "options": "Bulk Overtime",
+   "no_copy": 1,
    "print_hide": 1,
-   "read_only": 1
-  },
-  {
-   "fieldname": "column_break_fbuf",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "bulk_overtime_title",
-   "fieldtype": "Data",
-   "hidden": 1,
-   "label": "Bulk Overtime",
-   "read_only": 1
-  },
-  {
-   "fieldname": "request_details_column",
-   "fieldtype": "Column Break",
-   "label": "Request Details"
+   "read_only": 1,
+   "search_index": 1
   }
  ],
- "is_submittable": 1,
+ "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-15 20:42:11.763380",
+ "modified": "2026-09-19 19:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime",
- "naming_rule": "By \"Naming Series\" field",
  "owner": "Administrator",
  "permissions": [
   {
@@ -212,10 +215,15 @@
   }
  ],
  "row_format": "Dynamic",
- "search_fields": "company,department,from_date,to_date",
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
- "title_field": "department",
- "track_changes": 1
+ "allow_import": 1,
+ "autoname": "naming_series:",
+ "naming_rule": "By \"Naming Series\" field",
+ "is_submittable": 1,
+ "track_changes": 1,
+ "document_type": "Document",
+ "title_field": "bulk_overtime_title",
+ "search_fields": "company,from_date,to_date"
 }
