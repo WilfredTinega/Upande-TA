@@ -54,8 +54,8 @@ def _exception_pair(exception):
 	"""Normalise one exception into ``(date, holiday_list)``.
 
 	Tolerates a 2-tuple/list, a mapping with ``exception_date`` /
-	``holiday_list`` keys, or any object with those attributes (which is what a
-	Holiday Assignment Tool Exception child row is) — without importing frappe.
+	``holiday_list`` keys, or any object with those attributes — without
+	importing frappe.
 	"""
 	if isinstance(exception, dict):
 		return as_date(exception.get("exception_date")), exception.get("holiday_list")
