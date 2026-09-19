@@ -526,7 +526,16 @@ body::before{display:none!important}
 /* readable logged-in-user row in the sidebar footer */
 .att-sb-foot .wm-avatar{width:100%;height:auto;min-height:46px;border-radius:12px;padding:9px 12px;display:flex;align-items:center;gap:10px;justify-content:flex-start;text-align:left}
 .att-sb-foot .wm-ini{flex:0 0 26px;width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.18);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600}
-.att-sb-foot .wm-uid{flex:1;min-width:0;color:#fff;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Name over email, both clipped rather than wrapped so the row keeps its
+   height. The block is static now (no account dropdown), so it also drops
+   the button's pointer and hover-lift. */
+.att-sb-foot .wm-who{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;line-height:1.25;overflow:hidden}
+.att-sb-foot .wm-name{color:#fff;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.att-sb-foot .wm-uid{min-width:0;color:rgba(255,255,255,.62);font-size:11px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.att-sb-foot .wm-uid:empty{display:none}
+.att-sb-foot .wm-avatar{cursor:default}
+.att-sb-foot .wm-avatar:hover{transform:none}
+.wm-login{display:block;margin-top:6px;text-align:center;font:500 12.5px 'Poppins',sans-serif;color:var(--text-2)!important;text-decoration:none!important}
 
 
 /* active-selected unit in the sidebar */
@@ -536,8 +545,68 @@ body::before{display:none!important}
 .att-sb-head{gap:8px}
 .att-sb-brand{display:flex;align-items:center;gap:10px;min-width:0}
 .att-sb-head .att-logo{height:22px;width:auto;flex-shrink:0;margin:0}
-/* farm + company now handled by the sidebar — hidden from the topbar (kept in DOM for state) */
-#r-farm,#r-company{display:none!important}
+/* farm stays sidebar-only; company is also shown top-right in the topbar
+   (moved there and given margin-left:auto in the HTML) so it doesn't require
+   opening the sidebar just to switch company. Kept in DOM either way for state. */
+#r-farm{display:none!important}
+
+/* Company reads as a bold plain label, not a form control: native caret,
+   border, background and the shared focus ring are all stripped. It is
+   still a real <select>, so clicking anywhere on the text opens the browser's
+   own dropdown to switch company -- only the chrome around it is gone. */
+/* Neither text-align nor direction:rtl reliably moves a native <select>'s own
+   CLOSED-state text in every Chrome/OS build once appearance:none is applied
+   -- that box is still laid out by the browser's own internal widget, not by
+   this stylesheet, and it doesn't consistently honour either property there
+   (only the open option list reliably takes CSS). So the select itself is
+   made fully transparent (still real, still clickable, still opens the native
+   dropdown) and a separate plain <span> on top of it -- #r-company-label --
+   is what actually displays the bold, right-aligned company name. JS keeps
+   that span's text in sync with #r-company's value everywhere it changes. */
+.r-company-wrap{position:relative;display:inline-flex;align-items:center}
+#r-company{
+  appearance:none;-webkit-appearance:none;-moz-appearance:none;
+  border:none!important;background:transparent!important;box-shadow:none!important;
+  font-family:var(--f-ui);font-size:19px;font-weight:700;color:transparent!important;
+  padding:0 4px;height:auto;cursor:pointer;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.r-company-label{
+  position:absolute;right:4px;top:50%;transform:translateY(-50%);
+  pointer-events:none;
+  font-family:var(--f-ui);font-size:19px;font-weight:700;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;
+}
+#r-company:hover,#r-company:focus,#r-company:focus-visible{
+  border:none!important;background:transparent!important;box-shadow:none!important;outline:none!important;
+}
+/* The open option list is native/OS-rendered outside the page's DOM, so the
+   browser (not this stylesheet) draws the highlight colour on hover/selection
+   -- that part can't be reskinned from CSS on a plain <select> in any browser.
+   These properties are the ones browsers that DO support styling <option> will
+   actually apply (background/text colour, size, spacing of the closed list). */
+#r-company option{
+  font-family:var(--f-ui);font-size:15px;font-weight:500;text-align:left;direction:ltr;
+  background:var(--panel);color:var(--text);padding:8px 12px;
+}
+
+/* Refresh lives on the existing logo/title header itself now, not a separate
+   button row -- click anywhere on the brand to reload. */
+.att-sb-refresh{cursor:pointer;border-radius:8px;transition:background .15s;padding:4px 6px;margin:-4px -6px}
+.att-sb-refresh:hover{background:var(--accent-light)}
+.att-sb-refresh:active{background:var(--accent)}
+
+/* Out of the page and back to the Desk, inline with the brand -- same button
+   the Sensors dashboard sidebar carries (lucide Home, 18px, muted until
+   hover). A sibling of .att-sb-brand, not a child, so clicking it navigates
+   instead of tripping the brand's click-to-refresh handler. */
+.att-sb-home{flex:none;display:flex;align-items:center;justify-content:center;
+  width:30px;height:30px;border-radius:8px;border:none;background:transparent;
+  color:var(--text-3)!important;cursor:pointer;text-decoration:none!important;
+  transition:color .12s,background .12s}
+.att-sb-home:hover{color:var(--text)!important;background:var(--accent-light)}
+.att-sb-home:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
+.att-sb-home-icon{width:18px;height:18px;display:block}
 .topbar .filt{border-top:none;padding-top:0}
 
 

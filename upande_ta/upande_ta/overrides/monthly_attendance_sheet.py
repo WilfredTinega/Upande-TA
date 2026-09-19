@@ -184,6 +184,10 @@ def get_disabled_employee_names() -> set:
 				emp_filters["company"] = row.company
 			disabled_names.update(frappe.get_all("Employee", filters=emp_filters, pluck="name"))
 
+	for row in (settings.get("attendance_employee_filters") or []):
+		if row.employee and row.excluded:
+			disabled_names.add(row.employee)
+
 	return disabled_names
 
 

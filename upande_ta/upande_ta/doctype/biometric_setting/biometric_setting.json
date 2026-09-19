@@ -112,7 +112,9 @@
   "attendance_filters_section",
   "attendance_employment_type_filters",
   "attendance_filters_column_break",
-  "attendance_employee_category_filters"
+  "attendance_employee_category_filters",
+  "attendance_employee_filters_section",
+  "attendance_employee_filters"
  ],
  "fields": [
   {
@@ -710,13 +712,23 @@
    "fieldtype": "Table",
    "label": "Employee Category",
    "options": "Attendance Filter Employee Category"
+  },
+  {
+   "fieldname": "attendance_employee_filters_section",
+   "fieldtype": "Section Break",
+   "label": "Employee"
+  },
+  {
+   "fieldname": "attendance_employee_filters",
+   "fieldtype": "Table",
+   "options": "Attendance Filter Employee"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-19 01:21:33.151344",
+ "modified": "2026-09-19 08:14:20.715477",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

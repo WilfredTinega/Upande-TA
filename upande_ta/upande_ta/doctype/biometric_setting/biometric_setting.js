@@ -173,6 +173,22 @@ frappe.ui.form.on("Biometric Setting", {
 		add_device_refresh_button(frm);
 		wire_device_farms(frm);
 		mark_bio_grids(frm);
+		frm.set_query("employee", "attendance_employee_filters", function(doc, cdt, cdn) {
+			// Once an employee is picked in one row, drop them from every other
+			// row's suggestion list -- there is no reason to exclude the same
+			// employee twice, and it only clutters the picker.
+			const selected = (doc.attendance_employee_filters || [])
+				.filter(r => r.name !== cdn)
+				.map(r => r.employee)
+				.filter(Boolean);
+			return { filters: { name: ["not in", selected] } };
+		});
+		const emp_filter_grid = frm.fields_dict.attendance_employee_filters &&
+			frm.fields_dict.attendance_employee_filters.grid;
+		if (emp_filter_grid) {
+			emp_filter_grid.add_custom_button(__("Find & Add by Payroll Number"),
+				() => open_bulk_add_by_payroll(frm), "top");
+		}
 	},
 
 	devices_on_form_rendered: function(frm) {
@@ -723,6 +739,83 @@ function refresh_device_statuses(frm, $btn) {
 			if ($btn) $btn.prop("disabled", false);
 		}
 	});
+}
+
+// Wildcard search over Employee (name and Employee Number both carry the
+// payroll number on this fleet, e.g. "H 007") + a checklist of the matches,
+// so excluding a whole batch (e.g. every "H0*" payroll number) does not mean
+// adding them to the Employee Filters grid one row at a time.
+function _payroll_like_pattern(pattern) {
+	let txt = (pattern || "").trim();
+	if (!txt) return "%";
+	let sql = txt.replace(/\*/g, "%");
+	if (!sql.includes("%")) sql = "%" + sql + "%";
+	return sql;
+}
+
+function open_bulk_add_by_payroll(frm) {
+	const already = new Set(
+		(frm.doc.attendance_employee_filters || []).map(r => r.employee).filter(Boolean)
+	);
+
+	function fetch_matches(pattern) {
+		const like = _payroll_like_pattern(pattern);
+		return frappe.db.get_list("Employee", {
+			filters: { status: "Active" },
+			or_filters: [["name", "like", like], ["employee_number", "like", like]],
+			fields: ["name", "employee_name"],
+			order_by: "name asc",
+			limit: 500
+		}).then(rows => rows
+			.filter(r => !already.has(r.name))
+			.map(r => ({ label: `${r.name} — ${r.employee_name || ""}`, value: r.name, checked: false }))
+		);
+	}
+
+	// `dlg` is declared (not const-assigned) before the Dialog is built because
+	// MultiCheck's get_data runs synchronously while the fields are being set
+	// up -- i.e. before `new frappe.ui.Dialog(...)` has finished and returned,
+	// so a `const dlg = new frappe.ui.Dialog(...)` closed over by get_data
+	// would hit the temporal-dead-zone and throw, killing the dialog silently
+	// (see open_device_farms_dialog above for the same pattern).
+	let dlg;
+	dlg = new frappe.ui.Dialog({
+		title: __("Find & Add Employees by Payroll Number"),
+		size: "large",
+		fields: [
+			{
+				fieldname: "pattern",
+				fieldtype: "Data",
+				label: __("Payroll Number"),
+				description: __("Use * as a wildcard, e.g. H0* or *035. Leave blank to list everyone."),
+				change: () => { if (dlg) dlg.fields_dict.matches.refresh(); }
+			},
+			{ fieldtype: "Section Break" },
+			{
+				fieldname: "matches",
+				fieldtype: "MultiCheck",
+				label: __("Matching Employees (already-added ones are left out)"),
+				columns: 2,
+				select_all: true,
+				get_data: () => fetch_matches(dlg ? dlg.get_value("pattern") : "")
+			}
+		],
+		primary_action_label: __("Add Selected"),
+		primary_action: () => {
+			const picked = (dlg.get_value("matches") || []).filter(emp => !already.has(emp));
+			dlg.hide();
+			if (!picked.length) return;
+			picked.forEach(emp => {
+				const row = frm.add_child("attendance_employee_filters");
+				row.employee = emp;
+				row.excluded = 1;
+			});
+			frm.refresh_field("attendance_employee_filters");
+			frappe.show_alert({ message: __("Added {0} employee(s)", [picked.length]), indicator: "green" });
+		}
+	});
+
+	dlg.show();
 }
 
 function _split_farms(value) {

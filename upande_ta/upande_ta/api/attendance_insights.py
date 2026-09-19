@@ -162,6 +162,17 @@ def attendance_dashboard_data():
 	if emptype:
 		econd = econd + " AND FIND_IN_SET(e.employment_type, " + frappe.db.escape(emptype) + ")"
 
+	# Access-only condition for the filter pickers themselves (farm/company/
+	# employment-type dropdowns, the sidebar tree): scoped to what the caller
+	# is PERMITTED to see, never to whatever they currently have selected --
+	# picking one company must narrow the data view (econd), not collapse the
+	# picker down to just that company and hide every other one they can see.
+	acond, aparams = "", {}
+	if allowed_companies:
+		_cond, _cparams = company_where("", allowed_companies, "e", "acompany")
+		acond = " AND " + _cond
+		aparams = _cparams
+
 	# range predicate on the raw datetime column (sargable). Alias `c` assumed.
 	trange = " AND c.time >= %(from_date)s AND c.time < %(to_date_excl)s "
 
@@ -177,7 +188,7 @@ def attendance_dashboard_data():
 	# Scoped to the caller's permitted companies so a restricted user never even
 	# sees another company's name, farm or employment type in a picker.
 	farm_list = []
-	frows = frappe.db.sql("SELECT DISTINCT e.custom_farm AS f FROM `tabEmployee` e WHERE e.status = 'Active' AND IFNULL(e.custom_farm, '') != ''" + econd + " ORDER BY e.custom_farm", params, as_dict=1)
+	frows = frappe.db.sql("SELECT DISTINCT e.custom_farm AS f FROM `tabEmployee` e WHERE e.status = 'Active' AND IFNULL(e.custom_farm, '') != ''" + acond + " ORDER BY e.custom_farm", aparams, as_dict=1)
 	for fr in frows:
 		farm_list.append(fr["f"])
 
@@ -197,15 +208,15 @@ def attendance_dashboard_data():
 	company_farms = filter_companies(company_farms, allowed_companies)
 
 	emp_type_list = []
-	etrows = frappe.db.sql("SELECT DISTINCT e.employment_type AS et FROM `tabEmployee` e WHERE e.status = 'Active' AND IFNULL(e.employment_type,'') != ''" + econd + " ORDER BY e.employment_type", params, as_dict=1)
+	etrows = frappe.db.sql("SELECT DISTINCT e.employment_type AS et FROM `tabEmployee` e WHERE e.status = 'Active' AND IFNULL(e.employment_type,'') != ''" + acond + " ORDER BY e.employment_type", aparams, as_dict=1)
 	for er in etrows:
 		emp_type_list.append(er["et"])
 
 	# per-company/per-farm split: task workers vs the rest
 	company_farm_counts = {}
-	cfc_params = dict(params)
+	cfc_params = dict(aparams)
 	cfc_params["tw_type"] = TASK_WORKER_EMPLOYMENT_TYPE
-	cfcrows = frappe.db.sql("SELECT e.company AS co, e.custom_farm AS f, SUM(CASE WHEN e.employment_type=%(tw_type)s THEN 1 ELSE 0 END) AS tw, SUM(CASE WHEN COALESCE(e.employment_type,'')<>%(tw_type)s THEN 1 ELSE 0 END) AS rest FROM `tabEmployee` e WHERE e.status='Active' AND IFNULL(e.company,'')<>'' AND IFNULL(e.custom_farm,'')<>''" + econd + " GROUP BY e.company, e.custom_farm", cfc_params, as_dict=1)
+	cfcrows = frappe.db.sql("SELECT e.company AS co, e.custom_farm AS f, SUM(CASE WHEN e.employment_type=%(tw_type)s THEN 1 ELSE 0 END) AS tw, SUM(CASE WHEN COALESCE(e.employment_type,'')<>%(tw_type)s THEN 1 ELSE 0 END) AS rest FROM `tabEmployee` e WHERE e.status='Active' AND IFNULL(e.company,'')<>'' AND IFNULL(e.custom_farm,'')<>''" + acond + " GROUP BY e.company, e.custom_farm", cfc_params, as_dict=1)
 	for cr in cfcrows:
 		company_farm_counts.setdefault(cr["co"], {})
 		company_farm_counts[cr["co"]][cr["f"]] = {"tw": int(cr["tw"] or 0), "rest": int(cr["rest"] or 0)}
@@ -1440,12 +1451,12 @@ def attendance_register():
 			payroll_start = frappe.utils.add_months(rd, -1).replace(day=p_from_day)
 			payroll_end = rd.replace(day=p_to_day)
 
+		# Access-only, like acond in attendance_dashboard_data: the sidebar tree
+		# is a navigation picker and must show every company the caller is
+		# permitted to see, not collapse to whichever one is currently selected.
 		sb_params = {"tw_type": TASK_WORKER_EMPLOYMENT_TYPE}
 		sb_cond = ""
-		if company:
-			sb_cond = " AND company = %(sb_company)s"
-			sb_params["sb_company"] = company
-		elif allowed_companies:
+		if allowed_companies:
 			sb_cond = " AND company IN %(sb_companies)s"
 			sb_params["sb_companies"] = tuple(allowed_companies)
 
@@ -1875,6 +1886,19 @@ def attendance_employee_history():
 		WHERE la.employee = %(emp_id)s AND la.docstatus = 1
 		  AND la.from_date <= %(h_to)s AND la.to_date >= %(h_from)s
 	""", p)[0][0]
+
+	# Full leave applications overlapping the range, for the drawer's per-day
+	# table -- a leave day has no check-in at all, so without this the day was
+	# either missing from the table entirely or misread as an unexplained absence.
+	# from_date/to_date here are the LEAVE's own span, not clamped to the query
+	# window, so the UI can show "on leave 12 Sep -> 15 Sep" on every day in it.
+	leaves = frappe.db.sql("""
+		SELECT la.name, la.leave_type, la.from_date, la.to_date, la.status
+		FROM `tabLeave Application` la
+		WHERE la.employee = %(emp_id)s AND la.docstatus = 1
+		  AND la.from_date <= %(h_to)s AND la.to_date >= %(h_from)s
+		ORDER BY la.from_date ASC
+	""", p, as_dict=True)
 	weekoff_days = frappe.db.sql("""
 		SELECT COUNT(*)
 		FROM `tabHoliday` h
@@ -1954,6 +1978,7 @@ def attendance_employee_history():
 	frappe.response["message"] = {
 		"emp_id": emp_id, "from_date": str(h_from), "to_date": str(h_to),
 		"employee": emp_meta, "kpi": kpi, "monthly": monthly, "rows": rows,
+		"leaves": leaves,
 		"ot_threshold_min": 30,
 	}
 
@@ -2586,9 +2611,23 @@ def shift_assign():
 		return
 
 	emp_ids = [e.strip() for e in emp_ids_raw.split(",") if e.strip()]
+
+	allowed_companies = get_allowed_companies()
+	allowed_ids = None
+	if allowed_companies is not None:
+		allowed_ids = set(frappe.get_all(
+			"Employee",
+			filters={"name": ["in", emp_ids], "company": ["in", allowed_companies]},
+			pluck="name",
+		))
+
 	results = []
 
 	for emp_id in emp_ids:
+		if allowed_ids is not None and emp_id not in allowed_ids:
+			results.append({"employee": emp_id, "ok": False,
+				"error": "You are not permitted to reassign this employee's shift"})
+			continue
 		try:
 			frappe.db.set_value("Employee", emp_id, "default_shift", shift_type)
 			results.append({"employee": emp_id, "ok": True})
