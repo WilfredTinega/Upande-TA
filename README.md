@@ -448,7 +448,7 @@ release nothing. **MAJOR is never bumped automatically** — `releaseRules` sets
 `{"breaking": true, "release": false}` because the major tracks the Frappe
 version, so majors are tagged by hand. The version comes from what lands on
 `main`, so **squash & merge** with a Conventional-Commit **PR title** (that is
-what the `Semantic Commits` workflow lints); merge commits usually produce no
+what the `Checks` workflow lints); merge commits usually produce no
 bump. If `main` is protected, `GITHUB_TOKEN` cannot push the bump — add a
 `RELEASE_TOKEN` PAT secret and switch the two token references.
 

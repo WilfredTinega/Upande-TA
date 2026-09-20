@@ -388,8 +388,10 @@ _SIDEBAR_LAYOUT = (
 	# them onto one for a date range and puts them back afterwards.
 	{"type": "Link", "link_type": "DocType", "link_to": "Holiday Assignment Tool", "label": "Holiday Assignment Tool", "icon": "calendar-plus"},
 
-	# Ordered the way overtime is actually worked: the bulk entry raises the
-	# slips, and the type master is the thing you touch least.
+	# Ordered the way overtime is actually worked: it is requested and approved,
+	# the bulk entry pays the approved requests against attendance and raises
+	# the slips, and the type master is the thing you touch least.
+	{"type": "Link", "link_type": "DocType", "link_to": "Overtime Request", "label": "Overtime Request", "icon": "clock"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Bulk Overtime", "label": "Bulk Overtime", "icon": "clipboard-list"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Overtime Slip", "label": "Overtime Slip", "icon": "file-clock"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Overtime Type", "label": "Overtime Type", "icon": "layers"},
@@ -569,7 +571,7 @@ _DROP_WORKSPACE_CHARTS = ("Attendance Count",)
 _WORKSPACE_CARD_LINKS = (
 	("Attendance", (("DocType", "Gate Pass"),)),
 	("Shifts", (("DocType", "Bulk Week Off"), ("DocType", "Holiday Assignment Tool"))),
-	("Overtime", (("DocType", "Bulk Overtime"),)),
+	("Overtime", (("DocType", "Overtime Request"), ("DocType", "Bulk Overtime"))),
 	("Biometrics", (
 		("DocType", "Biometric Logs"),
 		("DocType", "Biometric User"),
