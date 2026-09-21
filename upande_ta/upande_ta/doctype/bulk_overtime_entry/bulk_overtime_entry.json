@@ -1,8 +1,7 @@
 {
  "actions": [],
- "creation": "2026-09-19 19:00:00.000000",
+ "creation": "2026-09-19 19:00:00",
  "doctype": "DocType",
- "editable_grid": 0,
  "engine": "InnoDB",
  "field_order": [
   "employee",
@@ -17,7 +16,6 @@
   "status",
   "section_break_override",
   "manual_override",
-  "override_reason",
   "section_break_source",
   "overtime_request",
   "attendance",
@@ -94,7 +92,6 @@
   },
   {
    "columns": 1,
-   "description": "The lower of Requested and Biometric. Tick Manual Override to enter it yourself.",
    "fieldname": "approved_hours",
    "fieldtype": "Float",
    "in_list_view": 1,
@@ -117,16 +114,10 @@
    "label": "Override"
   },
   {
+   "default": "0",
    "fieldname": "manual_override",
    "fieldtype": "Check",
    "label": "Manual Override"
-  },
-  {
-   "depends_on": "eval:doc.manual_override || doc.manual_working_hours",
-   "fieldname": "override_reason",
-   "fieldtype": "Small Text",
-   "label": "Reason",
-   "mandatory_depends_on": "manual_override"
   },
   {
    "fieldname": "section_break_source",
@@ -138,7 +129,8 @@
    "fieldtype": "Link",
    "label": "Overtime Request",
    "options": "Overtime Request",
-   "read_only": 1
+   "read_only": 1,
+   "search_index": 1
   },
   {
    "fieldname": "attendance",
@@ -165,10 +157,12 @@
    "read_only": 1
   },
   {
-   "description": "The figure below was typed in, not read from the biometric. It survives a refetch, and the overtime is worked out from it.",
+   "default": "0",
+   "description": "Set on its own when the figure beside it is typed in. It keeps that figure when the batch is fetched again.",
    "fieldname": "manual_working_hours",
    "fieldtype": "Check",
-   "label": "Worked Hours Entered by Hand"
+   "label": "Worked Hours Entered by Hand",
+   "read_only": 1
   },
   {
    "columns": 1,
@@ -177,7 +171,8 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Worked",
-   "read_only": 1
+   "read_only": 1,
+   "read_only_depends_on": "eval:!parent.edit_worked_hours"
   },
   {
    "allow_on_submit": 1,
@@ -192,7 +187,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-09-22 10:15:00.000000",
+ "modified": "2026-09-22 03:40:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime Entry",

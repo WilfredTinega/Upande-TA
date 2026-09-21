@@ -85,135 +85,19 @@ frappe.ui.form.on("Overtime Request", {
 		}
 	},
 
-	/** Open a new Bulk Overtime over this request's own period, and pull this
-	 * request into it. Overtime is paid once it has been worked, so the period
-	 * stops at today even when the request runs past it. */
+	/** Open a new Bulk Overtime that pays this request. The batch takes its
+	 * period from the request itself, so there is nothing to fill in — and
+	 * nothing to pay yet if the request has not been worked, which the fetch
+	 * says in its own words. */
 	start_bulk_overtime(frm) {
-		const today = frappe.datetime.get_today();
-		const from_date = frm.doc.overtime_date;
-		const requested_end = frm.doc.to_date || frm.doc.overtime_date;
-		const to_date = requested_end > today ? today : requested_end;
-
-		if (from_date > to_date) {
-			frappe.msgprint({
-				title: __("Not Yet"),
-				indicator: "orange",
-				message: __(
-					"This request is for a period that has not been worked yet. Overtime is paid against the biometric logs, so there is nothing to pay until then.",
-				),
-			});
-			return;
-		}
-
 		frappe.new_doc("Bulk Overtime").then(() => {
 			const target = cur_frm;
 			if (!target || target.doctype !== "Bulk Overtime") return;
-			// the payroll-period default must not race in over these dates
-			target._dates_pinned = true;
 			target
 				.set_value("company", frm.doc.company)
-				.then(() =>
-					target.set_value({
-						custom_farm: frm.doc.custom_farm || "",
-						from_date: from_date,
-						to_date: to_date,
-					}),
-				)
+				.then(() => target.set_value("custom_farm", frm.doc.custom_farm || ""))
 				.then(() => target.events.fetch_overtime(target, [frm.doc.name]));
 		});
-	},
-
-	/** Month wears the browser's own picker; Week is a plain list of ISO week
-	 * numbers. Either way the start date is named for the period requested. */
-	dress_period_fields(frm) {
-		const $month = frm.fields_dict.month && frm.fields_dict.month.$input;
-		if ($month && $month.attr("type") !== "month") $month.attr("type", "month");
-		frm.set_df_property(
-			"overtime_date",
-			"label",
-			ot_is_range(frm) ? __("From Date") : __("Overtime Date"),
-		);
-		frm.events.describe_week(frm);
-	},
-
-	/** Spell out the dates a week number lands on, next to the list itself. */
-	describe_week(frm) {
-		const dates =
-			frm.doc.request_for === "Week" && frm.doc.overtime_date && frm.doc.to_date
-				? __("{0} to {1}", [
-						frappe.datetime.str_to_user(frm.doc.overtime_date),
-						frappe.datetime.str_to_user(frm.doc.to_date),
-				  ])
-				: __("ISO week: Monday to Sunday.");
-		frm.set_df_property("week", "description", dates);
-	},
-
-	/** Week and Month fix both ends; Single Day collapses them. */
-	set_period(frm) {
-		const type = frm.doc.request_for;
-		if (type === "Week") {
-			const number = ot_week_number(frm.doc.week);
-			const year =
-				cint(frm.doc.week_year) ||
-				moment(frm.doc.overtime_date || undefined).isoWeekYear();
-			const start = number
-				? ot_week_start(year, number)
-				: frm.doc.overtime_date
-				? ot_ymd(moment(frm.doc.overtime_date).startOf("isoWeek"))
-				: null;
-			if (!start) return;
-			// read back off the resolved Monday: week 53 of a 52-week year lands
-			// in the next one, and the list should say so
-			frm.set_value("week", ot_week_label(moment(start).isoWeek()));
-			frm.set_value("week_year", moment(start).isoWeekYear());
-			frm.set_value("overtime_date", start);
-			frm.set_value("to_date", ot_ymd(moment(start).add(6, "days")));
-			frm.events.describe_week(frm);
-		} else if (type === "Month") {
-			const source = /^\d{4}-\d{2}$/.test(frm.doc.month || "") ? `${frm.doc.month}-01` : frm.doc.overtime_date;
-			if (!source) return;
-			const start = moment(source).startOf("month");
-			frm.set_value("month", start.format("YYYY-MM"));
-			frm.set_value("overtime_date", ot_ymd(start));
-			frm.set_value("to_date", ot_ymd(start.endOf("month")));
-		} else if (type === "Single Day") {
-			frm.set_value("to_date", frm.doc.overtime_date);
-		} else if (!frm.doc.to_date) {
-			frm.set_value("to_date", frm.doc.overtime_date);
-		}
-	},
-
-	request_for(frm) {
-		if (frm.doc.request_for === "Week") {
-			// start on the week being worked, and leave it alone once chosen
-			if (!ot_week_number(frm.doc.week) && !frm.doc.overtime_date) {
-				frm.set_value("week", ot_week_label(moment().isoWeek()));
-				frm.set_value("week_year", moment().isoWeekYear());
-			}
-			if (!cint(frm.doc.week_year)) frm.set_value("week_year", moment().isoWeekYear());
-		} else {
-			frm.set_value("week", null);
-			frm.set_value("week_year", null);
-		}
-		if (frm.doc.request_for !== "Month") frm.set_value("month", null);
-		frm.events.dress_period_fields(frm);
-		frm.events.set_period(frm);
-	},
-
-	week(frm) {
-		if (frm.doc.request_for === "Week") frm.events.set_period(frm);
-	},
-
-	week_year(frm) {
-		if (frm.doc.request_for === "Week") frm.events.set_period(frm);
-	},
-
-	month(frm) {
-		if (frm.doc.request_for === "Month") frm.events.set_period(frm);
-	},
-
-	overtime_date(frm) {
-		frm.events.set_period(frm);
 	},
 
 	onload(frm) {
@@ -272,8 +156,10 @@ frappe.ui.form.on("Overtime Request", {
 	},
 
 	request_employees(frm, filters) {
-		return frappe
-			.call({
+		// Promise.resolve(): frappe.call hands back a jQuery promise, and jQuery
+		// deferreds have no .finally() — load() below stops its bar with one.
+		return Promise.resolve(
+			frappe.call({
 				method: OT_FETCH_METHOD,
 				args: {
 					company: frm.doc.company,
@@ -284,8 +170,8 @@ frappe.ui.form.on("Overtime Request", {
 					designation: filters.designation || null,
 					with_holiday_list: 0,
 				},
-			})
-			.then((r) => r.message || {});
+			}),
+		).then((r) => (r && r.message) || {});
 	},
 
 	show_selection_dialog(frm) {

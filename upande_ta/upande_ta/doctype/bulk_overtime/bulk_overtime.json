@@ -9,16 +9,19 @@
  "field_order": [
   "naming_series",
   "company",
+  "column_break_pcmy",
   "custom_farm",
   "column_break_period",
   "from_date",
-  "to_date",
   "column_break_title",
+  "to_date",
+  "column_break_uwap",
   "bulk_overtime_title",
   "section_break_zxgn",
   "get_from_overtime_request",
   "column_break_xmdk",
   "edit_worked_hours",
+  "override_reason",
   "section_break_entries",
   "bulk_overtime_entries",
   "section_break_totals",
@@ -55,7 +58,7 @@
   {
    "fieldname": "custom_farm",
    "fieldtype": "Link",
-   "label": "Unit/Division",
+   "label": "Unit",
    "options": "Farm",
    "read_only": 1
   },
@@ -108,10 +111,16 @@
   {
    "default": "0",
    "depends_on": "eval:doc.docstatus===0 && (doc.bulk_overtime_entries || []).length",
-   "description": "Makes Worked Hours editable in the table below, for a shift the scanner did not record properly. A row you change keeps its figure when the batch is fetched again, and needs a reason before the batch can be submitted.",
    "fieldname": "edit_worked_hours",
    "fieldtype": "Check",
    "label": "Edit Worked Hours"
+  },
+  {
+   "depends_on": "eval:doc.edit_worked_hours || (doc.bulk_overtime_entries || []).some(r => r.manual_override || r.manual_working_hours)",
+   "description": "Why any row was changed by hand. Asked for once, on the batch, before it can be submitted.",
+   "fieldname": "override_reason",
+   "fieldtype": "Small Text",
+   "label": "Reason for Manual Changes"
   },
   {
    "fieldname": "section_break_totals",
@@ -180,6 +189,14 @@
   {
    "fieldname": "column_break_xmdk",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_pcmy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_uwap",
+   "fieldtype": "Column Break"
   }
  ],
  "index_web_pages_for_search": 1,
@@ -191,7 +208,7 @@
    "link_fieldname": "custom_bulk_overtime"
   }
  ],
- "modified": "2026-09-22 10:15:00.000000",
+ "modified": "2026-09-22 03:40:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime",
