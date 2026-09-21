@@ -105,6 +105,8 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		cls.short_day = add_days(cls.from_date, 3)  # 10h: less OT than requested
 		cls.no_punch_day = add_days(cls.from_date, 4)  # Present, no working hours
 
+		cls._quieten_workflow_emails("Overtime Request", "Bulk Overtime")
+
 		cls._make_shift()
 		cls._make_holiday_list()
 		cls._make_overtime_type()
@@ -120,6 +122,28 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		cls._mark_attendance(cls.short_day, 10)
 		cls._mark_attendance(cls.no_punch_day, 0)
 
+
+	@classmethod
+	def _quieten_workflow_emails(cls, *doctypes):
+		"""Stop the approval workflow's e-mail from taking the submit with it.
+
+		``process_workflow_actions`` enqueues the approver e-mail with
+		``now=frappe.in_test`` (frappe/workflow/doctype/workflow_action), so
+		under the test runner it runs inline inside this transaction rather
+		than in a worker after commit — and when it unwinds, the submit that
+		triggered it is rolled back with it, leaving a document that reports
+		docstatus 1 in memory and 0 in the database.
+
+		Production is unaffected: there the job is enqueued after commit. The
+		workflow itself stays active, so these tests still exercise the part
+		that matters — Approved mapping to docstatus 1.
+		"""
+		for doctype in doctypes:
+			for name in frappe.get_all(
+				"Workflow", filters={"document_type": doctype, "is_active": 1}, pluck="name"
+			):
+				frappe.db.set_value("Workflow", name, "send_email_alert", 0)
+				frappe.clear_document_cache("Workflow", name)
 
 	@classmethod
 	def _make_shift(cls):
@@ -370,6 +394,19 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 			request.submit()
 		return request
 
+	def make_bulk_overtime_for(self, requests):
+		"""A batch that pays only the requests named, the way the picker does."""
+		doc = frappe.get_doc(
+			{
+				"doctype": "Bulk Overtime",
+				"company": self.company,
+				"from_date": self.from_date,
+				"to_date": self.to_date,
+			}
+		)
+		doc.get_overtime(overtime_requests=requests)
+		return doc
+
 	def make_bulk_overtime(self):
 		doc = frappe.get_doc(
 			{
@@ -594,6 +631,136 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		doc = self.make_bulk_overtime()
 
 		self.assertEqual(len(self.own_rows(doc)), 0)
+
+	# ──────────────────────────────────────────────────────────────────────
+	# Get from Overtime Request: paying the requests HR picks
+	# ──────────────────────────────────────────────────────────────────────
+
+	def test_the_picker_offers_the_requests_in_the_period(self):
+		names = self.make_request({self.working_day: 2, self.short_day: 3})
+		doc = self.make_bulk_overtime()
+
+		offered = {r.name: r for r in doc.get_approved_requests()}
+		for name in names:
+			self.assertIn(name, offered)
+			self.assertEqual(offered[name].employees, 1)
+			self.assertEqual(offered[name].days_in_period, 1)
+
+	def test_the_picker_counts_only_the_days_inside_the_period(self):
+		"""A request running past the batch is offered for what this batch
+		would actually pay, not for its whole length."""
+		from frappe.utils import add_days
+
+		request = self.make_range_request(self.from_date, add_days(self.to_date, 10), 2)
+		doc = self.make_bulk_overtime()
+
+		offered = {r.name: r for r in doc.get_approved_requests()}[request.name]
+		self.assertEqual(offered.days_in_period, 7)  # the batch is a 7-day period
+
+	def test_only_the_picked_request_is_paid(self):
+		picked, other = self.make_request({self.working_day: 2}), self.make_request({self.short_day: 3})
+		doc = self.make_bulk_overtime_for(picked)
+
+		dates = sorted(self.rows_by_date(doc))
+		self.assertEqual(dates, [self.working_day], "the request that was not picked must be left alone")
+		self.assertTrue(all(row.overtime_request in picked for row in self.own_rows(doc)))
+		self.assertNotIn(other[0], [row.overtime_request for row in self.own_rows(doc)])
+
+	def test_picking_every_request_matches_the_sweep(self):
+		names = self.make_request({self.working_day: 2, self.short_day: 3})
+		self.assertEqual(
+			sorted(self.rows_by_date(self.make_bulk_overtime_for(names))),
+			sorted(self.rows_by_date(self.make_bulk_overtime())),
+		)
+
+	def test_a_picked_request_is_still_clipped_to_the_period(self):
+		"""Picking a request does not let it pay outside the batch's dates."""
+		from frappe.utils import add_days, getdate
+
+		request = self.make_range_request(add_days(self.from_date, -10), add_days(self.to_date, 10), 2)
+		doc = self.make_bulk_overtime_for([request.name])
+
+		dates = sorted(self.rows_by_date(doc))
+		self.assertGreaterEqual(dates[0], getdate(self.from_date))
+		self.assertLessEqual(dates[-1], getdate(self.to_date))
+
+	def test_picking_a_request_outside_the_period_pays_nothing(self):
+		self.make_request({self.working_day: 2})
+		doc = self.make_bulk_overtime()
+		result = doc.get_overtime(overtime_requests=["HR-OTR-NOT-A-REQUEST"])
+
+		self.assertEqual(result["rows"], 0)
+		self.assertEqual(result["picked"], 1)
+
+	# ──────────────────────────────────────────────────────────────────────
+	# The approval workflow
+	# ──────────────────────────────────────────────────────────────────────
+
+	def _apply(self, doc, *actions):
+		from frappe.model.workflow import apply_workflow
+
+		for action in actions:
+			doc = apply_workflow(doc, action)
+		return doc
+
+	def _needs_workflow(self, doctype):
+		if not frappe.db.exists("Workflow", {"document_type": doctype, "is_active": 1}):
+			raise unittest.SkipTest(f"no active Workflow on {doctype}; run bench migrate")
+
+	def test_approving_a_request_through_the_workflow_pays_it(self):
+		self._needs_workflow("Overtime Request")
+		name = self.make_request({self.working_day: 2}, submit=False)[0]
+
+		request = self._apply(frappe.get_doc("Overtime Request", name), "Submit for Approval", "Approve")
+		self.assertEqual((request.workflow_state, request.docstatus), ("Approved", 1))
+		self.assertEqual(len(self.own_rows(self.make_bulk_overtime())), 1)
+
+	def test_a_rejected_request_is_never_paid(self):
+		"""The reason Rejected is docstatus 0 and not 1: Bulk Overtime pays
+		from ``docstatus = 1``, so a rejection that submitted the document
+		would be paid exactly like an approval."""
+		self._needs_workflow("Overtime Request")
+		name = self.make_request({self.working_day: 2}, submit=False)[0]
+
+		request = self._apply(frappe.get_doc("Overtime Request", name), "Submit for Approval", "Reject")
+		self.assertEqual(request.workflow_state, "Rejected")
+		self.assertEqual(request.docstatus, 0, "a rejection must never reach docstatus 1")
+		self.assertEqual(len(self.own_rows(self.make_bulk_overtime())), 0)
+
+	def test_a_request_awaiting_approval_is_not_paid(self):
+		self._needs_workflow("Overtime Request")
+		name = self.make_request({self.working_day: 2}, submit=False)[0]
+
+		request = self._apply(frappe.get_doc("Overtime Request", name), "Submit for Approval")
+		self.assertEqual((request.workflow_state, request.docstatus), ("Pending Approval", 0))
+		self.assertEqual(len(self.own_rows(self.make_bulk_overtime())), 0)
+
+	def test_a_rejected_batch_cuts_no_slips(self):
+		"""The same rule on the payout side: rejecting a batch must not fire
+		on_submit and create the Overtime Slips it was refused."""
+		self._needs_workflow("Bulk Overtime")
+		self.make_request({self.working_day: 2})
+		batch = self.make_bulk_overtime()
+		batch.insert(ignore_permissions=True)
+
+		batch = self._apply(batch, "Submit for Approval", "Reject")
+		self.assertEqual(batch.docstatus, 0, "a rejected batch must never reach docstatus 1")
+		self.assertFalse(
+			frappe.get_all("Overtime Slip", filters={"custom_bulk_overtime": batch.name}),
+			"a rejected batch must cut no slips",
+		)
+
+	def test_approving_a_batch_cuts_its_slips(self):
+		self._needs_workflow("Bulk Overtime")
+		self.make_request({self.working_day: 2})
+		batch = self.make_bulk_overtime()
+		batch.insert(ignore_permissions=True)
+
+		batch = self._apply(batch, "Submit for Approval", "Approve")
+		self.assertEqual((batch.workflow_state, batch.docstatus), ("Approved", 1))
+		self.assertTrue(
+			frappe.get_all("Overtime Slip", filters={"custom_bulk_overtime": batch.name, "docstatus": 1})
+		)
 
 
 if __name__ == "__main__":

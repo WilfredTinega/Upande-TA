@@ -49,6 +49,52 @@ frappe.ui.form.on("Overtime Request", {
 		frm.set_df_property("employees", "cannot_add_rows", 1);
 		frm.toggle_display(["get_employees", "default_requested_hours"], frm.doc.docstatus === 0);
 		frm.events.dress_period_fields(frm);
+
+		if (frm.doc.docstatus === 1) {
+			frm.add_custom_button(
+				__("Bulk Overtime"),
+				() => frm.events.start_bulk_overtime(frm),
+				__("Create"),
+			);
+		}
+	},
+
+	/** Open a new Bulk Overtime over this request's own period, and pull this
+	 * request into it. Overtime is paid once it has been worked, so the period
+	 * stops at today even when the request runs past it. */
+	start_bulk_overtime(frm) {
+		const today = frappe.datetime.get_today();
+		const from_date = frm.doc.overtime_date;
+		const requested_end = frm.doc.to_date || frm.doc.overtime_date;
+		const to_date = requested_end > today ? today : requested_end;
+
+		if (from_date > to_date) {
+			frappe.msgprint({
+				title: __("Not Yet"),
+				indicator: "orange",
+				message: __(
+					"This request is for a period that has not been worked yet. Overtime is paid against the biometric logs, so there is nothing to pay until then.",
+				),
+			});
+			return;
+		}
+
+		frappe.new_doc("Bulk Overtime").then(() => {
+			const target = cur_frm;
+			if (!target || target.doctype !== "Bulk Overtime") return;
+			// the payroll-period default must not race in over these dates
+			target._dates_pinned = true;
+			target
+				.set_value("company", frm.doc.company)
+				.then(() =>
+					target.set_value({
+						custom_farm: frm.doc.custom_farm || "",
+						from_date: from_date,
+						to_date: to_date,
+					}),
+				)
+				.then(() => target.events.get_overtime(target, [frm.doc.name]));
+		});
 	},
 
 	/** Month wears the browser's own picker; Week is a plain list of ISO week

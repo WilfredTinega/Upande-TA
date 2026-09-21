@@ -7,7 +7,6 @@
  "field_order": [
   "naming_series",
   "company",
-  "custom_farm",
   "column_break_request_1",
   "request_for",
   "column_break_kgeg",
@@ -23,10 +22,11 @@
   "column_break_ufhk",
   "default_requested_hours",
   "section_break_employees",
-  "department",
+  "custom_farm",
   "column_break_employee_filters_2",
-  "designation",
+  "department",
   "column_break_employee_filters",
+  "designation",
   "section_break_pick_employees",
   "get_employees",
   "employees",
@@ -244,7 +244,7 @@
    "table_fieldname": "bulk_overtime_entries"
   }
  ],
- "modified": "2026-09-21 22:31:10.858165",
+ "modified": "2026-09-21 22:58:17.304458",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Overtime Request",
