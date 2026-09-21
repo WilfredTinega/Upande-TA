@@ -56,6 +56,25 @@ class OvertimeRequest(Document):
 	def before_submit(self):
 		self.validate_not_already_requested()
 
+	def on_submit(self):
+		self.queue_bulk_overtime()
+
+	def queue_bulk_overtime(self):
+		"""An approved request should not also have to be fetched by hand.
+
+		Built after this commit rather than inside it, so a batch that cannot
+		be made — because the days have no attendance yet, which is the usual
+		case, or because something else is already paying them — can never
+		undo the approval that triggered it. Requests that cannot be paid now
+		are picked up by the daily run once their attendance is in.
+		"""
+		frappe.enqueue(
+			"upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime.auto_create_batch",
+			queue="short",
+			enqueue_after_commit=True,
+			overtime_request=self.name,
+		)
+
 	# ──────────────────────────────────────────────────────────────────────
 	# Dates
 	# ──────────────────────────────────────────────────────────────────────
