@@ -39,6 +39,43 @@ const bo_busy = (frm, fieldname, busy) => {
 	if (field && field.$input) field.$input.prop("disabled", busy);
 };
 
+/** Why a fetch came back empty, in the attendance's own words.
+ *
+ * "No attendance" is rarely the whole truth: the days are usually there and
+ * marked Absent or On Leave, and the biometric behind them may not have been
+ * worked into attendance yet. Saying which sends people to the right place. */
+const bo_nothing_to_pay = (result) => {
+	const why = result.why || {};
+	const lines = [
+		__("Found <b>{0}</b> approved Overtime Request(s) covering <b>{1}</b> employee-day(s), none of them payable.", [
+			result.approved_requests,
+			result.days_without_attendance,
+		]),
+		__("Overtime is paid against attendance marked <b>Present</b>, with hours on it."),
+	];
+
+	const statuses = why.statuses || [];
+	if (statuses.length) {
+		lines.push(
+			__("The attendance in this period says: {0}.", [
+				statuses.map((s) => `<b>${bo_esc(s.status)}</b> ${s.days}`).join(", "),
+			]),
+		);
+	} else if (why.employees) {
+		lines.push(__("There is no attendance at all for these <b>{0}</b> employee(s) in this period.", [why.employees]));
+	}
+
+	if (why.checkins) {
+		lines.push(
+			__(
+				"There are <b>{0}</b> biometric check-in(s) in this period, so the attendance for these days may not have been processed yet.",
+				[why.checkins],
+			),
+		);
+	}
+	return lines.join("<br><br>");
+};
+
 const STATUS_INDICATOR = {
 	Matched: "green",
 	"Capped at Request": "blue",
@@ -250,10 +287,7 @@ frappe.ui.form.on("Bulk Overtime", {
 					? result.picked
 						? __("The Overtime Request(s) you picked cover no days inside this period.")
 						: __("No approved Overtime Requests in this period.")
-					: __(
-							"Found <b>{0}</b> approved Overtime Request(s), but no attendance on any of the <b>{1}</b> day(s) they cover. Overtime is paid against the biometric logs, so there is nothing to pay until the attendance for those days is in.",
-							[result.approved_requests, result.days_without_attendance],
-					  );
+					: bo_nothing_to_pay(result);
 				frappe.msgprint({ title: __("Nothing to Pay"), indicator: "orange", message });
 				return;
 			}

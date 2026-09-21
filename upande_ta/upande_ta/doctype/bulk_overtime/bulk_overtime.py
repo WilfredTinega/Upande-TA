@@ -187,13 +187,16 @@ class BulkOvertime(Document):
 		self.set_totals()
 		self.set_title()
 
-		return {
+		result = {
 			"rows": len(self.bulk_overtime_entries),
 			"left_out": sorted(set(left_out)),
 			"approved_requests": found.requests,
 			"days_without_attendance": found.days_without_attendance,
 			"picked": len(chosen),
 		}
+		if not result["rows"] and found.requests:
+			result["why"] = self._why_nothing_to_pay(chosen)
+		return result
 
 	def _request_scope(self):
 		"""The company/unit the batch pays for, as a join and a filter both the
@@ -397,6 +400,74 @@ class BulkOvertime(Document):
 
 		rows.sort(key=lambda r: (r.employee_name or "", r.overtime_date))
 		return rows
+
+	def _why_nothing_to_pay(self, chosen=None) -> dict:
+		"""What the attendance actually says, when it says nothing payable.
+
+		"No attendance" is rarely the whole truth and never the useful part of
+		it: the days are usually there and marked Absent or On Leave, and the
+		biometric behind them may not have been worked into attendance yet.
+		Saying which sends people to the right place instead of to this form.
+
+		Only asked for when a fetch comes back empty, so its cost is paid on
+		the one path where it is worth paying.
+		"""
+		# the employees this fetch was actually about, so the figures match
+		# what was asked for rather than everything in the period
+		scope = {"company": self.company, "from_date": self.from_date, "to_date": self.to_date}
+		chosen_filter = ""
+		if chosen:
+			chosen_filter = "and req.name in %(chosen)s"
+			scope["chosen"] = tuple(chosen)
+
+		employees = [
+			row.employee
+			for row in frappe.db.sql(
+				f"""
+				select distinct row.employee
+				from `tabOvertime Request` req
+				join `tabOvertime Request Employee` row
+					on row.parent = req.name and row.parenttype = 'Overtime Request'
+				where req.docstatus = 1
+					and req.company = %(company)s
+					and req.overtime_date <= %(to_date)s
+					and coalesce(req.to_date, req.overtime_date) >= %(from_date)s
+					{chosen_filter}
+				""",
+				scope,
+				as_dict=True,
+			)
+		]
+		if not employees:
+			return {}
+
+		values = {"employees": tuple(employees), "from_date": self.from_date, "to_date": self.to_date}
+		statuses = frappe.db.sql(
+			"""
+			select status, count(*) as days
+			from `tabAttendance`
+			where docstatus = 1 and employee in %(employees)s
+				and attendance_date between %(from_date)s and %(to_date)s
+			group by status
+			order by days desc
+			""",
+			values,
+			as_dict=True,
+		)
+		checkins = frappe.db.sql(
+			"""
+			select count(*) from `tabEmployee Checkin`
+			where employee in %(employees)s
+				and time >= %(from_date)s and time < date_add(%(to_date)s, interval 1 day)
+			""",
+			values,
+		)[0][0]
+
+		return {
+			"employees": len(employees),
+			"statuses": [{"status": row.status, "days": row.days} for row in statuses],
+			"checkins": cint(checkins),
+		}
 
 	def _claimed_elsewhere(self, requests) -> dict:
 		"""(employee, date) pairs already in another open or submitted Bulk
@@ -759,3 +830,101 @@ def _drop_legacy_amount_fields():
 		name = f"Overtime Details-{field}"
 		if frappe.db.exists("Custom Field", name):
 			frappe.delete_doc("Custom Field", name, ignore_permissions=True, force=True)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Building a batch without being asked
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def batch_for_request(overtime_request: str) -> str | None:
+	"""Build and save the Bulk Overtime that pays one approved request.
+
+	Returns the batch, or ``None`` when there is nothing to pay yet — which is
+	the ordinary case at approval time, because a request is approved *before*
+	the overtime is worked. Those are picked up later by :func:`create_pending_batches`,
+	once the attendance for their days has arrived.
+
+	Idempotent: a request already sitting in a batch is left alone, since a day
+	is paid once.
+	"""
+	from upande_ta.upande_ta.doctype.overtime_request.overtime_request import paying_batch
+
+	if paying_batch(overtime_request):
+		return None
+
+	request = frappe.db.get_value(
+		"Overtime Request", overtime_request, ["company", "custom_farm", "docstatus"], as_dict=True
+	)
+	if not request or request.docstatus != 1:
+		return None
+
+	batch = frappe.get_doc(
+		{
+			"doctype": "Bulk Overtime",
+			"company": request.company,
+			"custom_farm": request.custom_farm or "",
+		}
+	)
+	result = batch.get_overtime(overtime_requests=[overtime_request])
+	if not result["rows"]:
+		return None
+
+	batch.insert(ignore_permissions=True)
+	return batch.name
+
+
+def auto_create_batch(overtime_request: str):
+	"""Called after a request is approved. Never raises: an approval must not
+	be undone because the attendance behind it has not arrived, or because a
+	day of it is already being paid somewhere else."""
+	try:
+		name = batch_for_request(overtime_request)
+	except Exception:
+		frappe.log_error(
+			title="Bulk Overtime: could not build a batch for {0}".format(overtime_request),
+			message=frappe.get_traceback(),
+		)
+		return None
+
+	# No commit here. The background job and the scheduled run each commit
+	# their own work when they return, and committing inside would take the
+	# caller's transaction with it — a test's rollback included.
+	return name
+
+
+def create_pending_batches(limit: int = 200):
+	"""The daily run: approved requests whose days have been worked but which
+	no batch has picked up yet.
+
+	Overtime is approved in advance, so at approval time there is usually
+	nothing to pay. This is what turns those into batches once the attendance
+	is in, so nobody has to watch for it.
+	"""
+	requests = frappe.db.sql(
+		"""
+		select req.name
+		from `tabOvertime Request` req
+		where req.docstatus = 1
+			and req.overtime_date <= %(today)s
+			and not exists (
+				select 1
+				from `tabBulk Overtime Entry` entry
+				join `tabBulk Overtime` bo on bo.name = entry.parent
+				where entry.parenttype = 'Bulk Overtime'
+					and bo.docstatus < 2
+					and entry.overtime_request = req.name
+			)
+		order by req.overtime_date
+		limit %(limit)s
+		""",
+		{"today": today(), "limit": cint(limit)},
+		as_dict=True,
+	)
+
+	built = []
+	for request in requests:
+		name = auto_create_batch(request.name)
+		if name:
+			built.append(name)
+	return built

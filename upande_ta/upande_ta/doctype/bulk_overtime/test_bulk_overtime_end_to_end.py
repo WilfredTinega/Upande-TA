@@ -1121,6 +1121,76 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 
 		self.assertIsNone(self._status(name)["batch"], "a cancelled batch has released it")
 
+	# ──────────────────────────────────────────────────────────────────────
+	# Batches built without being asked
+	# ──────────────────────────────────────────────────────────────────────
+
+	def _auto(self, name):
+		from upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime import batch_for_request
+
+		return batch_for_request(name)
+
+	def test_an_approved_request_builds_its_own_batch(self):
+		name = self.make_request({self.working_day: 2})[0]
+		built = self._auto(name)
+
+		self.assertIsNotNone(built)
+		batch = frappe.get_doc("Bulk Overtime", built)
+		self.assertEqual(batch.docstatus, 0, "built as a draft, for someone to look at")
+		self.assertEqual([r.overtime_request for r in batch.bulk_overtime_entries], [name])
+
+	def test_it_takes_the_period_from_the_request(self):
+		from frappe.utils import getdate
+
+		request = self.make_range_request(self.from_date, self.to_date, 2)
+		batch = frappe.get_doc("Bulk Overtime", self._auto(request.name))
+
+		self.assertEqual(getdate(batch.from_date), getdate(self.from_date))
+		self.assertEqual(getdate(batch.to_date), getdate(self.to_date))
+
+	def test_nothing_is_built_when_there_is_nothing_to_pay(self):
+		"""The ordinary case at approval time: a request is approved before the
+		overtime is worked, so there is no attendance behind it yet."""
+		from frappe.utils import add_days, getdate, today
+
+		# a day inside the period with no attendance of any kind
+		bare = add_days(getdate(self.from_date), 5)
+		self.make_range_request(bare, add_days(bare, 1), 2)
+		requests = frappe.get_all(
+			"Overtime Request", filters={"docstatus": 1}, pluck="name", order_by="creation desc", limit=1
+		)
+		self.assertIsNone(self._auto(requests[0]))
+		self.assertLessEqual(getdate(bare), getdate(today()))
+
+	def test_a_request_already_in_a_batch_is_left_alone(self):
+		name = self.make_request({self.working_day: 2})[0]
+		first = self._auto(name)
+		self.assertIsNotNone(first)
+
+		self.assertIsNone(self._auto(name), "a day is paid once")
+
+	def test_a_draft_request_builds_nothing(self):
+		name = self.make_request({self.working_day: 2}, submit=False)[0]
+		self.assertIsNone(self._auto(name))
+
+	def test_the_daily_run_picks_up_what_is_payable(self):
+		from upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime import create_pending_batches
+
+		name = self.make_request({self.working_day: 2})[0]
+		built = create_pending_batches()
+
+		paying = [
+			row.parent
+			for row in frappe.db.sql(
+				"""select entry.parent from `tabBulk Overtime Entry` entry
+				   where entry.overtime_request = %s""",
+				name,
+				as_dict=True,
+			)
+		]
+		self.assertTrue(paying, "the daily run should have paid it")
+		self.assertTrue(set(paying) & set(built))
+
 
 if __name__ == "__main__":
 	unittest.main()
