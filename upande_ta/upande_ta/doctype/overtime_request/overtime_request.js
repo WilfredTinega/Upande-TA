@@ -2,6 +2,8 @@
 // For license information, please see license.txt
 
 const OT_FETCH_METHOD = "upande_ta.upande_ta.api.holiday_assignment_employees.get_holiday_assignment_employees";
+const OT_BULK_STATUS_METHOD =
+	"upande_ta.upande_ta.doctype.overtime_request.overtime_request.bulk_overtime_status";
 
 const ot_esc = (value) => frappe.utils.escape_html(value == null ? "" : String(value));
 
@@ -101,34 +103,25 @@ frappe.ui.form.on("Overtime Request", {
 	},
 
 	/** An approved request exists to be paid, so the way to its Bulk Overtime
-	 * belongs on the request itself rather than inside a Create menu. Once a
-	 * batch holds it the button goes to that batch instead: a day is paid
-	 * once, so a second batch could only come up empty. */
+	 * belongs on the request itself rather than inside a Create menu. The
+	 * server answers both halves at once: a request is only payable once it
+	 * has cleared its last approval, and once a batch holds it the button goes
+	 * to that batch instead — a day is paid once, so a second batch could only
+	 * come up empty. */
 	show_bulk_overtime_button(frm) {
-		frappe.db
-			.get_list("Bulk Overtime Entry", {
-				parent: "Bulk Overtime",
-				filters: { overtime_request: frm.doc.name, parenttype: "Bulk Overtime" },
-				fields: ["parent"],
-				limit: 1,
-			})
-			.then((rows) => {
-				const batch = (rows || [])[0] && rows[0].parent;
-				if (batch) {
+		frappe
+			.call({ method: OT_BULK_STATUS_METHOD, args: { overtime_request: frm.doc.name } })
+			.then((r) => {
+				const status = (r && r.message) || {};
+				if (status.batch) {
 					frm.add_custom_button(__("Go to Bulk Overtime"), () =>
-						frappe.set_route("Form", "Bulk Overtime", batch),
+						frappe.set_route("Form", "Bulk Overtime", status.batch),
 					);
-				} else {
+				} else if (status.approved) {
 					frm.add_custom_button(__("Create Bulk Overtime"), () =>
 						frm.events.start_bulk_overtime(frm),
 					).addClass("btn-primary");
 				}
-			})
-			.catch(() => {
-				// the link lookup is a convenience, not a gate
-				frm.add_custom_button(__("Create Bulk Overtime"), () =>
-					frm.events.start_bulk_overtime(frm),
-				).addClass("btn-primary");
 			});
 	},
 
