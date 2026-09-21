@@ -1069,6 +1069,58 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		self.assertFalse(row.manual_working_hours)
 		self.assertEqual(row.working_hours, 11.5, "read from the attendance, not typed")
 
+	# ──────────────────────────────────────────────────────────────────────
+	# What the Overtime Request form asks before offering its button
+	# ──────────────────────────────────────────────────────────────────────
+
+	def _status(self, name):
+		from upande_ta.upande_ta.doctype.overtime_request.overtime_request import bulk_overtime_status
+
+		return bulk_overtime_status(name)
+
+	def test_a_draft_request_offers_no_batch(self):
+		"""Nothing is payable until the last approval: a draft gets no button."""
+		name = self.make_request({self.working_day: 2}, submit=False)[0]
+		status = self._status(name)
+		self.assertEqual((status["approved"], status["batch"]), (False, None))
+
+	def test_an_approved_request_offers_to_create_one(self):
+		name = self.make_request({self.working_day: 2})[0]
+		status = self._status(name)
+		self.assertEqual((status["approved"], status["batch"]), (True, None))
+
+	def test_a_request_awaiting_approval_offers_no_batch(self):
+		"""Halfway through the chain is not approved, whatever the stage is
+		called — the workflow's own states are what is read."""
+		self._needs_workflow("Overtime Request")
+		name = self.make_request({self.working_day: 2}, submit=False)[0]
+		self._apply(frappe.get_doc("Overtime Request", name), "Submit for Approval")
+
+		self.assertFalse(self._status(name)["approved"])
+
+	def test_a_rejected_request_offers_no_batch(self):
+		self._needs_workflow("Overtime Request")
+		name = self.make_request({self.working_day: 2}, submit=False)[0]
+		self._apply(frappe.get_doc("Overtime Request", name), "Submit for Approval", "Reject")
+
+		self.assertFalse(self._status(name)["approved"])
+
+	def test_a_paid_request_points_at_its_batch(self):
+		name = self.make_request({self.working_day: 2})[0]
+		batch = self.make_bulk_overtime()
+		batch.insert(ignore_permissions=True)
+
+		self.assertEqual(self._status(name)["batch"], batch.name)
+
+	def test_a_cancelled_batch_stops_pointing_at_it(self):
+		name = self.make_request({self.working_day: 2})[0]
+		batch = self.make_bulk_overtime()
+		batch.insert(ignore_permissions=True)
+		batch.submit()
+		batch.cancel()
+
+		self.assertIsNone(self._status(name)["batch"], "a cancelled batch has released it")
+
 
 if __name__ == "__main__":
 	unittest.main()

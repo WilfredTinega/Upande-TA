@@ -25,6 +25,7 @@ from frappe.model.document import Document
 from frappe.query_builder.functions import Coalesce
 from frappe.utils import (
 	add_days,
+	cint,
 	date_diff,
 	flt,
 	get_first_day,
@@ -259,3 +260,68 @@ def month_start(value: str) -> datetime.date:
 		return datetime.datetime.strptime(str(value), "%Y-%m").date()
 	except ValueError:
 		frappe.throw(_("{0} is not a month. Pick one with the Month field.").format(frappe.bold(value)))
+
+
+@frappe.whitelist()
+def bulk_overtime_status(overtime_request: str) -> dict:
+	"""What the form needs to decide its Bulk Overtime button.
+
+	``batch`` is the Bulk Overtime already paying this request, if any, and
+	``approved`` says whether it has cleared its last approval — a request is
+	only payable once it has.
+
+	The batch cannot be looked up from the desk's generic list API:
+	``frappe.desk.reportview`` has no notion of a parent doctype, so a child
+	table is not readable through it. It is answered here, where the
+	permission check belongs anyway.
+	"""
+	frappe.has_permission("Overtime Request", doc=overtime_request, throw=True)
+	doc = frappe.get_doc("Overtime Request", overtime_request)
+	return {"approved": is_finally_approved(doc), "batch": paying_batch(overtime_request)}
+
+
+def is_finally_approved(doc) -> bool:
+	"""Whether this request has cleared the last stage of its approval.
+
+	docstatus 1 is the approval — nothing else reaches it, and a rejection
+	deliberately stays at 0 — but where a workflow is in force its own states
+	are read, so a chain with more stages than the one shipped still answers
+	this correctly, whatever those stages are called.
+	"""
+	if doc.docstatus != 1:
+		return False
+
+	state = doc.get("workflow_state")
+	if not state:
+		return True
+
+	workflow = frappe.db.get_value("Workflow", {"document_type": doc.doctype, "is_active": 1}, "name")
+	if not workflow:
+		return True
+
+	doc_status = frappe.db.get_value(
+		"Workflow Document State", {"parent": workflow, "state": state}, "doc_status"
+	)
+	return cint(doc_status) == 1
+
+
+def paying_batch(overtime_request: str) -> str | None:
+	"""The Bulk Overtime already paying this request, if there is one. A
+	cancelled batch does not count: it has released whatever it held."""
+	if not frappe.db.exists("DocType", "Bulk Overtime"):
+		return None
+
+	rows = frappe.db.sql(
+		"""
+		select entry.parent
+		from `tabBulk Overtime Entry` entry
+		join `tabBulk Overtime` bo on bo.name = entry.parent
+		where entry.parenttype = 'Bulk Overtime'
+			and bo.docstatus < 2
+			and entry.overtime_request = %s
+		order by bo.creation desc
+		limit 1
+		""",
+		overtime_request,
+	)
+	return rows[0][0] if rows else None
