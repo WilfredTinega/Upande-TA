@@ -91,11 +91,15 @@ frappe.ui.form.on("Bulk Overtime", {
 			const result = r.message || {};
 
 			if (!result.rows && !(result.left_out || []).length) {
-				frappe.msgprint({
-					title: __("Nothing to Pay"),
-					indicator: "orange",
-					message: __("No approved Overtime Requests in this period."),
-				});
+				// saying "no requests" when there are approved requests but no
+				// attendance yet sends people looking in the wrong place
+				const message = !result.approved_requests
+					? __("No approved Overtime Requests in this period.")
+					: __(
+							"Found <b>{0}</b> approved Overtime Request(s), but no attendance on any of the <b>{1}</b> day(s) they cover. Overtime is paid against the biometric logs, so there is nothing to pay until the attendance for those days is in.",
+							[result.approved_requests, result.days_without_attendance],
+					  );
+				frappe.msgprint({ title: __("Nothing to Pay"), indicator: "orange", message });
 				return;
 			}
 			if ((result.left_out || []).length) {

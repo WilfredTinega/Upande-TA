@@ -7,8 +7,10 @@ The chain is::
 
     Overtime Request (approved)  ->  Bulk Overtime  ->  Overtime Slip  ->  Additional Salary
 
-**Get Overtime** pulls every approved request row in the period (one row per
-employee per date) and checks it against that day's attendance. The hours paid
+**Get Overtime** pulls every approved request overlapping the period and
+expands it into one row per employee per date — a request may cover a day, a
+week or a month, and its requested hours are per day — then checks each row
+against that day's attendance. The hours paid
 are the lower of what was requested and what the biometric shows was worked
 (see ``upande_ta.upande_ta.overtime_engine``). HR may override a row by hand,
 with a reason, up to the requested hours — for a missing clock-out, say.
@@ -30,7 +32,7 @@ import frappe
 from frappe import _
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.model.document import Document
-from frappe.utils import cint, flt, get_link_to_form, getdate, today
+from frappe.utils import add_days, cint, flt, get_link_to_form, getdate, today
 
 from upande_ta.upande_ta import overtime_engine as engine
 
@@ -103,7 +105,8 @@ class BulkOvertime(Document):
 			if row.manual_override
 		}
 
-		requests = self._approved_request_rows()
+		found = frappe._dict(requests=0, days_without_attendance=0)
+		requests = self._approved_request_rows(found)
 		claimed = self._claimed_elsewhere(requests)
 		blocked = self._employees_with_overlapping_slips({r.employee for r in requests})
 
@@ -142,9 +145,25 @@ class BulkOvertime(Document):
 		self.set_totals()
 		self.set_title()
 
-		return {"rows": len(self.bulk_overtime_entries), "left_out": sorted(set(left_out))}
+		return {
+			"rows": len(self.bulk_overtime_entries),
+			"left_out": sorted(set(left_out)),
+			"approved_requests": found.requests,
+			"days_without_attendance": found.days_without_attendance,
+		}
 
-	def _approved_request_rows(self):
+	def _approved_request_rows(self, found=None):
+		"""One row per employee per date, from every approved request that
+		overlaps this period.
+
+		A request covers a range — a day, a week, a month — and its requested
+		hours are *per day*, so a range is expanded one date at a time and
+		clipped to this document's own period. A range longer than a day is a
+		standing permission rather than a promise about each day, so its dates
+		with no attendance at all are dropped; a single-day request keeps its
+		row either way, because that day was asked for by name and a missing
+		clock-in is what HR needs to see.
+		"""
 		farm_join = farm_filter = ""
 		values = {"company": self.company, "from_date": self.from_date, "to_date": self.to_date}
 		if self.custom_farm and "custom_farm" in frappe.db.get_table_columns("Employee"):
@@ -152,23 +171,63 @@ class BulkOvertime(Document):
 			farm_filter = "and emp.custom_farm = %(custom_farm)s"
 			values["custom_farm"] = self.custom_farm
 
-		return frappe.db.sql(
+		requests = frappe.db.sql(
 			f"""
-			select req.name as request, req.overtime_date, req.overtime_type, row.employee,
-				row.employee_name, row.requested_hours
+			select req.name as request, req.overtime_date,
+				coalesce(req.to_date, req.overtime_date) as request_to_date,
+				req.overtime_type, row.employee, row.employee_name, row.requested_hours
 			from `tabOvertime Request` req
 			join `tabOvertime Request Employee` row
 				on row.parent = req.name and row.parenttype = 'Overtime Request'
 			{farm_join}
 			where req.docstatus = 1
 				and req.company = %(company)s
-				and req.overtime_date between %(from_date)s and %(to_date)s
+				and req.overtime_date <= %(to_date)s
+				and coalesce(req.to_date, req.overtime_date) >= %(from_date)s
 				{farm_filter}
 			order by row.employee_name, req.overtime_date
 			""",
 			values,
 			as_dict=True,
 		)
+
+		if found is not None:
+			found.requests = len({row.request for row in requests})
+
+		if not requests:
+			return []
+
+		# the same lookup refresh_entries uses, so a date is dropped only when
+		# it would have shown up as "No Attendance" anyway
+		attended = set(self._attendance_by_day({r.employee for r in requests}))
+		period_start, period_end = getdate(self.from_date), getdate(self.to_date)
+
+		rows = []
+		for request in requests:
+			start = max(getdate(request.overtime_date), period_start)
+			end = min(getdate(request.request_to_date), period_end)
+			is_range = getdate(request.request_to_date) > getdate(request.overtime_date)
+
+			date = start
+			while date <= end:
+				if is_range and (request.employee, date) not in attended:
+					if found is not None:
+						found.days_without_attendance += 1
+				else:
+					rows.append(
+						frappe._dict(
+							request=request.request,
+							overtime_date=date,
+							overtime_type=request.overtime_type,
+							employee=request.employee,
+							employee_name=request.employee_name,
+							requested_hours=request.requested_hours,
+						)
+					)
+				date = add_days(date, 1)
+
+		rows.sort(key=lambda r: (r.employee_name or "", r.overtime_date))
+		return rows
 
 	def _claimed_elsewhere(self, requests) -> dict:
 		"""(employee, date) pairs already in another open or submitted Bulk

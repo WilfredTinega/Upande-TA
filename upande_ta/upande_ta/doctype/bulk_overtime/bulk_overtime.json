@@ -160,8 +160,14 @@
   }
  ],
  "index_web_pages_for_search": 1,
- "links": [],
- "modified": "2026-09-19 19:00:00.000000",
+ "links": [
+  {
+   "group": "Payout",
+   "link_doctype": "Overtime Slip",
+   "link_fieldname": "custom_bulk_overtime"
+  }
+ ],
+ "modified": "2026-09-21 19:58:15.505205",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime",

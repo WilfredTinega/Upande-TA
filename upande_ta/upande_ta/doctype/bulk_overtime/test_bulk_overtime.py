@@ -30,7 +30,25 @@ from upande_ta.upande_ta.overtime_engine import (
 
 # Frappe crawls Link targets for test records unless told not to; this module
 # needs none of them.
-IGNORE_TEST_RECORD_DEPENDENCIES = ["Company", "Employee", "Overtime Type", "Overtime Request", "Farm"]
+#: Generating a "_Test Company" pulls in erpnext's country fixtures, which this
+#: site cannot install and none of these tests need.
+IGNORE_TEST_RECORD_DEPENDENCIES = [
+	"Additional Salary",
+	"Attendance",
+	"Company",
+	"Department",
+	"Designation",
+	"Employee",
+	"Farm",
+	"Gender",
+	"Holiday List",
+	"Overtime Request",
+	"Overtime Slip",
+	"Overtime Type",
+	"Salary Component",
+	"Salary Structure",
+	"Shift Type",
+]
 
 
 class TestShiftLength(unittest.TestCase):
