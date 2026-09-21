@@ -19,6 +19,7 @@ required_apps = ["hrms"]
 
 doctype_js = {
 	"Employee": "public/js/employee.js",
+	"Holiday List Assignment": "public/js/holiday_list_assignment.js",
 	"Stock Entry": "public/js/stock_entry.js",
 }
 
@@ -96,9 +97,7 @@ override_doctype_class = {
 }
 
 doc_events = {
-	"Employee Checkin": {
-		"validate": "upande_ta.upande_ta.overrides.employee_checkin.prevent_duplicate"
-	},
+	"Employee Checkin": {"validate": "upande_ta.upande_ta.overrides.employee_checkin.prevent_duplicate"},
 	"Employee": {
 		"before_save": "upande_ta.upande_ta.overrides.employee.set_attendance_device_id",
 		"after_insert": "upande_ta.upande_ta.overrides.employee.set_attendance_device_id",
@@ -131,7 +130,11 @@ has_permission = {
 scheduler_events = {
 	"cron": {
 		"0 0 * * *": [
-			"upande_ta.upande_ta.doctype.bulk_week_off.bulk_week_off.submit_due_employee_transfers"
+			"upande_ta.upande_ta.doctype.bulk_week_off.bulk_week_off.submit_due_employee_transfers",
+			# Overtime is approved before it is worked, so most requests have
+			# nothing to pay at approval time. This picks them up once their
+			# attendance is in, rather than leaving someone to watch for it.
+			"upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime.create_pending_batches",
 		],
 		"* * * * *": [
 			"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.mark_stale_devices_offline_scheduled"

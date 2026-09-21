@@ -1,7 +1,8 @@
 {
  "actions": [],
- "creation": "2026-09-19 19:00:00.000000",
+ "creation": "2026-09-19 19:00:00",
  "doctype": "DocType",
+ "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "employee",
@@ -16,7 +17,8 @@
   "status",
   "section_break_override",
   "manual_override",
-  "override_reason",
+  "column_break_ruvb",
+  "manual_working_hours",
   "section_break_source",
   "overtime_request",
   "attendance",
@@ -28,40 +30,38 @@
  ],
  "fields": [
   {
+   "columns": 1,
    "fieldname": "employee",
    "fieldtype": "Link",
    "label": "Employee",
    "options": "Employee",
-   "reqd": 1,
    "read_only": 1,
-   "columns": 1,
-   "in_list_view": 1
+   "reqd": 1
   },
   {
+   "columns": 2,
+   "fetch_from": "employee.employee_name",
    "fieldname": "employee_name",
    "fieldtype": "Data",
    "label": "Employee Name",
-   "fetch_from": "employee.employee_name",
-   "read_only": 1,
-   "in_list_view": 1,
-   "columns": 2
+   "read_only": 1
   },
   {
+   "columns": 1,
    "fieldname": "overtime_date",
    "fieldtype": "Date",
-   "label": "Date",
-   "read_only": 1,
    "in_list_view": 1,
-   "columns": 1
+   "label": "Date",
+   "read_only": 1
   },
   {
+   "columns": 1,
    "fieldname": "day_type",
    "fieldtype": "Select",
+   "in_list_view": 1,
    "label": "Day Type",
    "options": "Working Day\nRest Day\nPublic Holiday",
-   "read_only": 1,
-   "in_list_view": 1,
-   "columns": 1
+   "read_only": 1
   },
   {
    "fieldname": "overtime_type",
@@ -75,39 +75,38 @@
    "fieldtype": "Column Break"
   },
   {
+   "columns": 1,
    "fieldname": "requested_hours",
    "fieldtype": "Float",
-   "label": "Requested",
-   "read_only": 1,
    "in_list_view": 1,
-   "columns": 1
+   "label": "Requested",
+   "read_only": 1
   },
   {
+   "columns": 1,
    "fieldname": "biometric_hours",
    "fieldtype": "Float",
-   "label": "Biometric",
-   "read_only": 1,
    "in_list_view": 1,
-   "columns": 1
+   "label": "Biometric",
+   "read_only": 1
   },
   {
+   "columns": 1,
    "fieldname": "approved_hours",
    "fieldtype": "Float",
+   "in_list_view": 1,
    "label": "Approved",
    "non_negative": 1,
-   "in_list_view": 1,
-   "columns": 1,
-   "read_only_depends_on": "eval:!doc.manual_override",
-   "description": "The lower of Requested and Biometric. Tick Manual Override to enter it yourself."
+   "read_only_depends_on": "eval:!doc.manual_override"
   },
   {
+   "columns": 1,
    "fieldname": "status",
    "fieldtype": "Select",
+   "in_list_view": 1,
    "label": "Status",
    "options": "\nMatched\nCapped at Request\nWorked Less\nNo Clock-Out\nNo Shift\nNo Attendance",
-   "read_only": 1,
-   "in_list_view": 1,
-   "columns": 1
+   "read_only": 1
   },
   {
    "fieldname": "section_break_override",
@@ -115,16 +114,10 @@
    "label": "Override"
   },
   {
+   "default": "0",
    "fieldname": "manual_override",
    "fieldtype": "Check",
    "label": "Manual Override"
-  },
-  {
-   "fieldname": "override_reason",
-   "fieldtype": "Small Text",
-   "label": "Override Reason",
-   "depends_on": "manual_override",
-   "mandatory_depends_on": "manual_override"
   },
   {
    "fieldname": "section_break_source",
@@ -136,7 +129,8 @@
    "fieldtype": "Link",
    "label": "Overtime Request",
    "options": "Overtime Request",
-   "read_only": 1
+   "read_only": 1,
+   "search_index": 1
   },
   {
    "fieldname": "attendance",
@@ -163,24 +157,38 @@
    "read_only": 1
   },
   {
-   "fieldname": "working_hours",
-   "fieldtype": "Float",
-   "label": "Working Hours",
+   "default": "0",
+   "fieldname": "manual_working_hours",
+   "fieldtype": "Check",
+   "label": "Worked Hours Entered by Hand",
    "read_only": 1
   },
   {
+   "columns": 1,
+   "fieldname": "working_hours",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Worked",
+   "read_only_depends_on": "eval:!parent.edit_worked_hours"
+  },
+  {
+   "allow_on_submit": 1,
    "fieldname": "overtime_slip",
    "fieldtype": "Link",
    "label": "Overtime Slip",
+   "no_copy": 1,
    "options": "Overtime Slip",
-   "read_only": 1,
-   "allow_on_submit": 1,
-   "no_copy": 1
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_ruvb",
+   "fieldtype": "Column Break"
   }
  ],
  "index_web_pages_for_search": 1,
+ "istable": 1,
  "links": [],
- "modified": "2026-09-19 20:00:00.000000",
+ "modified": "2026-09-22 05:17:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime Entry",
@@ -189,7 +197,5 @@
  "row_format": "Dynamic",
  "sort_field": "creation",
  "sort_order": "DESC",
- "states": [],
- "editable_grid": 0,
- "istable": 1
+ "states": []
 }

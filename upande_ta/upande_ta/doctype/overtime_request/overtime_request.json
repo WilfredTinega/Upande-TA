@@ -1,71 +1,127 @@
 {
  "actions": [],
- "creation": "2026-09-19 19:00:00.000000",
+ "autoname": "naming_series:",
+ "creation": "2026-09-19 19:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
   "naming_series",
   "company",
-  "overtime_date",
-  "overtime_type",
   "column_break_request_1",
-  "default_requested_hours",
+  "request_for",
+  "column_break_kgeg",
+  "overtime_type",
+  "week",
+  "month",
+  "week_year",
+  "column_break_tgng",
+  "overtime_date",
+  "to_date",
+  "column_break_qnmt",
   "reason",
+  "column_break_ufhk",
+  "default_requested_hours",
   "section_break_employees",
+  "custom_farm",
+  "column_break_employee_filters_2",
+  "department",
+  "column_break_employee_filters",
+  "designation",
+  "section_break_pick_employees",
   "get_employees",
   "employees",
   "section_break_totals",
   "number_of_employees",
+  "number_of_days",
   "column_break_totals",
   "total_requested_hours",
   "amended_from"
  ],
  "fields": [
   {
+   "default": "HR-OTR-.YYYY.-",
    "fieldname": "naming_series",
    "fieldtype": "Select",
+   "hidden": 1,
    "label": "Series",
    "options": "HR-OTR-.YYYY.-",
-   "default": "HR-OTR-.YYYY.-",
-   "reqd": 1,
-   "hidden": 1
+   "reqd": 1
   },
   {
    "fieldname": "company",
    "fieldtype": "Link",
+   "in_standard_filter": 1,
    "label": "Company",
    "options": "Company",
-   "reqd": 1,
+   "remember_last_selected_value": 1,
+   "reqd": 1
+  },
+  {
+   "default": "Single Day",
+   "fieldname": "request_for",
+   "fieldtype": "Select",
    "in_standard_filter": 1,
-   "remember_last_selected_value": 1
+   "label": "Request For",
+   "options": "Single Day\nWeek\nMonth\nDate Range",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.request_for=='Week'",
+   "fieldname": "week",
+   "fieldtype": "Select",
+   "label": "Week",
+   "mandatory_depends_on": "eval:doc.request_for=='Week'",
+   "options": "\nWeek 01\nWeek 02\nWeek 03\nWeek 04\nWeek 05\nWeek 06\nWeek 07\nWeek 08\nWeek 09\nWeek 10\nWeek 11\nWeek 12\nWeek 13\nWeek 14\nWeek 15\nWeek 16\nWeek 17\nWeek 18\nWeek 19\nWeek 20\nWeek 21\nWeek 22\nWeek 23\nWeek 24\nWeek 25\nWeek 26\nWeek 27\nWeek 28\nWeek 29\nWeek 30\nWeek 31\nWeek 32\nWeek 33\nWeek 34\nWeek 35\nWeek 36\nWeek 37\nWeek 38\nWeek 39\nWeek 40\nWeek 41\nWeek 42\nWeek 43\nWeek 44\nWeek 45\nWeek 46\nWeek 47\nWeek 48\nWeek 49\nWeek 50\nWeek 51\nWeek 52\nWeek 53"
+  },
+  {
+   "depends_on": "eval:doc.request_for=='Week'",
+   "fieldname": "week_year",
+   "fieldtype": "Int",
+   "label": "Year",
+   "mandatory_depends_on": "eval:doc.request_for=='Week'"
+  },
+  {
+   "depends_on": "eval:doc.request_for=='Month'",
+   "fieldname": "month",
+   "fieldtype": "Data",
+   "label": "Month",
+   "mandatory_depends_on": "eval:doc.request_for=='Month'"
   },
   {
    "fieldname": "overtime_date",
    "fieldtype": "Date",
-   "label": "Overtime Date",
-   "reqd": 1,
    "in_list_view": 1,
-   "in_standard_filter": 1
+   "in_standard_filter": 1,
+   "label": "From Date",
+   "mandatory_depends_on": "eval:!['Week','Month'].includes(doc.request_for)",
+   "read_only_depends_on": "eval:['Week','Month'].includes(doc.request_for)"
+  },
+  {
+   "depends_on": "eval:doc.request_for!='Single Day'",
+   "fieldname": "to_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "To Date",
+   "read_only_depends_on": "eval:doc.request_for!='Date Range'"
   },
   {
    "fieldname": "overtime_type",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Overtime Type",
    "options": "Overtime Type",
-   "reqd": 1,
-   "in_list_view": 1,
-   "description": "Carries the rate: its multipliers, including the weekend and public-holiday ones, are what the Overtime Slip pays by."
+   "reqd": 1
   },
   {
    "fieldname": "column_break_request_1",
    "fieldtype": "Column Break"
   },
   {
+   "description": "Applied to every employee you add. Change a row to give one person different hours.",
    "fieldname": "default_requested_hours",
    "fieldtype": "Float",
    "label": "Requested Hours",
-   "non_negative": 1,
-   "description": "Applied to every employee you add. Change a row to give one person different hours."
+   "non_negative": 1
   },
   {
    "fieldname": "reason",
@@ -77,6 +133,39 @@
    "fieldname": "section_break_employees",
    "fieldtype": "Section Break",
    "label": "Employees"
+  },
+  {
+   "fieldname": "custom_farm",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Unit/Division",
+   "options": "Farm"
+  },
+  {
+   "fieldname": "column_break_employee_filters_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Department",
+   "options": "Department"
+  },
+  {
+   "fieldname": "column_break_employee_filters",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "designation",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Designation",
+   "options": "Designation"
+  },
+  {
+   "fieldname": "section_break_pick_employees",
+   "fieldtype": "Section Break"
   },
   {
    "fieldname": "get_employees",
@@ -101,6 +190,12 @@
    "read_only": 1
   },
   {
+   "fieldname": "number_of_days",
+   "fieldtype": "Int",
+   "label": "Number of Days",
+   "read_only": 1
+  },
+  {
    "fieldname": "column_break_totals",
    "fieldtype": "Column Break"
   },
@@ -114,72 +209,95 @@
    "fieldname": "amended_from",
    "fieldtype": "Link",
    "label": "Amended From",
-   "options": "Overtime Request",
    "no_copy": 1,
+   "options": "Overtime Request",
    "print_hide": 1,
    "read_only": 1,
    "search_index": 1
+  },
+  {
+   "fieldname": "column_break_kgeg",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_tgng",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_qnmt",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_ufhk",
+   "fieldtype": "Column Break"
   }
  ],
  "index_web_pages_for_search": 1,
- "links": [],
- "modified": "2026-09-19 20:00:00.000000",
+ "is_submittable": 1,
+ "links": [
+  {
+   "group": "Overtime",
+   "is_child_table": 1,
+   "link_doctype": "Bulk Overtime Entry",
+   "link_fieldname": "overtime_request",
+   "parent_doctype": "Bulk Overtime",
+   "table_fieldname": "bulk_overtime_entries"
+  }
+ ],
+ "modified": "2026-09-22 04:06:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Overtime Request",
+ "naming_rule": "By \"Naming Series\" field",
  "owner": "Administrator",
  "permissions": [
   {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
    "role": "System Manager",
-   "read": 1,
-   "print": 1,
-   "email": 1,
-   "report": 1,
    "share": 1,
-   "create": 1,
-   "write": 1,
-   "delete": 1,
    "submit": 1,
-   "cancel": 1,
-   "amend": 1,
-   "export": 1
+   "write": 1
   },
   {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
    "role": "HR Manager",
-   "read": 1,
-   "print": 1,
-   "email": 1,
-   "report": 1,
    "share": 1,
-   "create": 1,
-   "write": 1,
-   "delete": 1,
    "submit": 1,
-   "cancel": 1,
-   "amend": 1,
-   "export": 1
+   "write": 1
   },
   {
-   "role": "HR User",
-   "read": 1,
-   "print": 1,
-   "email": 1,
-   "report": 1,
-   "share": 1,
    "create": 1,
-   "write": 1,
-   "delete": 1
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR User",
+   "share": 1,
+   "write": 1
   }
  ],
  "row_format": "Dynamic",
+ "search_fields": "company,overtime_date",
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
- "autoname": "naming_series:",
- "naming_rule": "By \"Naming Series\" field",
- "is_submittable": 1,
- "track_changes": 1,
  "title_field": "reason",
- "show_title_field_in_link": 0,
- "search_fields": "company,overtime_date"
+ "track_changes": 1
 }

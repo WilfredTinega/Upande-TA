@@ -6,14 +6,21 @@
  "field_order": [
   "naming_series",
   "company",
+  "column_break_pcmy",
   "custom_farm",
   "column_break_period",
   "from_date",
-  "to_date",
   "column_break_title",
+  "to_date",
+  "column_break_uwap",
   "bulk_overtime_title",
+  "section_break_zxgn",
+  "get_from_overtime_request",
+  "column_break_xmdk",
+  "edit_worked_hours",
+  "column_break_ufns",
+  "override_reason",
   "section_break_entries",
-  "get_overtime",
   "bulk_overtime_entries",
   "section_break_totals",
   "number_of_employees",
@@ -29,47 +36,50 @@
  ],
  "fields": [
   {
+   "default": "HR-BOT-.YYYY.-",
    "fieldname": "naming_series",
    "fieldtype": "Select",
+   "hidden": 1,
    "label": "Series",
    "options": "HR-BOT-.YYYY.-",
-   "default": "HR-BOT-.YYYY.-",
-   "reqd": 1,
-   "hidden": 1
+   "reqd": 1
   },
   {
    "fieldname": "company",
    "fieldtype": "Link",
    "label": "Company",
    "options": "Company",
-   "reqd": 1,
-   "in_standard_filter": 1,
-   "remember_last_selected_value": 1
+   "remember_last_selected_value": 1,
+   "reqd": 1
   },
   {
    "fieldname": "custom_farm",
    "fieldtype": "Link",
-   "label": "Unit/Division",
+   "label": "Unit",
    "options": "Farm",
-   "description": "Leave blank for every approved request in the company."
+   "read_only": 1
   },
   {
    "fieldname": "column_break_period",
    "fieldtype": "Column Break"
   },
   {
+   "description": "Taken from the Overtime Requests this batch pays.",
    "fieldname": "from_date",
    "fieldtype": "Date",
+   "in_list_view": 1,
    "label": "From Date",
-   "reqd": 1,
-   "in_list_view": 1
+   "read_only": 1,
+   "reqd": 1
   },
   {
+   "description": "Taken from the Overtime Requests this batch pays.",
    "fieldname": "to_date",
    "fieldtype": "Date",
+   "in_list_view": 1,
    "label": "To Date",
-   "reqd": 1,
-   "in_list_view": 1
+   "read_only": 1,
+   "reqd": 1
   },
   {
    "fieldname": "column_break_title",
@@ -87,16 +97,30 @@
    "label": "Overtime"
   },
   {
-   "fieldname": "get_overtime",
+   "button_color": "Primary",
+   "depends_on": "eval:doc.docstatus===0",
+   "fieldname": "get_from_overtime_request",
    "fieldtype": "Button",
-   "label": "Get Overtime",
-   "description": "Pulls every approved Overtime Request in the period and checks it against attendance."
+   "label": "Get Overtime"
   },
   {
    "fieldname": "bulk_overtime_entries",
    "fieldtype": "Table",
    "label": "Entries",
    "options": "Bulk Overtime Entry"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.docstatus===0 && (doc.bulk_overtime_entries || []).length",
+   "fieldname": "edit_worked_hours",
+   "fieldtype": "Check",
+   "label": "Edit Worked Hours"
+  },
+  {
+   "depends_on": "eval:doc.edit_worked_hours || (doc.bulk_overtime_entries || []).some(r => r.manual_override || r.manual_working_hours)",
+   "fieldname": "override_reason",
+   "fieldtype": "Small Text",
+   "label": "Reason for Manual Changes"
   },
   {
    "fieldname": "section_break_totals",
@@ -135,33 +159,61 @@
   {
    "fieldname": "total_approved_hours",
    "fieldtype": "Float",
+   "in_list_view": 1,
    "label": "Approved Hours",
-   "read_only": 1,
-   "in_list_view": 1
+   "read_only": 1
   },
   {
    "fieldname": "section_break_notes",
    "fieldtype": "Section Break"
   },
   {
-   "fieldname": "remarks",
-   "fieldtype": "Small Text",
-   "label": "Remarks"
+   "fieldname": "number_of_employees",
+   "fieldtype": "Int",
+   "label": "Employees",
+   "read_only": 1
   },
   {
    "fieldname": "amended_from",
    "fieldtype": "Link",
    "label": "Amended From",
-   "options": "Bulk Overtime",
    "no_copy": 1,
+   "options": "Bulk Overtime",
    "print_hide": 1,
    "read_only": 1,
    "search_index": 1
+  },
+  {
+   "fieldname": "section_break_zxgn",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_xmdk",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_pcmy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_uwap",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_ufns",
+   "fieldtype": "Column Break"
   }
  ],
  "index_web_pages_for_search": 1,
- "links": [],
- "modified": "2026-09-19 19:00:00.000000",
+ "is_submittable": 1,
+ "links": [
+  {
+   "group": "Payout",
+   "link_doctype": "Overtime Slip",
+   "link_fieldname": "custom_bulk_overtime"
+  }
+ ],
+ "modified": "2026-09-22 05:17:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime",
@@ -215,15 +267,10 @@
   }
  ],
  "row_format": "Dynamic",
+ "search_fields": "company,from_date,to_date",
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
- "allow_import": 1,
- "autoname": "naming_series:",
- "naming_rule": "By \"Naming Series\" field",
- "is_submittable": 1,
- "track_changes": 1,
- "document_type": "Document",
  "title_field": "bulk_overtime_title",
- "search_fields": "company,from_date,to_date"
+ "track_changes": 1
 }

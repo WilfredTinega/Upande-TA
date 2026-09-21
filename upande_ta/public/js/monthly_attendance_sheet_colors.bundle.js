@@ -1,4 +1,3 @@
-
 frappe.provide("frappe.views");
 
 (function () {
@@ -10,6 +9,27 @@ frappe.provide("frappe.views");
 
 	const STATUS_CODES = /^(P|A|WFH|H|WO|HD\/P|HD\/A)$/;
 
+	// Weekly Off, in its own purple. It used to share Holiday's grey, which left
+	// the two unreadable side by side in a month that has both. Keep in step
+	// with WEEK_OFF_COLOR in overrides/monthly_attendance_sheet.py, which paints
+	// the legend chip.
+	const WEEK_OFF_COLOR = "#7B1FA2";
+
+	// The per-employee total columns the server adds (add_total_columns), each
+	// in the colour its own day cells carry: a green Present count over a run of
+	// green Ps reads as one thing rather than two.
+	const TOTAL_COLORS = {
+		ta_present: "green",
+		ta_absent: "red",
+		ta_on_leave: "#318AD8",
+		ta_half_day: "orange",
+		ta_holiday: "#878787",
+		ta_week_off: WEEK_OFF_COLOR,
+	};
+
+	// Total Days carries no colour of its own, but it is ruled off with the rest.
+	const TOTAL_FIELDS = new Set(Object.keys(TOTAL_COLORS).concat(["ta_total_days"]));
+
 	function leaveColorFormatter(value, row, column, data, default_formatter) {
 		const rawValue = value;
 
@@ -20,39 +40,57 @@ frappe.provide("frappe.views");
 			summarized_view = frappe.query_report.get_filter_value("summarized_view");
 			group_by = frappe.query_report.get_filter_value("group_by");
 		} catch (e) {
-			
+			// filters not ready yet
 		}
 
 		if (group_by && column.colIndex === 1) {
 			value = "<strong>" + value + "</strong>";
 		}
 
+		const fieldname = (column && (column.fieldname || column.id)) || "";
+		const totalColor = TOTAL_COLORS[fieldname];
+
 		if (data && data._is_summary) {
 			if (rawValue === null || rawValue === undefined || rawValue === "") return value;
-			const fn = column && (column.fieldname || column.id);
+			const fn = fieldname;
 
 			if (fn === SUMMARY_LABEL_FIELD) {
-
 				return (
 					// Background comes from the themed variable in
 					// ensureSummaryStyle(): this label floats over the frozen
 					// column, so it has to repaint the band behind itself.
 					"<b class='ta-summary-label' style=\"position:absolute; left:0; top:0; bottom:0;" +
 					" display:flex; align-items:center; padding-left:15px; white-space:nowrap;" +
-					" z-index:5;\">" +
+					' z-index:5;">' +
 					rawValue +
 					"</b>"
 				);
 			}
-			return "<b>" + rawValue + "</b>";
+			// the grand total of this status, in the status' own colour
+			const bold = "<b>" + rawValue + "</b>";
+			return totalColor
+				? "<span style='color:" + totalColor + "'>" + bold + "</span>"
+				: bold;
 		}
 
 		if (summarized_view) return value;
 
-		const fieldname = column && (column.fieldname || column.id);
-		if (!DAY_RE.test(fieldname || "")) return value;
+		if (totalColor) {
+			// a zero says nothing, and a column of coloured zeros is noise
+			const count = (value || "")
+				.toString()
+				.replace(/<[^>]*>/g, "")
+				.trim();
+			if (!count || count === "0") return value;
+			return "<span style='color:" + totalColor + "'>" + value + "</span>";
+		}
 
-		const txt = (value || "").toString().replace(/<[^>]*>/g, "").trim();
+		if (!DAY_RE.test(fieldname)) return value;
+
+		const txt = (value || "")
+			.toString()
+			.replace(/<[^>]*>/g, "")
+			.trim();
 		if (!txt) return value;
 
 		let color;
@@ -66,7 +104,9 @@ frappe.provide("frappe.views");
 					? "#914EE3"
 					: txt === "HD/A"
 					? "orange"
-					: "#878787"; // H, WO
+					: txt === "WO"
+					? WEEK_OFF_COLOR
+					: "#878787"; // H
 		} else {
 			color = "#318AD8"; // a leave-type abbreviation -> blue
 		}
@@ -84,7 +124,9 @@ frappe.provide("frappe.views");
 		if (document.getElementById("ta-mas-summary-style")) return;
 		const css =
 			":root { --ta-summary-bg: var(--subtle-accent, #f7f7f7);" +
-			" --ta-summary-fg: var(--heading-color, #171717); }" +
+			" --ta-summary-fg: var(--heading-color, #171717);" +
+			" --ta-total-edge: var(--heading-color, #171717);" +
+			" --ta-total-rule: var(--border-color, #d1d8dd); }" +
 			".dt-row.ta-summary-row .dt-cell { background:var(--ta-summary-bg) !important; color:var(--ta-summary-fg) !important; position:relative; }" +
 			".dt-row.ta-summary-top .dt-cell" +
 			" { border-top:2px solid var(--ta-summary-fg) !important; }" +
@@ -96,6 +138,51 @@ frappe.provide("frappe.views");
 		document.head.appendChild(style);
 	}
 
+	// Rule the total columns off from the month they sum up: bold text, a light
+	// line between them and a heavy one down each side of the block.
+	//
+	// Written as CSS against the column indexes rather than classes added to
+	// each cell, because the table renders rows as they scroll into view: a
+	// rule already in the stylesheet catches those, a class added to today's
+	// cells does not. The indexes move whenever the columns do, so this runs
+	// again after every render.
+	function styleTotalColumns(report) {
+		try {
+			const wrapper = report && report.$report && report.$report[0];
+			const manager = report && report.datatable && report.datatable.datamanager;
+			if (!wrapper || !manager || !manager.columns) return;
+
+			ensureSummaryStyle();
+			wrapper.classList.add("ta-mas-report");
+
+			let style = document.getElementById("ta-mas-total-style");
+			if (!style) {
+				style = document.createElement("style");
+				style.id = "ta-mas-total-style";
+				document.head.appendChild(style);
+			}
+
+			const indexes = manager.columns
+				.filter((col) => TOTAL_FIELDS.has(col.id))
+				.map((col) => col.colIndex);
+			if (!indexes.length) {
+				style.textContent = "";
+				return;
+			}
+
+			const cell = (i) => ".ta-mas-report .dt-cell--col-" + i;
+			style.textContent =
+				indexes.map(cell).join(",") +
+				" { font-weight:600 !important;" +
+				" border-right:1px solid var(--ta-total-rule) !important; }" +
+				cell(indexes[0]) +
+				" { border-left:2px solid var(--ta-total-edge) !important; }" +
+				cell(indexes[indexes.length - 1]) +
+				" { border-right:2px solid var(--ta-total-edge) !important; }";
+		} catch (e) {
+			console.warn("[MAS totals]", e);
+		}
+	}
 
 	function markSummaryRows(report) {
 		try {
@@ -105,9 +192,11 @@ frappe.provide("frappe.views");
 
 			ensureSummaryStyle();
 
-			wrapper.querySelectorAll(".dt-row.ta-summary-row, .dt-row.ta-summary-top").forEach((el) => {
-				el.classList.remove("ta-summary-row", "ta-summary-top");
-			});
+			wrapper
+				.querySelectorAll(".dt-row.ta-summary-row, .dt-row.ta-summary-top")
+				.forEach((el) => {
+					el.classList.remove("ta-summary-row", "ta-summary-top");
+				});
 
 			let firstSummaryMarked = false;
 			rows.forEach((row, i) => {
@@ -137,6 +226,7 @@ frappe.provide("frappe.views");
 				requestAnimationFrame(() => {
 					scheduled = false;
 					markSummaryRows(report);
+					styleTotalColumns(report);
 				});
 			});
 			obs.observe(wrapper, { childList: true, subtree: true });
@@ -145,7 +235,6 @@ frappe.provide("frappe.views");
 			console.warn("[MAS observer]", e);
 		}
 	}
-
 
 	function pinSummaryRows(datatable, dataRows) {
 		try {
@@ -259,8 +348,7 @@ frappe.provide("frappe.views");
 		if (!company) return;
 
 		frappe.call({
-			method:
-				"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.get_payroll_period",
+			method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.get_payroll_period",
 			args: { company },
 			callback: function (r) {
 				const data = (r && r.message) || {};
@@ -323,7 +411,6 @@ frappe.provide("frappe.views");
 				if (this.report_name === REPORT && this.report_settings) {
 					this.report_settings.formatter = leaveColorFormatter;
 
-
 					if (!this.report_settings.__ta_gdo) {
 						const origGDO = this.report_settings.get_datatable_options;
 						this.report_settings.get_datatable_options = function (options) {
@@ -338,7 +425,7 @@ frappe.provide("frappe.views");
 					}
 				}
 			} catch (e) {
-				
+				// never break the report over a decoration
 			}
 			return origPrepareColumns.apply(this, arguments);
 		};
@@ -359,8 +446,10 @@ frappe.provide("frappe.views");
 			const out = origRender.apply(this, arguments);
 			if (this.report_name === REPORT) {
 				installSummaryObserver(this);
+				styleTotalColumns(this);
 				setTimeout(() => {
 					markSummaryRows(this);
+					styleTotalColumns(this);
 				}, 50);
 			}
 			return out;

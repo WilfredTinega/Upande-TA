@@ -30,7 +30,25 @@ from upande_ta.upande_ta.overtime_engine import (
 
 # Frappe crawls Link targets for test records unless told not to; this module
 # needs none of them.
-IGNORE_TEST_RECORD_DEPENDENCIES = ["Company", "Employee", "Overtime Type", "Overtime Request", "Farm"]
+#: Generating a "_Test Company" pulls in erpnext's country fixtures, which this
+#: site cannot install and none of these tests need.
+IGNORE_TEST_RECORD_DEPENDENCIES = [
+	"Additional Salary",
+	"Attendance",
+	"Company",
+	"Department",
+	"Designation",
+	"Employee",
+	"Farm",
+	"Gender",
+	"Holiday List",
+	"Overtime Request",
+	"Overtime Slip",
+	"Overtime Type",
+	"Salary Component",
+	"Salary Structure",
+	"Shift Type",
+]
 
 
 class TestShiftLength(unittest.TestCase):
@@ -122,3 +140,60 @@ class TestEngineIsFrameworkFree(unittest.TestCase):
 
 if __name__ == "__main__":
 	unittest.main()
+
+
+class TestOvertimeWorkflowChain(unittest.TestCase):
+	"""The approval chain is built from one config block, so the invariants
+	that keep it safe are worth pinning to that block rather than to a
+	hand-written list of states."""
+
+	def setUp(self):
+		from upande_ta.upande_ta import overtime_workflow as wf
+
+		self.wf = wf
+
+	def test_approved_is_the_only_submitted_state(self):
+		"""Bulk Overtime pays from docstatus 1, and a plain submit() lands on
+		the first state carrying it."""
+		submitted = [s for s in self.wf.states() if s.doc_status == "1"]
+		self.assertEqual([s.state for s in submitted], ["Approved"])
+
+		order = [s.state for s in self.wf.states()]
+		self.assertLess(order.index("Approved"), order.index("Rejected"))
+		self.assertLess(order.index("Approved"), order.index("Cancelled"))
+
+	def test_a_rejection_never_submits(self):
+		"""The whole reason Rejected is docstatus 0: at 1 a rejected request
+		would be paid, and a rejected batch would cut its slips."""
+		self.assertEqual(self.wf.REJECTED.doc_status, "0")
+
+	def test_every_colour_is_one_the_desk_knows(self):
+		for stage in self.wf.states():
+			with self.subTest(state=stage.state):
+				self.assertIn(stage.colour, self.wf.COLOURS)
+
+	def test_the_chain_runs_draft_to_approved(self):
+		moves = {(f, a): t for f, a, t, _role in self.wf.transitions()}
+		self.assertEqual(moves[("Draft", "Submit for Approval")], "Pending Approval")
+		self.assertEqual(moves[("Pending Approval", "Approve")], "Approved")
+		self.assertEqual(moves[("Pending Approval", "Reject")], "Rejected")
+		self.assertEqual(moves[("Rejected", "Reopen")], "Draft")
+
+	def test_adding_a_stage_rewires_the_chain(self):
+		"""Adding a signature should need nothing but another Stage."""
+		from unittest.mock import patch
+
+		extra = self.wf.Stage(state="Pending HOD", role="HOD", action="Authorise")
+		with patch.object(self.wf, "APPROVALS", (self.wf.APPROVALS[0], extra)):
+			moves = {(f, a): t for f, a, t, _role in self.wf.transitions()}
+			# the first stage now hands on to the new one, and it to Approved
+			self.assertEqual(moves[("Pending Approval", "Approve")], "Pending HOD")
+			self.assertEqual(moves[("Pending HOD", "Authorise")], "Approved")
+			# and the new stage can reject like any other
+			self.assertEqual(moves[("Pending HOD", "Reject")], "Rejected")
+			self.assertIn("Authorise", self.wf.actions())
+
+	def test_a_stage_edits_as_its_own_role_unless_told_otherwise(self):
+		stage = self.wf.Stage(state="X", role="HR Manager")
+		self.assertEqual(stage.editor, "HR Manager")
+		self.assertEqual(self.wf.Stage(state="X", role="HR Manager", allow_edit="HR User").editor, "HR User")
