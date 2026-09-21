@@ -25,12 +25,9 @@ frappe.ui.form.on("Bulk Overtime", {
 	},
 
 	refresh(frm) {
-		// rows only come from Get Overtime
+		// rows only come from the Get Overtime picker
 		frm.set_df_property("bulk_overtime_entries", "cannot_add_rows", 1);
-		frm.toggle_display(
-			["get_overtime", "get_from_overtime_request"],
-			frm.doc.docstatus === 0,
-		);
+		frm.toggle_display("get_from_overtime_request", frm.doc.docstatus === 0);
 
 		if (frm.doc.docstatus === 1) {
 			frm.add_custom_button(__("Overtime Slips"), () =>
@@ -78,7 +75,24 @@ frappe.ui.form.on("Bulk Overtime", {
 		frm.refresh_field("bulk_overtime_entries");
 	},
 
-	/** Pay only the requests HR picks, rather than every one in the period. */
+	/** The one way rows get here: pick the approved requests to pay. Sweeping
+	 * the whole period blindly is what "Select All" in the dialog does, and
+	 * this way the cost is paid once, with the list in front of you. */
+	/** Worked Hours is what the biometric read, so it is read-only until asked
+	 * for — a scanner that missed a clock-out is the case this is for. */
+	edit_worked_hours(frm) {
+		frm._worked_hours_unlocked = !frm._worked_hours_unlocked;
+		const grid = frm.fields_dict.bulk_overtime_entries.grid;
+		grid.update_docfield_property("working_hours", "read_only", frm._worked_hours_unlocked ? 0 : 1);
+		grid.refresh();
+		frappe.show_alert({
+			message: frm._worked_hours_unlocked
+				? __("Worked Hours can now be edited on a row. Give a reason for each one you change.")
+				: __("Worked Hours locked again."),
+			indicator: frm._worked_hours_unlocked ? "orange" : "green",
+		});
+	},
+
 	get_from_overtime_request(frm) {
 		if (!frm.doc.company || !frm.doc.from_date || !frm.doc.to_date) {
 			frappe.msgprint({
@@ -100,7 +114,9 @@ frappe.ui.form.on("Bulk Overtime", {
 				frappe.msgprint({
 					title: __("Nothing to Pick"),
 					indicator: "orange",
-					message: __("No approved Overtime Requests overlap this period."),
+					message: __(
+						"No approved Overtime Request has anything left to add here — either none overlaps this period, or every day they cover is already in another Bulk Overtime.",
+					),
 				});
 				return;
 			}
@@ -123,11 +139,30 @@ frappe.ui.form.on("Bulk Overtime", {
 				request.days_in_period === 1
 					? __("1 day in this period")
 					: __("{0} days in this period", [request.days_in_period]);
+			// a day is paid once. A request with nothing left is not offered at
+			// all, so anything labelled here is only partly taken — say where
+			// the rest went, or the missing rows look like a bug
+			const taken = (request.taken_by || [])
+				.map((t) =>
+					t.this_batch
+						? __("{0} row(s) already in this batch", [t.entries])
+						: __("{0} row(s) already in {1}{2}", [
+								t.entries,
+								t.batch,
+								t.submitted ? __(", submitted") : "",
+						  ]),
+				)
+				.join(" · ");
+
 			return `
 				<label class="checkbox" style="display:block; padding:8px 0; border-bottom:1px solid var(--border-color);">
 					<input type="checkbox" class="ot-request" data-name="${bo_esc(request.name)}">
 					<b>${bo_esc(request.name)}</b>
 					<span class="text-muted">${bo_esc(request.request_for || "")}</span>
+					<span class="indicator-pill green" style="margin-left:6px;">${__("{0} row(s) to add", [
+						request.rows_available,
+					])}</span>
+					${taken ? `<span class="indicator-pill orange" style="margin-left:4px;">${bo_esc(taken)}</span>` : ""}
 					<div class="text-muted small" style="margin-left:22px;">
 						${bo_esc(span)} · ${covered}<br>
 						${__("{0} employee(s)", [request.employees])} ·
@@ -138,7 +173,7 @@ frappe.ui.form.on("Bulk Overtime", {
 		};
 
 		const dialog = new frappe.ui.Dialog({
-			title: __("Get from Overtime Request"),
+			title: __("Get Overtime"),
 			size: "large",
 			fields: [
 				{
@@ -153,7 +188,7 @@ frappe.ui.form.on("Bulk Overtime", {
 				},
 				{ fieldtype: "HTML", fieldname: "requests" },
 			],
-			primary_action_label: __("Get Overtime"),
+			primary_action_label: __("Get Selected"),
 			primary_action() {
 				const picked = dialog.$wrapper
 					.find("input.ot-request:checked")
@@ -164,7 +199,7 @@ frappe.ui.form.on("Bulk Overtime", {
 					return;
 				}
 				dialog.hide();
-				frm.events.get_overtime(frm, picked);
+				frm.events.fetch_overtime(frm, picked);
 			},
 		});
 
@@ -172,7 +207,11 @@ frappe.ui.form.on("Bulk Overtime", {
 		dialog.show();
 	},
 
-	get_overtime(frm, overtime_requests) {
+	/** The fetch itself. Reached from the picker, and from Create > Bulk
+	 * Overtime on an Overtime Request. Frappe calls a field handler as
+	 * (frm, doctype, name), so no button may point here directly: its second
+	 * argument would arrive as the doctype name. */
+	fetch_overtime(frm, overtime_requests) {
 		if (!frm.doc.company || !frm.doc.from_date || !frm.doc.to_date) {
 			frappe.msgprint({
 				title: __("Missing Details"),
@@ -227,9 +266,30 @@ frappe.ui.form.on("Bulk Overtime", {
 });
 
 frappe.ui.form.on("Bulk Overtime Entry", {
+	// one reason field covers both kinds of change, so it is only cleared
+	// once neither is in force
 	manual_override(frm, cdt, cdn) {
+		frm.events.clear_reason_if_untouched(frm, cdt, cdn);
+	},
+
+	manual_working_hours(frm, cdt, cdn) {
+		frm.events.clear_reason_if_untouched(frm, cdt, cdn);
+	},
+
+	/** Typing a figure is the same statement as ticking the box, so the box
+	 * follows the typing rather than having to be found first. */
+	working_hours(frm, cdt, cdn) {
 		const row = locals[cdt][cdn];
-		if (!row.manual_override) {
+		if (frm._worked_hours_unlocked && !row.manual_working_hours) {
+			frappe.model.set_value(cdt, cdn, "manual_working_hours", 1);
+		}
+	},
+});
+
+frappe.ui.form.on("Bulk Overtime", {
+	clear_reason_if_untouched(frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		if (!row.manual_override && !row.manual_working_hours) {
 			frappe.model.set_value(cdt, cdn, "override_reason", "");
 		}
 	},

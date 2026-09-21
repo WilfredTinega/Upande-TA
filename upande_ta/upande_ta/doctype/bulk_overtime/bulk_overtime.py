@@ -7,17 +7,19 @@ The chain is::
 
     Overtime Request (approved)  ->  Bulk Overtime  ->  Overtime Slip  ->  Additional Salary
 
-**Get Overtime** pulls every approved request overlapping the period and
-expands it into one row per employee per date — a request may cover a day, a
-week or a month, and its requested hours are per day — then checks each row
-against that day's attendance. The hours paid
-are the lower of what was requested and what the biometric shows was worked
-(see ``upande_ta.upande_ta.overtime_engine``). HR may override a row by hand,
-with a reason, up to the requested hours — for a missing clock-out, say.
+**Get Overtime** lists the approved requests with hours still to pay in the
+period and takes the ones HR picks — "Select All" for the lot. Each is expanded
+into one row per employee per date (a request may cover a day, a week or a
+month, and its requested hours are per day), then checked against that day's
+attendance. The hours paid are the lower of what was requested and what the
+biometric shows was worked (see ``upande_ta.upande_ta.overtime_engine``). HR
+may override a row by hand, with a reason, up to the requested hours — for a
+missing clock-out, say.
 
-**Get from Overtime Request** narrows that to the requests HR picks, and the
-Overtime Request form can start a batch over its own period. Either way the
-period governs: a request is always clipped to this document's dates.
+A request with nothing left to add — every day of it already in another batch —
+is not offered, since a day is paid once. The Overtime Request form can also
+start a batch over its own period. Either way the period governs: a request is
+always clipped to this document's dates.
 
 Approval runs through the **Bulk Overtime Approval** workflow, and approving is
 what submits the batch — so a rejection stays at docstatus 0 and cuts no slips.
@@ -104,7 +106,7 @@ class BulkOvertime(Document):
 		has overridden by hand keep their hours and reason.
 
 		``overtime_requests`` narrows the sweep to the requests named — what
-		**Get from Overtime Request** sends when HR picks them by hand. The
+		**Get Overtime** sends when HR picks them from the list. The
 		period still governs either way: a chosen request is clipped to it
 		exactly as a swept one is, so the batch can never pay outside its own
 		dates.
@@ -113,13 +115,12 @@ class BulkOvertime(Document):
 			frappe.throw(_("Set the Company, From Date and To Date first."))
 		self.validate_dates()
 
-		chosen = frappe.parse_json(overtime_requests) if isinstance(overtime_requests, str) else overtime_requests
-		chosen = [name for name in (chosen or []) if name]
+		chosen = _request_names(overtime_requests)
 
 		manual = {
 			(row.employee, str(getdate(row.overtime_date))): row
 			for row in self.bulk_overtime_entries
-			if row.manual_override
+			if row.manual_override or row.manual_working_hours
 		}
 
 		found = frappe._dict(requests=0, days_without_attendance=0)
@@ -153,12 +154,18 @@ class BulkOvertime(Document):
 					"overtime_request": request.request,
 				},
 			)
-			if key in manual:
-				row.manual_override = 1
-				row.approved_hours = manual[key].approved_hours
-				row.override_reason = manual[key].override_reason
+			kept = manual.get(key)
+			if kept:
+				row.override_reason = kept.override_reason
+				if kept.manual_override:
+					row.manual_override = 1
+					row.approved_hours = kept.approved_hours
+				if kept.manual_working_hours:
+					row.manual_working_hours = 1
+					row.working_hours = kept.working_hours
 
 		self.refresh_entries()
+		self.adopt_request_unit(chosen)
 		self.set_totals()
 		self.set_title()
 
@@ -184,12 +191,14 @@ class BulkOvertime(Document):
 
 	@frappe.whitelist()
 	def get_approved_requests(self):
-		"""The approved requests this batch could pay from, for the picker.
+		"""The approved requests this batch could still pay from, for the picker.
 
 		One row per request rather than per employee per day: what is being
-		chosen is the request, and the fetch does the expanding. ``days`` is
-		how much of the request this period actually covers, which is the part
-		HR is agreeing to pay now.
+		chosen is the request, and the fetch does the expanding. What it offers
+		is what the fetch would actually take — a request whose every day is
+		already being paid elsewhere has nothing left to add and is not offered
+		at all, while one only partly taken is offered for the rest and says
+		where the remainder went.
 		"""
 		if not (self.company and self.from_date and self.to_date):
 			frappe.throw(_("Set the Company, From Date and To Date first."))
@@ -218,12 +227,109 @@ class BulkOvertime(Document):
 			as_dict=True,
 		)
 
+		available = self._rows_available_per_request()
+		offered = [request for request in requests if available.get(request.name)]
+
 		period_start, period_end = getdate(self.from_date), getdate(self.to_date)
-		for request in requests:
+		for request in offered:
 			start = max(getdate(request.overtime_date), period_start)
 			end = min(getdate(request.to_date), period_end)
 			request.days_in_period = (end - start).days + 1
-		return requests
+			request.rows_available = available[request.name]
+
+		self._mark_already_taken(offered)
+		return offered
+
+	def _rows_available_per_request(self) -> dict:
+		"""How many rows each approved request would still add to this batch.
+
+		The fetch's own expansion, minus the days already being paid elsewhere,
+		so what the picker offers cannot drift from what picking it produces.
+		"""
+		rows = self._approved_request_rows()
+		if not rows:
+			return {}
+
+		claimed = self._claimed_elsewhere(rows)
+		blocked = self._employees_with_overlapping_slips({row.employee for row in rows})
+
+		available = {}
+		for row in rows:
+			if (row.employee, str(row.overtime_date)) in claimed or row.employee in blocked:
+				continue
+			available[row.request] = available.get(row.request, 0) + 1
+		return available
+
+	def _mark_already_taken(self, requests):
+		"""Say which of these requests are already sitting in a Bulk Overtime.
+
+		A day is paid once, so anything already taken is left out of the fetch
+		— better for the picker to say so up front than for the rows to go
+		quietly missing afterwards. A range can legitimately be split across
+		two batches, so this reports what is taken rather than barring the
+		request from being picked again for its remaining days.
+		"""
+		names = [request.name for request in requests]
+		if not names:
+			return
+
+		taken = frappe.db.sql(
+			"""
+			select entry.overtime_request as request, entry.parent as batch,
+				bo.docstatus, count(*) as entries
+			from `tabBulk Overtime Entry` entry
+			join `tabBulk Overtime` bo on bo.name = entry.parent
+			where entry.parenttype = 'Bulk Overtime'
+				and bo.docstatus < 2
+				and entry.overtime_request in %(names)s
+			group by entry.overtime_request, entry.parent, bo.docstatus
+			order by entry.parent
+			""",
+			{"names": tuple(names)},
+			as_dict=True,
+		)
+
+		by_request = {}
+		for row in taken:
+			by_request.setdefault(row.request, []).append(row)
+
+		for request in requests:
+			rows = by_request.get(request.name, [])
+			request.taken_by = [
+				{
+					"batch": row.batch,
+					"entries": row.entries,
+					"this_batch": row.batch == self.name,
+					"submitted": row.docstatus == 1,
+				}
+				for row in rows
+			]
+			request.entries_taken = sum(row.entries for row in rows)
+
+	def adopt_request_unit(self, chosen):
+		"""Take the Unit/Division from the requests this batch was fetched from.
+
+		Picking the requests by hand says which unit the batch is for, so the
+		field should not have to be filled twice — and the title reads off it.
+		Only when this batch has none of its own and the requests agree on one:
+		a batch spanning two units belongs to neither. Run after the rows are
+		built, because Unit/Division also filters the sweep, and adopting it
+		must not quietly drop rows from the very fetch that set it.
+		"""
+		if self.custom_farm or not chosen:
+			return
+		if "custom_farm" not in frappe.db.get_table_columns("Overtime Request"):
+			return
+
+		units = {
+			unit
+			for unit in frappe.get_all(
+				"Overtime Request", filters={"name": ["in", list(chosen)]}, pluck="custom_farm"
+			)
+			if unit
+		}
+		if len(units) == 1:
+			self.custom_farm = units.pop()
 
 	def _approved_request_rows(self, found=None, chosen=None):
 		"""One row per employee per date, from every approved request that
@@ -376,11 +482,25 @@ class BulkOvertime(Document):
 			row.day_type = day_types.get(row.employee, date)
 			row.attendance = record.name if record else None
 			row.shift = record.shift if record else None
-			row.working_hours = flt(record.working_hours) if record else 0
-			row.shift_hours = (shift_hours.get(row.shift) or default_hours) if record else 0
+
+			if row.manual_working_hours:
+				# typed in by hand, for a shift the scanner did not record
+				# properly. It stands in for the attendance: the hours are
+				# HR's assertion that they were worked, and everything below
+				# is worked out from them exactly as it would be from a punch.
+				if not (row.override_reason or "").strip():
+					frappe.throw(
+						_("Row #{0}: give a reason for the worked hours you entered by hand.").format(row.idx)
+					)
+				worked = flt(row.working_hours)
+				row.shift_hours = shift_hours.get(row.shift) or default_hours
+			else:
+				worked = flt(record.working_hours) if record else 0
+				row.working_hours = worked
+				row.shift_hours = (shift_hours.get(row.shift) or default_hours) if record else 0
 
 			row.biometric_hours = engine.biometric_overtime(
-				row.working_hours,
+				worked,
 				row.shift_hours,
 				row.day_type,
 				maximum_hours=caps.get(row.overtime_type) or 0,
@@ -388,8 +508,8 @@ class BulkOvertime(Document):
 			approved, row.status = engine.settle(
 				row.requested_hours,
 				row.biometric_hours,
-				has_attendance=bool(record),
-				has_hours=bool(record and flt(record.working_hours) > 0),
+				has_attendance=bool(record) or bool(row.manual_working_hours),
+				has_hours=worked > 0,
 				# a rest day pays every hour worked, so it needs no shift length
 				has_shift=bool(row.shift_hours) or row.day_type != engine.WORKING_DAY,
 			)
@@ -527,6 +647,30 @@ def _daily_caps(overtime_types) -> dict:
 		fields=["name", "maximum_overtime_hours_allowed"],
 	)
 	return {row.name: flt(row.maximum_overtime_hours_allowed) for row in rows}
+
+
+def _request_names(value) -> list:
+	"""The Overtime Requests a fetch was narrowed to.
+
+	The desk sends a JSON array; a direct API call may pass a real list or a
+	single name. Anything else is nothing to narrow by — and must not raise,
+	since a fetch that cannot read its argument should still be able to sweep
+	the period rather than fail the whole form.
+	"""
+	if not value:
+		return []
+	if isinstance(value, str):
+		value = value.strip()
+		if value.startswith("["):
+			try:
+				value = frappe.parse_json(value)
+			except Exception:
+				return []
+		else:
+			value = [value]
+	if not isinstance(value, list | tuple | set):
+		return []
+	return [name for name in value if isinstance(name, str) and name.strip()]
 
 
 def _shift_lengths(shifts) -> dict:
