@@ -171,10 +171,12 @@
    "label": "Worked Hours Entered by Hand"
   },
   {
-   "description": "From the attendance. Use Edit Worked Hours above to correct a missed punch.",
+   "columns": 1,
+   "description": "From the attendance. Tick Edit Worked Hours on the batch to correct a missed punch.",
    "fieldname": "working_hours",
    "fieldtype": "Float",
-   "label": "Working Hours",
+   "in_list_view": 1,
+   "label": "Worked",
    "read_only": 1
   },
   {
@@ -190,7 +192,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-09-22 09:45:00.000000",
+ "modified": "2026-09-22 10:15:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime Entry",

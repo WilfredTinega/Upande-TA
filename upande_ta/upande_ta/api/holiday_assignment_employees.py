@@ -58,6 +58,7 @@ def _build_employee_query(
 	company: str,
 	from_date,
 	to_date,
+	employee: str | None,
 	custom_farm: str | None,
 	department: str | None,
 	designation: str | None,
@@ -83,6 +84,8 @@ def _build_employee_query(
 	Employee = frappe.qb.DocType("Employee")
 
 	filters = [["company", "=", company]]
+	if employee:
+		filters.append(["name", "=", employee])
 	if department:
 		filters.append(["department", "=", department])
 	if designation:
@@ -154,6 +157,7 @@ def get_holiday_assignment_employees(
 	company: str,
 	from_date: str,
 	to_date: str | None = None,
+	employee: str | None = None,
 	custom_farm: str | None = None,
 	department: str | None = None,
 	designation: str | None = None,
@@ -168,6 +172,8 @@ def get_holiday_assignment_employees(
 	                the employment window and the prior-holiday-list lookup.
 	        to_date: optional end of the window. When given, employees relieved
 	                before it are dropped too.
+	        employee: optional single Employee, for picking one person out of a
+	                large unit without scrolling the table.
 	        custom_farm: optional Unit/Division (``Employee.custom_farm``).
 	                Ignored on sites without that custom field.
 	        department, designation: optional.
@@ -221,6 +227,7 @@ def get_holiday_assignment_employees(
 		company=company,
 		from_date=from_date,
 		to_date=to_date,
+		employee=employee,
 		custom_farm=custom_farm,
 		department=department,
 		designation=designation,

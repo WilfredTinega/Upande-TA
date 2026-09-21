@@ -916,15 +916,27 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		self.assertEqual(row.approved_hours, 2)
 		self.assertEqual(row.status, "Matched")
 
-	def test_hand_entered_hours_need_a_reason(self):
+	def test_hand_entered_hours_need_a_reason_to_be_paid(self):
+		"""Asked for at submit, not on every save: the figure is typed straight
+		into the grid, and a half-finished row should not block saving — but it
+		must not create money without saying why either."""
 		self.make_request({self.no_punch_day: 2})
 		doc = self.make_bulk_overtime()
 
 		row = self.own_rows(doc)[0]
 		row.manual_working_hours = 1
 		row.working_hours = 11
-		with self.assertRaises(frappe.ValidationError):
-			doc.refresh_entries()
+		doc.insert(ignore_permissions=True)  # saving is fine
+
+		with self.assertRaises(frappe.ValidationError) as caught:
+			doc.submit()
+		self.assertIn("reason", frappe.utils.strip_html(str(caught.exception)).lower())
+
+		doc.reload()  # the refused submit left this copy behind the database
+		doc.bulk_overtime_entries[0].override_reason = "Scanner missed the clock-out"
+		doc.save(ignore_permissions=True)
+		doc.submit()
+		self.assertEqual(doc.docstatus, 1)
 
 	def test_hand_entered_hours_survive_a_refetch(self):
 		self.make_request({self.no_punch_day: 2})

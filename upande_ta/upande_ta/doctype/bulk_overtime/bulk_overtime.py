@@ -67,11 +67,28 @@ class BulkOvertime(Document):
 	def before_submit(self):
 		if not any(flt(row.approved_hours) > 0 for row in self.bulk_overtime_entries):
 			frappe.throw(_("There are no approved hours to pay."))
+		self.validate_hand_entered_hours()
 		for row in self.bulk_overtime_entries:
 			if flt(row.approved_hours) > 0 and not row.overtime_type:
 				frappe.throw(
 					_("Row #{0}: the Overtime Request it came from has no Overtime Type.").format(row.idx)
 				)
+
+	def validate_hand_entered_hours(self):
+		"""Worked hours typed in by hand are paid without a punch behind them,
+		so each one says why before the batch creates any money."""
+		missing = [
+			row.idx
+			for row in self.bulk_overtime_entries
+			if row.manual_working_hours and not (row.override_reason or "").strip()
+		]
+		if missing:
+			frappe.throw(
+				_("Give a reason for the worked hours entered by hand on row(s) {0}.").format(
+					", ".join(str(idx) for idx in missing)
+				),
+				title=_("Reason Needed"),
+			)
 
 	def validate_dates(self):
 		if not (self.from_date and self.to_date):
@@ -488,10 +505,9 @@ class BulkOvertime(Document):
 				# properly. It stands in for the attendance: the hours are
 				# HR's assertion that they were worked, and everything below
 				# is worked out from them exactly as it would be from a punch.
-				if not (row.override_reason or "").strip():
-					frappe.throw(
-						_("Row #{0}: give a reason for the worked hours you entered by hand.").format(row.idx)
-					)
+				# The reason is asked for at submit rather than here: these are
+				# typed straight into the grid, and a half-finished row should
+				# not stop the batch being saved.
 				worked = flt(row.working_hours)
 				row.shift_hours = shift_hours.get(row.shift) or default_hours
 			else:
