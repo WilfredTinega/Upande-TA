@@ -5,7 +5,33 @@ const OT_FETCH_METHOD = "upande_ta.upande_ta.api.holiday_assignment_employees.ge
 
 const ot_esc = (value) => frappe.utils.escape_html(value == null ? "" : String(value));
 
-const ot_ymd = (date) => moment(date).format("YYYY-MM-DD");
+/** ISO week arithmetic done in plain UTC dates, mirroring the server's
+ * datetime.date.fromisocalendar: 4 January is always in week 1, and a week
+ * belongs to the year that numbers it — so week 1 can start in December. */
+const ot_ymd = (date) => date.toISOString().slice(0, 10);
+
+const ot_add_days = (date, days) => {
+	const moved = new Date(date);
+	moved.setUTCDate(moved.getUTCDate() + days);
+	return moved;
+};
+
+const ot_iso_week_start = (year, week) => {
+	const jan4 = new Date(Date.UTC(year, 0, 4));
+	const first_monday = ot_add_days(jan4, -((jan4.getUTCDay() || 7) - 1));
+	return ot_add_days(first_monday, (week - 1) * 7);
+};
+
+const ot_iso_week_of = (date) => {
+	const day = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+	// the Thursday of a week decides which year numbers it
+	const thursday = ot_add_days(day, 4 - (day.getUTCDay() || 7));
+	const year = thursday.getUTCFullYear();
+	const week = Math.ceil(((thursday - Date.UTC(year, 0, 1)) / 86400000 + 1) / 7);
+	return { year, week };
+};
+
+const ot_this_week = () => ot_iso_week_of(new Date());
 
 /** An inline bar for work whose length cannot be known in advance: it sweeps
  * towards the end rather than pretending to measure, and leaves the rest of
@@ -44,11 +70,6 @@ const ot_week_number = (value) => {
 	const number = cint(digits.length > 1 ? digits[digits.length - 1] : digits[0]);
 	return number >= 1 && number <= 53 ? number : null;
 };
-
-/** Monday of an ISO week, as YYYY-MM-DD. A week the year is too short for
- * rolls into the next one, and the caller writes the corrected label back. */
-const ot_week_start = (year, number) =>
-	ot_ymd(moment().isoWeekYear(year).isoWeek(number).startOf("isoWeek"));
 
 const ot_is_range = (frm) => frm.doc.request_for && frm.doc.request_for !== "Single Day";
 
@@ -124,6 +145,117 @@ frappe.ui.form.on("Overtime Request", {
 				.then(() => target.set_value("custom_farm", frm.doc.custom_farm || ""))
 				.then(() => target.events.fetch_overtime(target, [frm.doc.name]));
 		});
+	},
+
+	/** Month wears the browser's own picker; Week is a plain list of ISO week
+	 * numbers. Either way the start date is named for the period requested. */
+	dress_period_fields(frm) {
+		const $month = frm.fields_dict.month && frm.fields_dict.month.$input;
+		if ($month && $month.attr("type") !== "month") $month.attr("type", "month");
+		frm.set_df_property(
+			"overtime_date",
+			"label",
+			ot_is_range(frm) ? __("From Date") : __("Overtime Date"),
+		);
+		frm.events.describe_week(frm);
+	},
+
+	/** Spell out the dates a week number lands on, next to the list itself. */
+	describe_week(frm) {
+		const dates =
+			frm.doc.request_for === "Week" && frm.doc.overtime_date && frm.doc.to_date
+				? __("{0} to {1}", [
+						frappe.datetime.str_to_user(frm.doc.overtime_date),
+						frappe.datetime.str_to_user(frm.doc.to_date),
+				  ])
+				: __("ISO week: Monday to Sunday.");
+		frm.set_df_property("week", "description", dates);
+	},
+
+	/** Week and Month fix both ends; Single Day collapses them. The dates are
+	 * filled in here rather than on save, because the desk checks its own
+	 * mandatory fields before the server is ever asked. */
+	set_period(frm) {
+		// writing the corrected week back re-enters this through the week
+		// handler, and week 53 of a short year is exactly that case
+		if (frm._setting_period) return;
+		frm._setting_period = true;
+		try {
+			const type = frm.doc.request_for;
+			if (type === "Week") {
+				const number = ot_week_number(frm.doc.week);
+				if (!number) return;
+				const start = ot_iso_week_start(cint(frm.doc.week_year) || ot_this_week().year, number);
+				// read back off the resolved Monday: a week the year is too
+				// short for rolls into the next one, and the list should say so
+				const resolved = ot_iso_week_of(
+					new Date(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()),
+				);
+				frm.set_value("week", ot_week_label(resolved.week));
+				frm.set_value("week_year", resolved.year);
+				frm.set_value("overtime_date", ot_ymd(start));
+				frm.set_value("to_date", ot_ymd(ot_add_days(start, 6)));
+			} else if (type === "Month") {
+				const picked = /^(\d{4})-(\d{2})$/.exec(frm.doc.month || "");
+				let year, month;
+				if (picked) {
+					year = cint(picked[1]);
+					month = cint(picked[2]);
+				} else if (frm.doc.overtime_date) {
+					const on = frappe.datetime.str_to_obj(frm.doc.overtime_date);
+					year = on.getFullYear();
+					month = on.getMonth() + 1;
+				} else {
+					const now = new Date();
+					year = now.getFullYear();
+					month = now.getMonth() + 1;
+				}
+				frm.set_value("month", `${year}-${String(month).padStart(2, "0")}`);
+				frm.set_value("overtime_date", ot_ymd(new Date(Date.UTC(year, month - 1, 1))));
+				frm.set_value("to_date", ot_ymd(new Date(Date.UTC(year, month, 0))));
+			} else if (type === "Single Day") {
+				frm.set_value("to_date", frm.doc.overtime_date);
+			} else if (!frm.doc.to_date) {
+				frm.set_value("to_date", frm.doc.overtime_date);
+			}
+		} finally {
+			frm._setting_period = false;
+		}
+		frm.events.describe_week(frm);
+	},
+
+	request_for(frm) {
+		if (frm.doc.request_for === "Week") {
+			// overtime is nearly always asked for the week it is worked in, so
+			// that is where the fields start — both of them, every time
+			const now = ot_this_week();
+			if (!cint(frm.doc.week_year)) frm.set_value("week_year", now.year);
+			if (!ot_week_number(frm.doc.week)) frm.set_value("week", ot_week_label(now.week));
+		} else {
+			frm.set_value("week", null);
+			frm.set_value("week_year", null);
+		}
+		if (frm.doc.request_for !== "Month") frm.set_value("month", null);
+		frm.events.dress_period_fields(frm);
+		frm.events.set_period(frm);
+	},
+
+	week(frm) {
+		if (frm.doc.request_for !== "Week") return;
+		if (!cint(frm.doc.week_year)) frm.set_value("week_year", ot_this_week().year);
+		frm.events.set_period(frm);
+	},
+
+	week_year(frm) {
+		if (frm.doc.request_for === "Week") frm.events.set_period(frm);
+	},
+
+	month(frm) {
+		if (frm.doc.request_for === "Month") frm.events.set_period(frm);
+	},
+
+	overtime_date(frm) {
+		frm.events.set_period(frm);
 	},
 
 	onload(frm) {

@@ -93,8 +93,8 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "From Date",
-   "read_only_depends_on": "eval:['Week','Month'].includes(doc.request_for)",
-   "reqd": 1
+   "mandatory_depends_on": "eval:!['Week','Month'].includes(doc.request_for)",
+   "read_only_depends_on": "eval:['Week','Month'].includes(doc.request_for)"
   },
   {
    "depends_on": "eval:doc.request_for!='Single Day'",
@@ -244,7 +244,7 @@
    "table_fieldname": "bulk_overtime_entries"
   }
  ],
- "modified": "2026-09-22 03:57:51.375692",
+ "modified": "2026-09-22 04:06:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Overtime Request",
