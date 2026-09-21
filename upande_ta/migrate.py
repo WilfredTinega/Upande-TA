@@ -36,7 +36,6 @@ def _steps():
 		resync_scheduled_jobs,
 	)
 	from upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime import ensure_overtime_setup
-	from upande_ta.upande_ta.api.attendance_insights import ensure_attendance_insights_fields
 	from upande_ta.upande_ta.overrides.leave_type import ensure_abbreviation_field
 	from upande_ta.upande_ta.overrides.monthly_attendance_sheet import disable_prepared_report
 	from upande_ta.upande_ta.overrides.stock_entry import ensure_biometric_stock_entry_fields
@@ -364,6 +363,9 @@ _HR_SHIFT_SIDEBAR = "Shift & Attendance"
 # "Reports" and "Setup" headings are dropped along with the rest. The order
 # below is the grouping: the things opened daily first, then overtime, reports,
 # time & attendance, setup, and settings last.
+# fmt: off
+# One line per row, which is what makes this readable as the list it is; the
+# formatter would blow each entry out to six lines and bury the order.
 _SIDEBAR_LAYOUT = (
 	{"type": "Link", "link_type": "Workspace", "link_to": _HR_SHIFT_SIDEBAR, "label": "Home", "icon": "home"},
 	# Roster, Employee Attendance Tool, Shift Request and Attendance Request name
@@ -424,12 +426,13 @@ _SIDEBAR_LAYOUT = (
 	{"type": "Link", "link_type": "DocType", "link_to": "Biometric User", "label": "Biometric User", "icon": "user-check"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Biometric Template", "label": "Biometric Template", "icon": "scan-face"},
 )
+# fmt: on
 
 # Rows HRMS ships that this layout deliberately drops. Anything else HRMS adds
 # is carried over rather than lost, so a future version's new link still shows
 # up — at the end, where it is obvious it needs placing.
 _SIDEBAR_DROP = {
-	("link", "Dashboard", "attendance"),          # the Attendance dashboard tile
+	("link", "Dashboard", "attendance"),  # the Attendance dashboard tile
 	# The Upande TA workspace link. It has to be named here, not merely left out
 	# of the layout: the carry-over rule below would otherwise treat a row this
 	# app itself put there on an earlier migrate as something to preserve, and
@@ -527,7 +530,11 @@ def compose_shift_attendance_sidebar():
 		on save, so a stored heading never matches a computed one on those.
 		"""
 		is_link = (row.get("type") or "Link") == "Link"
-		fields = _SIDEBAR_ITEM_FIELDS if is_link else ("type", "label", "icon", "indent", "keep_closed", "collapsible")
+		fields = (
+			_SIDEBAR_ITEM_FIELDS
+			if is_link
+			else ("type", "label", "icon", "indent", "keep_closed", "collapsible")
+		)
 		shaped = [(f, row.get(f) or None) for f in fields]
 		if is_link:
 			shaped.append(("child", 1 if row.get("child") else None))
@@ -554,7 +561,6 @@ def compose_shift_attendance_sidebar():
 	print(f"{APP_NAME}: laid out the '{_HR_SHIFT_SIDEBAR}' sidebar ({len(rows)} rows)")
 
 
-
 # The workspace page itself, as opposed to its sidebar. HRMS puts an
 # "Attendance Count" dashboard chart at the top of it; the chart needs a company
 # filter to draw anything, so for everyone who has not set one it renders a
@@ -575,25 +581,42 @@ _DROP_WORKSPACE_CHARTS = ("Attendance Count",)
 # web page stays a sidebar-only entry.
 _WORKSPACE_CARD_LINKS = (
 	("Attendance", (("DocType", "Gate Pass"), ("DocType", "Meal Checkin"))),
-	("Shifts", (
-		("DocType", "Bulk Week Off"),
-		("DocType", "Holiday Assignment Tool"),
-		("DocType", "Holiday List Assignment"),
-	)),
+	(
+		"Shifts",
+		(
+			("DocType", "Bulk Week Off"),
+			("DocType", "Holiday Assignment Tool"),
+			("DocType", "Holiday List Assignment"),
+		),
+	),
 	("Overtime", (("DocType", "Overtime Request"), ("DocType", "Bulk Overtime"))),
-	("Biometrics", (
-		("DocType", "Biometric Logs"),
-		("DocType", "Biometric User"),
-		("DocType", "Biometric Template"),
-		("DocType", "Biometric Setting"),
-	)),
+	(
+		"Biometrics",
+		(
+			("DocType", "Biometric Logs"),
+			("DocType", "Biometric User"),
+			("DocType", "Biometric Template"),
+			("DocType", "Biometric Setting"),
+		),
+	),
 )
 
 # Everything on a Workspace Link row worth carrying when the list is rebuilt.
 _WORKSPACE_LINK_FIELDS = (
-	"type", "label", "icon", "hidden", "link_type", "link_to", "doctype_layout",
-	"dependencies", "only_for", "onboard", "is_query_report", "link_count",
-	"description", "report_ref_doctype",
+	"type",
+	"label",
+	"icon",
+	"hidden",
+	"link_type",
+	"link_to",
+	"doctype_layout",
+	"dependencies",
+	"only_for",
+	"onboard",
+	"is_query_report",
+	"link_count",
+	"description",
+	"report_ref_doctype",
 )
 
 
@@ -618,11 +641,7 @@ def compose_shift_attendance_workspace():
 			continue
 		# The spacer directly under the chart only existed to separate it from
 		# the heading below; on its own it is a gap at the top of the page.
-		if (
-			block.get("type") == "spacer"
-			and index
-			and is_dropped_chart(blocks[index - 1])
-		):
+		if block.get("type") == "spacer" and index and is_dropped_chart(blocks[index - 1]):
 			continue
 		kept.append(block)
 
@@ -672,15 +691,8 @@ def _shift_attendance_card_links(workspace):
 	table, because the rows are a flat list where a "Card Break" opens a card
 	and every row after it belongs to that card until the next break.
 	"""
-	rows = [
-		{f: link.get(f) for f in _WORKSPACE_LINK_FIELDS if link.get(f)}
-		for link in workspace.links
-	]
-	present = {
-		(row.get("link_type"), row.get("link_to"))
-		for row in rows
-		if row.get("type") == "Link"
-	}
+	rows = [{f: link.get(f) for f in _WORKSPACE_LINK_FIELDS if link.get(f)} for link in workspace.links]
+	present = {(row.get("link_type"), row.get("link_to")) for row in rows if row.get("type") == "Link"}
 	new_cards = []
 
 	for card, wanted in _WORKSPACE_CARD_LINKS:
@@ -695,11 +707,7 @@ def _shift_attendance_card_links(workspace):
 
 		# where this card's rows end: the next Card Break, or the end of the list
 		start = next(
-			(
-				i
-				for i, row in enumerate(rows)
-				if row.get("type") == "Card Break" and row.get("label") == card
-			),
+			(i for i, row in enumerate(rows) if row.get("type") == "Card Break" and row.get("label") == card),
 			None,
 		)
 		if start is None:
@@ -786,9 +794,7 @@ def rename_hr_app_icon():
 		# `hrms/desktop_icon/frappe_hr.json` and exports `hr.json` in its place,
 		# unconditionally on delete. Blanking `app` for the duration keeps this
 		# app out of HRMS' source tree; it is restored immediately after.
-		frappe.db.set_value(
-			"Desktop Icon", _HR_ICON_SHIPPED, "app", None, update_modified=False
-		)
+		frappe.db.set_value("Desktop Icon", _HR_ICON_SHIPPED, "app", None, update_modified=False)
 		try:
 			rename_doc(
 				"Desktop Icon",
@@ -799,9 +805,7 @@ def rename_hr_app_icon():
 				show_alert=False,
 			)
 		except Exception:
-			frappe.db.set_value(
-				"Desktop Icon", _HR_ICON_SHIPPED, "app", "hrms", update_modified=False
-			)
+			frappe.db.set_value("Desktop Icon", _HR_ICON_SHIPPED, "app", "hrms", update_modified=False)
 			raise
 		# `app` is what pairs the tile with hrms for Frappe's own duplicate sweep
 		# and for check_app_permission(), so it has to go back.
@@ -814,12 +818,8 @@ def rename_hr_app_icon():
 
 def _reparent_hr_children():
 	"""Move any tile still pointing at the shipped label onto the renamed group."""
-	for child in frappe.get_all(
-		"Desktop Icon", filters={"parent_icon": _HR_ICON_SHIPPED}, pluck="name"
-	):
-		frappe.db.set_value(
-			"Desktop Icon", child, "parent_icon", _HR_ICON, update_modified=False
-		)
+	for child in frappe.get_all("Desktop Icon", filters={"parent_icon": _HR_ICON_SHIPPED}, pluck="name"):
+		frappe.db.set_value("Desktop Icon", child, "parent_icon", _HR_ICON, update_modified=False)
 
 
 # --------------------------------------------------------------------------- #

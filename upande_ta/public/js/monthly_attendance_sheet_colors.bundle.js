@@ -1,4 +1,3 @@
-
 frappe.provide("frappe.views");
 
 (function () {
@@ -41,7 +40,7 @@ frappe.provide("frappe.views");
 			summarized_view = frappe.query_report.get_filter_value("summarized_view");
 			group_by = frappe.query_report.get_filter_value("group_by");
 		} catch (e) {
-			
+			// filters not ready yet
 		}
 
 		if (group_by && column.colIndex === 1) {
@@ -56,35 +55,42 @@ frappe.provide("frappe.views");
 			const fn = fieldname;
 
 			if (fn === SUMMARY_LABEL_FIELD) {
-
 				return (
 					// Background comes from the themed variable in
 					// ensureSummaryStyle(): this label floats over the frozen
 					// column, so it has to repaint the band behind itself.
 					"<b class='ta-summary-label' style=\"position:absolute; left:0; top:0; bottom:0;" +
 					" display:flex; align-items:center; padding-left:15px; white-space:nowrap;" +
-					" z-index:5;\">" +
+					' z-index:5;">' +
 					rawValue +
 					"</b>"
 				);
 			}
 			// the grand total of this status, in the status' own colour
 			const bold = "<b>" + rawValue + "</b>";
-			return totalColor ? "<span style='color:" + totalColor + "'>" + bold + "</span>" : bold;
+			return totalColor
+				? "<span style='color:" + totalColor + "'>" + bold + "</span>"
+				: bold;
 		}
 
 		if (summarized_view) return value;
 
 		if (totalColor) {
 			// a zero says nothing, and a column of coloured zeros is noise
-			const count = (value || "").toString().replace(/<[^>]*>/g, "").trim();
+			const count = (value || "")
+				.toString()
+				.replace(/<[^>]*>/g, "")
+				.trim();
 			if (!count || count === "0") return value;
 			return "<span style='color:" + totalColor + "'>" + value + "</span>";
 		}
 
 		if (!DAY_RE.test(fieldname)) return value;
 
-		const txt = (value || "").toString().replace(/<[^>]*>/g, "").trim();
+		const txt = (value || "")
+			.toString()
+			.replace(/<[^>]*>/g, "")
+			.trim();
 		if (!txt) return value;
 
 		let color;
@@ -178,7 +184,6 @@ frappe.provide("frappe.views");
 		}
 	}
 
-
 	function markSummaryRows(report) {
 		try {
 			const wrapper = report && report.$report && report.$report[0];
@@ -187,9 +192,11 @@ frappe.provide("frappe.views");
 
 			ensureSummaryStyle();
 
-			wrapper.querySelectorAll(".dt-row.ta-summary-row, .dt-row.ta-summary-top").forEach((el) => {
-				el.classList.remove("ta-summary-row", "ta-summary-top");
-			});
+			wrapper
+				.querySelectorAll(".dt-row.ta-summary-row, .dt-row.ta-summary-top")
+				.forEach((el) => {
+					el.classList.remove("ta-summary-row", "ta-summary-top");
+				});
 
 			let firstSummaryMarked = false;
 			rows.forEach((row, i) => {
@@ -228,7 +235,6 @@ frappe.provide("frappe.views");
 			console.warn("[MAS observer]", e);
 		}
 	}
-
 
 	function pinSummaryRows(datatable, dataRows) {
 		try {
@@ -342,8 +348,7 @@ frappe.provide("frappe.views");
 		if (!company) return;
 
 		frappe.call({
-			method:
-				"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.get_payroll_period",
+			method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.get_payroll_period",
 			args: { company },
 			callback: function (r) {
 				const data = (r && r.message) || {};
@@ -406,7 +411,6 @@ frappe.provide("frappe.views");
 				if (this.report_name === REPORT && this.report_settings) {
 					this.report_settings.formatter = leaveColorFormatter;
 
-
 					if (!this.report_settings.__ta_gdo) {
 						const origGDO = this.report_settings.get_datatable_options;
 						this.report_settings.get_datatable_options = function (options) {
@@ -421,7 +425,7 @@ frappe.provide("frappe.views");
 					}
 				}
 			} catch (e) {
-				
+				// never break the report over a decoration
 			}
 			return origPrepareColumns.apply(this, arguments);
 		};

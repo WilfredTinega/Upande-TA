@@ -21,7 +21,8 @@
  * and leave the rest of the page usable.
  */
 
-const FETCH_METHOD = "upande_ta.upande_ta.api.holiday_assignment_employees.get_holiday_assignment_employees";
+const FETCH_METHOD =
+	"upande_ta.upande_ta.api.holiday_assignment_employees.get_holiday_assignment_employees";
 
 /** Realtime event published by holiday_assignment_tool.py when a run finishes.
  * Above 30 employees the run happens in a background worker and this event is
@@ -76,7 +77,7 @@ function ensure_picker_styles() {
 		 .ha-employee-picker .ha-filters .form-column,
 		 .ha-employee-picker .ha-filters .frappe-control { overflow: visible; }
 		 .ha-employee-picker .ha-filters .awesomplete > ul { z-index: 101; }`,
-		"ha-employee-picker-style",
+		"ha-employee-picker-style"
 	);
 }
 
@@ -91,20 +92,22 @@ function build_success_html(success) {
 
 	const replaced = success.reduce((total, entry) => total + (cint(entry.replaced) || 0), 0);
 
-	let html = `<p>${__("Created <b>{0}</b> Holiday List Assignment(s) for <b>{1}</b> employee(s).", [
-		created,
-		success.length,
-	])}`;
+	let html = `<p>${__(
+		"Created <b>{0}</b> Holiday List Assignment(s) for <b>{1}</b> employee(s).",
+		[created, success.length]
+	)}`;
 	if (replaced) html += ` ${__("Replaced <b>{0}</b> earlier one(s).", [replaced])}`;
 	html += "</p>";
 
 	html += `<table class="table table-bordered"><tr><th>${__("Employee")}</th><th>${__(
-		"Holiday List Assignments",
+		"Holiday List Assignments"
 	)}</th></tr>`;
 	for (const entry of success.slice(0, MAX_ROWS_IN_MESSAGE)) {
 		// entry.doc is a server-built get_link_to_form() anchor, inserted as
 		// markup on purpose; everything else on the entry is escaped.
-		const detail = entry.doc ? `${cint(entry.count) || 0} &middot; ${entry.doc}` : String(cint(entry.count) || 0);
+		const detail = entry.doc
+			? `${cint(entry.count) || 0} &middot; ${entry.doc}`
+			: String(cint(entry.count) || 0);
 		html += `<tr><td>${entry_label(entry)}</td><td>${detail}</td></tr>`;
 	}
 	html += "</table>";
@@ -114,14 +117,16 @@ function build_success_html(success) {
 
 function build_failure_html(failure) {
 	let html = `<p>${__("<b>{0}</b> employee(s) failed.", [failure.length])}</p>`;
-	html += `<table class="table table-bordered"><tr><th>${__("Employee")}</th><th>${__("Reason")}</th></tr>`;
+	html += `<table class="table table-bordered"><tr><th>${__("Employee")}</th><th>${__(
+		"Reason"
+	)}</th></tr>`;
 	for (const entry of failure.slice(0, MAX_ROWS_IN_MESSAGE)) {
 		html += `<tr><td>${entry_label(entry)}</td><td>${esc(entry.reason)}</td></tr>`;
 	}
 	html += "</table>";
 	html += `<p class="text-muted small">${__(
 		"Check <a href='/app/List/Error Log?reference_doctype=Holiday List Assignment'>{0}</a> for more details",
-		[__("Error Log")],
+		[__("Error Log")]
 	)}</p>`;
 
 	return html + truncation_note(failure);
@@ -134,7 +139,7 @@ function build_skipped_html(skipped, to_date) {
 	return (
 		`<p>${__(
 			"Skipped <b>{0}</b> employee(s) with no previous Holiday List Assignment — there is nothing to restore them to after <b>{1}</b>. Give them a Holiday List Assignment first, then run this tool again for them:",
-			[skipped.length, period_end],
+			[skipped.length, period_end]
 		)}</p><p>${names}</p>` + truncation_note(skipped)
 	);
 }
@@ -210,7 +215,10 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 		}
 
 		frappe.confirm(
-			__("Assign <b>{0}</b> to {1} employee(s)?", [esc(frm.doc.holiday_list), employees.length]),
+			__("Assign <b>{0}</b> to {1} employee(s)?", [
+				esc(frm.doc.holiday_list),
+				employees.length,
+			]),
 			() => {
 				// the desk stays usable while this runs; the primary action is
 				// disabled instead, so the run cannot be started twice
@@ -223,7 +231,7 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 				Promise.resolve(frm.call({ method: "assign_holidays", doc: frm.doc }))
 					.then(() => frm.reload_doc())
 					.finally(() => $primary.prop("disabled", false));
-			},
+			}
 		);
 	},
 
@@ -234,7 +242,9 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 	 */
 	listen_for_completion(frm) {
 		frappe.realtime.off(ASSIGN_EVENT);
-		frappe.realtime.on(ASSIGN_EVENT, (message) => frm.events.notify_completion(frm, message || {}));
+		frappe.realtime.on(ASSIGN_EVENT, (message) =>
+			frm.events.notify_completion(frm, message || {})
+		);
 	},
 
 	notify_completion(frm, message) {
@@ -262,7 +272,12 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 		if (skipped.length) sections.push(build_skipped_html(skipped, frm.doc.to_date));
 		if (failure.length) sections.push(build_failure_html(failure));
 
-		frappe.msgprint({ title, indicator, message: sections.join("<hr>"), is_minimizable: true });
+		frappe.msgprint({
+			title,
+			indicator,
+			message: sections.join("<hr>"),
+			is_minimizable: true,
+		});
 
 		// the server emptied the Employees table; show that
 		frm.reload_doc();
@@ -276,7 +291,9 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 			frappe.msgprint({
 				title: __("From Date Required"),
 				indicator: "red",
-				message: __("Set the <b>From Date</b> first — it decides each employee's current holiday list."),
+				message: __(
+					"Set the <b>From Date</b> first — it decides each employee's current holiday list."
+				),
 			});
 			return;
 		}
@@ -299,7 +316,7 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 					department: filters.department || null,
 					designation: filters.designation || null,
 				},
-			}),
+			})
 		).then((r) => (r && r.message) || {});
 	},
 
@@ -322,7 +339,11 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 		// the next time the dialog opens.
 		const remembered = frm._last_filters || {};
 		const filters = {
-			company: frm.doc.company || remembered.company || frappe.defaults.get_user_default("Company") || "",
+			company:
+				frm.doc.company ||
+				remembered.company ||
+				frappe.defaults.get_user_default("Company") ||
+				"",
 			custom_farm: remembered.custom_farm || null,
 			department: remembered.department || null,
 			designation: remembered.designation || null,
@@ -355,7 +376,9 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 					if (mine !== ticket) return; // a newer fetch is already in flight
 					const employees = result.employees || [];
 					dialog.set_title(__("Select Employees ({0})", [employees.length]));
-					dialog.get_field("summary").$wrapper.html(frm.events.get_summary_html(frm, result, filters));
+					dialog
+						.get_field("summary")
+						.$wrapper.html(frm.events.get_summary_html(frm, result, filters));
 					frm.events.render_datatable(frm, dialog, employees);
 				})
 				.finally(() => {
@@ -470,18 +493,20 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 
 	get_summary_html(frm, result, filters) {
 		if (!filters.company) {
-			return `<div class="text-muted small" style="margin-bottom: 8px;">${__("Pick a Company to list its employees.")}</div>`;
+			return `<div class="text-muted small" style="margin-bottom: 8px;">${__(
+				"Pick a Company to list its employees."
+			)}</div>`;
 		}
 		if (!(result.employees || []).length) {
 			return `<div class="text-muted small" style="margin-bottom: 8px;">${__(
 				"No active employees found for {0}.",
-				[frappe.datetime.str_to_user(frm.doc.from_date)],
+				[frappe.datetime.str_to_user(frm.doc.from_date)]
 			)}</div>`;
 		}
 		if (result.truncated) {
 			return `<div class="alert alert-warning" style="padding: 8px 12px; margin-bottom: 8px;">${__(
 				"Showing the first <b>{0}</b> of <b>{1}</b> matching employees. Narrow by Unit/Division, Department, Designation or Employee.",
-				[result.count, result.total],
+				[result.count, result.total]
 			)}</div>`;
 		}
 		return "";
@@ -491,15 +516,27 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 		const $wrapper = dialog.get_field("employees_table").$wrapper;
 		$wrapper.empty();
 
-		const $container = $(`<div class="bulk-holiday-employees" style="min-height: 300px;"></div>`).appendTo($wrapper);
+		const $container = $(
+			`<div class="bulk-holiday-employees" style="min-height: 300px;"></div>`
+		).appendTo($wrapper);
 
 		const columns = [
 			{ id: "employee", name: "employee", content: __("Employee"), width: 120 },
-			{ id: "employee_name", name: "employee_name", content: __("Employee Name"), width: 200 },
+			{
+				id: "employee_name",
+				name: "employee_name",
+				content: __("Employee Name"),
+				width: 200,
+			},
 			{ id: "custom_farm", name: "custom_farm", content: __("Unit/Division"), width: 140 },
 			{ id: "department", name: "department", content: __("Department"), width: 160 },
 			{ id: "designation", name: "designation", content: __("Designation"), width: 150 },
-			{ id: "prior_holiday_list", name: "prior_holiday_list", content: __("Current Holiday List"), width: 200 },
+			{
+				id: "prior_holiday_list",
+				name: "prior_holiday_list",
+				content: __("Current Holiday List"),
+				width: 200,
+			},
 		].map((column) => ({
 			...column,
 			editable: false,
@@ -560,7 +597,9 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 		frm.refresh_field("employees");
 
 		frappe.show_alert({
-			message: __("{0} employee(s) added. Press <b>Assign Holidays</b> to run.", [selected.length]),
+			message: __("{0} employee(s) added. Press <b>Assign Holidays</b> to run.", [
+				selected.length,
+			]),
 			indicator: "green",
 		});
 	},
