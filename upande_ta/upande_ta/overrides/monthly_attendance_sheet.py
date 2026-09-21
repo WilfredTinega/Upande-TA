@@ -499,7 +499,7 @@ def get_message():
 		("#914EE3", _("Half Day/Other Half Present"), "HD/P"),
 		("green", _("Work From Home"), "WFH"),
 		("#878787", _("Holiday"), "H"),
-		("#878787", _("Weekly Off"), "WO"),
+		(WEEK_OFF_COLOR, _("Weekly Off"), "WO"),
 	]
 	for color, label, abbr in base:
 		message += chip(color, f"{label} - {abbr}")
@@ -540,6 +540,35 @@ _PRECEDENCE = {
 	"weekly_off": 1,
 }
 
+#: Weekly Off used to share Holiday's grey, which left the two indistinguishable
+#: in a month that has both. Kept here because the legend below and the cell
+#: formatter in public/js/monthly_attendance_sheet_colors.bundle.js must agree on it.
+WEEK_OFF_COLOR = "#7B1FA2"
+
+#: Per-employee totals for the selected period, in display order. The bucket is
+#: the one _classify() puts a day cell in, so a column and the summary row of
+#: the same name count the same thing seen from two sides: the column adds one
+#: employee's days up, the summary row adds one day's employees up. The summary
+#: rows deliberately leave these columns blank rather than mixing the two.
+_TOTAL_COLUMNS = (
+	("ta_present", "present"),
+	("ta_absent", "absent"),
+	("ta_on_leave", "on_leave"),
+	("ta_half_day", "half_day"),
+	("ta_holiday", "holiday"),
+	("ta_week_off", "weekly_off"),
+)
+
+#: The switch on Biometric Setting > Attendance Filters that decides whether the
+#: total columns are added at all.
+SUMMARY_SETTING_DOCTYPE = "Biometric Setting"
+SUMMARY_SETTING_FIELD = "show_employee_summary"
+
+#: Sum of the six above: every day of the period that carries a status. It falls
+#: short of the period length exactly where days are unmarked — before an
+#: employee joined, or where attendance was never marked at all.
+TOTAL_DAYS_FIELD = "ta_total_days"
+
 _SUMMARY_ROWS = [
 	("present", _("Present")),
 	("absent", _("Absent")),
@@ -550,12 +579,102 @@ _SUMMARY_ROWS = [
 ]
 
 
-def build_summary_rows(data, columns):
-	day_fields = [
+def employee_summary_enabled() -> bool:
+	"""Whether the per-employee total columns are switched on.
+
+	A Single materialises its field defaults only when it is first saved, so a
+	site that has never opened Biometric Setting has no row for this field at
+	all. That must read as the shipped default — on — or the columns would stay
+	invisible until somebody saved a form they have no reason to open.
+
+	Hence the raw read of `tabSingles` rather than ``get_single_value``, which
+	casts a missing Check to 0 and so cannot tell "switched off" from "never
+	saved". Same reason ``ensure_absent_marking_defaults`` reads that table
+	directly.
+	"""
+	try:
+		row = frappe.db.sql(
+			"""SELECT value FROM tabSingles WHERE doctype = %s AND field = %s""",
+			(SUMMARY_SETTING_DOCTYPE, SUMMARY_SETTING_FIELD),
+		)
+	except Exception:
+		# the setting doctype is not on this site, or has not synced yet
+		return True
+	return bool(cint(row[0][0])) if row else True
+
+
+def _day_fields(columns) -> list:
+	"""The per-day columns of the detailed view, in report order. Empty in the
+	summarized view, which has no day columns at all."""
+	return [
 		c["fieldname"]
 		for c in columns
 		if c.get("fieldtype") == "Data" and _DAY_RE.match(str(c.get("fieldname", "")))
 	]
+
+
+def add_total_columns(columns, data):
+	"""Count each employee's days by status over the selected period.
+
+	The report is one column per day, so reading a row for "how many days was
+	this person here?" means counting thirty cells by eye. These columns do it,
+	at the far right where the period ends: the totals close the month off
+	rather than standing in front of it.
+
+	Counted off the rendered day cells rather than re-queried: the cells are
+	what the user is looking at, holidays and weekly offs included, and those
+	come from the shift's holiday list rather than from any Attendance record.
+
+	Switched off from Biometric Setting > Attendance Filters > Summary per
+	Employee, which simply stops the columns being added; the client styles them
+	by fieldname, so nothing is left behind when they are gone.
+	"""
+	if not employee_summary_enabled():
+		return
+
+	day_fields = _day_fields(columns)
+	if not day_fields or any(c.get("fieldname") == TOTAL_DAYS_FIELD for c in columns):
+		return
+
+	# straight after the last day of the period
+	last_day = day_fields[-1]
+	insert_at = len(columns)
+	for index, column in enumerate(columns):
+		if column.get("fieldname") == last_day:
+			insert_at = index + 1
+			break
+
+	labels = dict(_SUMMARY_ROWS)
+	new_columns = [
+		{
+			"label": labels[bucket],
+			"fieldname": fieldname,
+			"fieldtype": "Int",
+			"width": 90,
+		}
+		for fieldname, bucket in _TOTAL_COLUMNS
+	]
+	new_columns.append(
+		{"label": _("Total Days"), "fieldname": TOTAL_DAYS_FIELD, "fieldtype": "Int", "width": 100}
+	)
+	columns[insert_at:insert_at] = new_columns
+
+	for row in data:
+		# group_by inserts header rows that carry no employee and no days
+		if not row.get("employee"):
+			continue
+		counts = {}
+		for fieldname in day_fields:
+			bucket = _classify(row.get(fieldname))
+			if bucket:
+				counts[bucket] = counts.get(bucket, 0) + 1
+		for fieldname, bucket in _TOTAL_COLUMNS:
+			row[fieldname] = counts.get(bucket, 0)
+		row[TOTAL_DAYS_FIELD] = sum(counts.values())
+
+
+def build_summary_rows(data, columns):
+	day_fields = _day_fields(columns)
 	if not day_fields:
 		return []
 
@@ -586,6 +705,10 @@ def build_summary_rows(data, columns):
 				counts[cat][d] += 1
 			headcount[d] += 1
 
+	# The summary rows leave the total columns alone. They count one day's
+	# employees; the total columns count one employee's days. Adding a row of
+	# horizontal totals up across them would put a second, different kind of
+	# number in the same cell, so those cells stay empty.
 	summary = []
 	summary.append({label_field: "", "_is_summary": 1})
 	for key, label in _SUMMARY_ROWS:
@@ -667,6 +790,8 @@ def execute(filters=None):
 	filters = frappe._dict(filters or {})
 	if data and not filters.summarized_view:
 		try:
+			add_total_columns(columns, data)
+
 			# Group the default view by shift on the server so users don't need to
 			# click-sort the Shift column (whose persisted sort would otherwise
 			# scatter the summary block on load). Skipped when group_by is set, as

@@ -234,6 +234,8 @@ class HolidayAssignmentTool(Document):
 
 		self._clear_employees()
 		self._report(success, failure, skipped)
+		# after _report: the skipped message quotes self.to_date
+		self._clear_run_scope()
 
 	def _create_assignments_for(self, row, restore_to) -> tuple[list, list]:
 		"""Replace whatever starts inside the window, then create and submit one
@@ -330,6 +332,20 @@ class HolidayAssignmentTool(Document):
 			{"parenttype": self.doctype, "parent": self.name, "parentfield": "employees"},
 		)
 		self.set("employees", [])
+
+	def _clear_run_scope(self):
+		"""Blank the run's own inputs once it is done.
+
+		The tool is a Single, so whatever the last run left in it is what the
+		next person sees when they open the form — and a company and a window
+		belonging to somebody else's run are never the right defaults for the
+		next one. The Holiday List is kept: it is the one field that says what
+		the tool is for, and it is validated on every run anyway.
+		"""
+		fields = {"company": None, "from_date": None, "to_date": None}
+		frappe.db.set_single_value(self.doctype, fields)
+		for fieldname in fields:
+			self.set(fieldname, None)
 
 	# ──────────────────────────────────────────────────────────────────────
 	# Progress and reporting
