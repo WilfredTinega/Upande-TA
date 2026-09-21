@@ -120,7 +120,7 @@
    "description": "Applied to every employee you add. Change a row to give one person different hours.",
    "fieldname": "default_requested_hours",
    "fieldtype": "Float",
-   "label": "Requested Hours per Day",
+   "label": "Requested Hours",
    "non_negative": 1
   },
   {
@@ -244,7 +244,7 @@
    "table_fieldname": "bulk_overtime_entries"
   }
  ],
- "modified": "2026-09-21 22:58:17.304458",
+ "modified": "2026-09-22 03:57:51.375692",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Overtime Request",
