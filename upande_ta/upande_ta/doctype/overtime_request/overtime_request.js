@@ -93,7 +93,7 @@ frappe.ui.form.on("Overtime Request", {
 						to_date: to_date,
 					}),
 				)
-				.then(() => target.events.get_overtime(target, [frm.doc.name]));
+				.then(() => target.events.fetch_overtime(target, [frm.doc.name]));
 		});
 	},
 

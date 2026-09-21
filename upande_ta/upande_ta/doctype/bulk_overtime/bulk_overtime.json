@@ -1,7 +1,10 @@
 {
  "actions": [],
+ "allow_import": 1,
+ "autoname": "naming_series:",
  "creation": "2026-04-14 00:00:00",
  "doctype": "DocType",
+ "document_type": "Document",
  "engine": "InnoDB",
  "field_order": [
   "naming_series",
@@ -13,9 +16,9 @@
   "column_break_title",
   "bulk_overtime_title",
   "section_break_entries",
-  "get_overtime",
   "get_from_overtime_request",
   "bulk_overtime_entries",
+  "edit_worked_hours",
   "section_break_totals",
   "number_of_employees",
   "column_break_totals_1",
@@ -30,29 +33,29 @@
  ],
  "fields": [
   {
+   "default": "HR-BOT-.YYYY.-",
    "fieldname": "naming_series",
    "fieldtype": "Select",
+   "hidden": 1,
    "label": "Series",
    "options": "HR-BOT-.YYYY.-",
-   "default": "HR-BOT-.YYYY.-",
-   "reqd": 1,
-   "hidden": 1
+   "reqd": 1
   },
   {
    "fieldname": "company",
    "fieldtype": "Link",
+   "in_standard_filter": 1,
    "label": "Company",
    "options": "Company",
-   "reqd": 1,
-   "in_standard_filter": 1,
-   "remember_last_selected_value": 1
+   "remember_last_selected_value": 1,
+   "reqd": 1
   },
   {
+   "description": "Leave blank for every approved request in the company. Filled in from the Overtime Requests when they agree on one.",
    "fieldname": "custom_farm",
    "fieldtype": "Link",
    "label": "Unit/Division",
-   "options": "Farm",
-   "description": "Leave blank for every approved request in the company."
+   "options": "Farm"
   },
   {
    "fieldname": "column_break_period",
@@ -61,16 +64,16 @@
   {
    "fieldname": "from_date",
    "fieldtype": "Date",
+   "in_list_view": 1,
    "label": "From Date",
-   "reqd": 1,
-   "in_list_view": 1
+   "reqd": 1
   },
   {
    "fieldname": "to_date",
    "fieldtype": "Date",
+   "in_list_view": 1,
    "label": "To Date",
-   "reqd": 1,
-   "in_list_view": 1
+   "reqd": 1
   },
   {
    "fieldname": "column_break_title",
@@ -88,23 +91,25 @@
    "label": "Overtime"
   },
   {
-   "fieldname": "get_overtime",
-   "fieldtype": "Button",
-   "label": "Get Overtime",
-   "description": "Pulls every approved Overtime Request in the period and checks it against attendance."
-  },
-  {
+   "button_color": "Primary",
+   "depends_on": "eval:doc.docstatus===0",
+   "description": "Lists the approved Overtime Requests with hours still to pay in this period, to choose from. Requests already paid elsewhere are not offered.",
    "fieldname": "get_from_overtime_request",
    "fieldtype": "Button",
-   "label": "Get from Overtime Request",
-   "description": "Pick the approved requests to pay, instead of taking every one in the period.",
-   "depends_on": "eval:doc.docstatus===0"
+   "label": "Get Overtime"
   },
   {
    "fieldname": "bulk_overtime_entries",
    "fieldtype": "Table",
    "label": "Entries",
    "options": "Bulk Overtime Entry"
+  },
+  {
+   "depends_on": "eval:doc.docstatus===0 && (doc.bulk_overtime_entries || []).length",
+   "description": "Unlocks Worked Hours on the rows, for a shift the scanner did not record properly. A row you change keeps its figure when the batch is fetched again, and needs a reason.",
+   "fieldname": "edit_worked_hours",
+   "fieldtype": "Button",
+   "label": "Edit Worked Hours"
   },
   {
    "fieldname": "section_break_totals",
@@ -143,9 +148,9 @@
   {
    "fieldname": "total_approved_hours",
    "fieldtype": "Float",
+   "in_list_view": 1,
    "label": "Approved Hours",
-   "read_only": 1,
-   "in_list_view": 1
+   "read_only": 1
   },
   {
    "fieldname": "section_break_notes",
@@ -160,14 +165,15 @@
    "fieldname": "amended_from",
    "fieldtype": "Link",
    "label": "Amended From",
-   "options": "Bulk Overtime",
    "no_copy": 1,
+   "options": "Bulk Overtime",
    "print_hide": 1,
    "read_only": 1,
    "search_index": 1
   }
  ],
  "index_web_pages_for_search": 1,
+ "is_submittable": 1,
  "links": [
   {
    "group": "Payout",
@@ -175,10 +181,11 @@
    "link_fieldname": "custom_bulk_overtime"
   }
  ],
- "modified": "2026-09-21 23:05:00.000000",
+ "modified": "2026-09-22 09:45:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime",
+ "naming_rule": "By \"Naming Series\" field",
  "owner": "Administrator",
  "permissions": [
   {
@@ -229,15 +236,10 @@
   }
  ],
  "row_format": "Dynamic",
+ "search_fields": "company,from_date,to_date",
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
- "allow_import": 1,
- "autoname": "naming_series:",
- "naming_rule": "By \"Naming Series\" field",
- "is_submittable": 1,
- "track_changes": 1,
- "document_type": "Document",
  "title_field": "bulk_overtime_title",
- "search_fields": "company,from_date,to_date"
+ "track_changes": 1
 }
