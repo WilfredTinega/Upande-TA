@@ -50,7 +50,7 @@ frappe.ui.form.on("Holiday List Assignment", {
 				if (!next) {
 					frm.set_intro(
 						__("In force from {0} onward — nothing later takes over yet.", [start]),
-						"blue",
+						"blue"
 					);
 					return;
 				}
@@ -61,7 +61,7 @@ frappe.ui.form.on("Holiday List Assignment", {
 						frappe.datetime.str_to_user(next.from_date),
 						frappe.utils.escape_html(next.holiday_list),
 					]),
-					"blue",
+					"blue"
 				);
 			});
 	},

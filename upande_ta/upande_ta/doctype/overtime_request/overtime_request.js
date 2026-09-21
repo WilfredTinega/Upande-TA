@@ -1,7 +1,8 @@
 // Copyright (c) 2026, Upande LTD and contributors
 // For license information, please see license.txt
 
-const OT_FETCH_METHOD = "upande_ta.upande_ta.api.holiday_assignment_employees.get_holiday_assignment_employees";
+const OT_FETCH_METHOD =
+	"upande_ta.upande_ta.api.holiday_assignment_employees.get_holiday_assignment_employees";
 const OT_BULK_STATUS_METHOD =
 	"upande_ta.upande_ta.doctype.overtime_request.overtime_request.bulk_overtime_status";
 
@@ -115,11 +116,11 @@ frappe.ui.form.on("Overtime Request", {
 				const status = (r && r.message) || {};
 				if (status.batch) {
 					frm.add_custom_button(__("Go to Bulk Overtime"), () =>
-						frappe.set_route("Form", "Bulk Overtime", status.batch),
+						frappe.set_route("Form", "Bulk Overtime", status.batch)
 					);
 				} else if (status.approved) {
 					frm.add_custom_button(__("Create Bulk Overtime"), () =>
-						frm.events.start_bulk_overtime(frm),
+						frm.events.start_bulk_overtime(frm)
 					).addClass("btn-primary");
 				}
 			});
@@ -148,7 +149,7 @@ frappe.ui.form.on("Overtime Request", {
 		frm.set_df_property(
 			"overtime_date",
 			"label",
-			ot_is_range(frm) ? __("From Date") : __("Overtime Date"),
+			ot_is_range(frm) ? __("From Date") : __("Overtime Date")
 		);
 		frm.events.describe_week(frm);
 	},
@@ -178,11 +179,14 @@ frappe.ui.form.on("Overtime Request", {
 			if (type === "Week") {
 				const number = ot_week_number(frm.doc.week);
 				if (!number) return;
-				const start = ot_iso_week_start(cint(frm.doc.week_year) || ot_this_week().year, number);
+				const start = ot_iso_week_start(
+					cint(frm.doc.week_year) || ot_this_week().year,
+					number
+				);
 				// read back off the resolved Monday: a week the year is too
 				// short for rolls into the next one, and the list should say so
 				const resolved = ot_iso_week_of(
-					new Date(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()),
+					new Date(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate())
 				);
 				frm.set_value("week", ot_week_label(resolved.week));
 				frm.set_value("week_year", resolved.year);
@@ -254,9 +258,11 @@ frappe.ui.form.on("Overtime Request", {
 	onload(frm) {
 		// one type carries the rates, so the last one used is nearly always right
 		if (frm.is_new() && !frm.doc.overtime_type) {
-			frappe.db.get_list("Overtime Type", { limit: 2, order_by: "modified desc" }).then((types) => {
-				if (types.length === 1) frm.set_value("overtime_type", types[0].name);
-			});
+			frappe.db
+				.get_list("Overtime Type", { limit: 2, order_by: "modified desc" })
+				.then((types) => {
+					if (types.length === 1) frm.set_value("overtime_type", types[0].name);
+				});
 		}
 	},
 
@@ -321,7 +327,7 @@ frappe.ui.form.on("Overtime Request", {
 					designation: filters.designation || null,
 					with_holiday_list: 0,
 				},
-			}),
+			})
 		).then((r) => (r && r.message) || {});
 	},
 
@@ -335,7 +341,7 @@ frappe.ui.form.on("Overtime Request", {
 				department: frm.doc.department || null,
 				designation: frm.doc.designation || null,
 			},
-			frm._last_filters || {},
+			frm._last_filters || {}
 		);
 		const already = new Set((frm.doc.employees || []).map((row) => row.employee));
 
@@ -344,7 +350,7 @@ frappe.ui.form.on("Overtime Request", {
 			// dialog rather than freezing the desk behind a modal
 			const stop = ot_inline_progress(
 				dialog.get_field("summary").$wrapper,
-				__("Fetching employees..."),
+				__("Fetching employees...")
 			);
 			dialog.disable_primary_action();
 			return frm.events
@@ -352,16 +358,20 @@ frappe.ui.form.on("Overtime Request", {
 				.then((result) => {
 					stop();
 					// someone already on the request is not offered twice
-					const employees = (result.employees || []).filter((e) => !already.has(e.employee));
-					dialog.set_title(__("Select Employees ({0})", [employees.length]));
-					dialog.get_field("summary").$wrapper.html(
-						result.truncated
-							? `<div class="alert alert-warning" style="padding: 8px 12px; margin-bottom: 8px;">${__(
-									"Showing the first <b>{0}</b> of <b>{1}</b> employees. Narrow by Unit/Division, Department or Designation.",
-									[result.count, result.total],
-							  )}</div>`
-							: "",
+					const employees = (result.employees || []).filter(
+						(e) => !already.has(e.employee)
 					);
+					dialog.set_title(__("Select Employees ({0})", [employees.length]));
+					dialog
+						.get_field("summary")
+						.$wrapper.html(
+							result.truncated
+								? `<div class="alert alert-warning" style="padding: 8px 12px; margin-bottom: 8px;">${__(
+										"Showing the first <b>{0}</b> of <b>{1}</b> employees. Narrow by Unit/Division, Department or Designation.",
+										[result.count, result.total]
+								  )}</div>`
+								: ""
+						);
 					frm.events.render_datatable(dialog, employees);
 				})
 				.finally(() => {
@@ -448,7 +458,10 @@ frappe.ui.form.on("Overtime Request", {
 		});
 
 		// the DataTable's sticky checkbox column would paint over the dropdown
-		dialog.get_field("custom_farm").$wrapper.closest(".form-section").css({ position: "relative", zIndex: 10 });
+		dialog
+			.get_field("custom_farm")
+			.$wrapper.closest(".form-section")
+			.css({ position: "relative", zIndex: 10 });
 		dialog.show();
 		// built after the modal is laid out, or every column measures 0 wide
 		setTimeout(load, 150);
@@ -461,7 +474,12 @@ frappe.ui.form.on("Overtime Request", {
 
 		const columns = [
 			{ id: "employee", name: "employee", content: __("Employee"), width: 120 },
-			{ id: "employee_name", name: "employee_name", content: __("Employee Name"), width: 220 },
+			{
+				id: "employee_name",
+				name: "employee_name",
+				content: __("Employee Name"),
+				width: 220,
+			},
 			{ id: "custom_farm", name: "custom_farm", content: __("Unit/Division"), width: 160 },
 			{ id: "department", name: "department", content: __("Department"), width: 180 },
 			{ id: "designation", name: "designation", content: __("Designation"), width: 170 },

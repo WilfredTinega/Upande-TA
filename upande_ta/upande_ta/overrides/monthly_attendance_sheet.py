@@ -92,8 +92,8 @@ def unit_division_query(doctype, txt, searchfield, start, page_len, filters):
 
 	where = [f"`{searchfield}` LIKE %(txt)s"]
 	params = {
-		"txt":      f"%{txt or ''}%",
-		"start":    cint(start),
+		"txt": f"%{txt or ''}%",
+		"start": cint(start),
 		"page_len": cint(page_len) or 20,
 	}
 	if companies:
@@ -175,7 +175,7 @@ def get_disabled_employee_names() -> set:
 	for table_field, (row_field, employee_field) in DISABLED_VALUE_TABLES.items():
 		if not meta.has_field(employee_field):
 			continue
-		for row in (settings.get(table_field) or []):
+		for row in settings.get(table_field) or []:
 			value = row.get(row_field)
 			if not value or not row.excluded:
 				continue
@@ -184,7 +184,7 @@ def get_disabled_employee_names() -> set:
 				emp_filters["company"] = row.company
 			disabled_names.update(frappe.get_all("Employee", filters=emp_filters, pluck="name"))
 
-	for row in (settings.get("attendance_employee_filters") or []):
+	for row in settings.get("attendance_employee_filters") or []:
 		if row.employee and row.excluded:
 			disabled_names.add(row.employee)
 
@@ -196,9 +196,7 @@ def get_leave_abbr(leave_type: str) -> str:
 		return "L"
 
 	try:
-		stored = frappe.get_cached_value(
-			"Leave Type", leave_type, LEAVE_TYPE_ABBR_FIELD
-		)
+		stored = frappe.get_cached_value("Leave Type", leave_type, LEAVE_TYPE_ABBR_FIELD)
 	except Exception:
 		stored = None
 
@@ -294,9 +292,7 @@ def get_employee_related_details(filters):
 	# group_by_param_values and would KeyError on a group we removed.
 	pruned = {}
 	for parameter, employees in emp_map.items():
-		kept = frappe._dict(
-			{name: emp for name, emp in employees.items() if keep(name)}
-		)
+		kept = frappe._dict({name: emp for name, emp in employees.items() if keep(name)})
 		if kept:
 			pruned[parameter] = kept
 
@@ -505,9 +501,7 @@ def get_message():
 		message += chip(color, f"{label} - {abbr}")
 
 	leave_types = frappe.db.get_all("Leave Type", pluck="name")
-	leave_chips = sorted(
-		((get_leave_abbr(lt), lt) for lt in leave_types), key=lambda x: x[0]
-	)
+	leave_chips = sorted(((get_leave_abbr(lt), lt) for lt in leave_types), key=lambda x: x[0])
 	for abbr, label in leave_chips:
 		message += chip("#318AD8", f"{label} - {abbr}")
 
@@ -742,13 +736,16 @@ def add_company_column(columns, data):
 			insert_at = i + 1
 			break
 
-	columns.insert(insert_at, {
-		"label": _("Company"),
-		"fieldname": "company",
-		"fieldtype": "Link",
-		"options": "Company",
-		"width": 140,
-	})
+	columns.insert(
+		insert_at,
+		{
+			"label": _("Company"),
+			"fieldname": "company",
+			"fieldtype": "Link",
+			"options": "Company",
+			"width": 140,
+		},
+	)
 
 	employees = {row.get("employee") for row in data if row.get("employee")}
 	if not employees:
@@ -806,9 +803,7 @@ def execute(filters=None):
 				)
 			data = list(data) + build_summary_rows(data, columns)
 		except Exception:
-			frappe.log_error(
-				frappe.get_traceback(), "Monthly Attendance Sheet summary rows"
-			)
+			frappe.log_error(frappe.get_traceback(), "Monthly Attendance Sheet summary rows")
 
 	return columns, data, message, chart
 
@@ -833,9 +828,7 @@ def apply_patch(*args, **kwargs):
 		mod._upande_ta_original_execute = mod.execute
 	_hrms_execute = getattr(mod, "_upande_ta_original_execute", None)
 
-	if not getattr(
-		getattr(mod, "get_employee_related_details", None), "_upande_ta_patched", False
-	):
+	if not getattr(getattr(mod, "get_employee_related_details", None), "_upande_ta_patched", False):
 		mod._upande_ta_original_get_employee_related_details = mod.get_employee_related_details
 	_hrms_get_employee_related_details = getattr(
 		mod, "_upande_ta_original_get_employee_related_details", None

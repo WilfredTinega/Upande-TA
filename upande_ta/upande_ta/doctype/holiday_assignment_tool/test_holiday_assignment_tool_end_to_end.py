@@ -143,9 +143,7 @@ class IntegrationTestHolidayAssignmentToolEndToEnd(_TestCase):
 		# The prior state the tool has to restore. Dated before the document's
 		# period so it is the list in force on every date until D1.
 		cls.prior_assignment_date = add_days(today, -10)
-		cls.prior_assignment = cls._assign_holiday_list(
-			cls.employee, cls.list_a, cls.prior_assignment_date
-		)
+		cls.prior_assignment = cls._assign_holiday_list(cls.employee, cls.list_a, cls.prior_assignment_date)
 
 	@classmethod
 	def _ensure_holiday_list(cls, name: str) -> str:
@@ -158,9 +156,7 @@ class IntegrationTestHolidayAssignmentToolEndToEnd(_TestCase):
 		covers the window cannot turn these into tests of nothing.
 		"""
 		if frappe.db.exists("Holiday List", name):
-			frappe.db.set_value(
-				"Holiday List", name, {"from_date": cls.list_start, "to_date": cls.list_end}
-			)
+			frappe.db.set_value("Holiday List", name, {"from_date": cls.list_start, "to_date": cls.list_end})
 			return name
 
 		return (
