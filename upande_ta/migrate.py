@@ -387,6 +387,10 @@ _SIDEBAR_LAYOUT = (
 	# end: Bulk Week Off moves a group onto a list permanently, this one moves
 	# them onto one for a date range and puts them back afterwards.
 	{"type": "Link", "link_type": "DocType", "link_to": "Holiday Assignment Tool", "label": "Holiday Assignment Tool", "icon": "calendar-plus"},
+	# The records both rows above write. Neither tool has an undo: a run is
+	# reversed by cancelling its assignments from this list, so the list cannot
+	# be further away than the tools that fill it.
+	{"type": "Link", "link_type": "DocType", "link_to": "Holiday List Assignment", "label": "Holiday List Assignment", "icon": "calendar-range"},
 
 	# Ordered the way overtime is actually worked: it is requested and approved,
 	# the bulk entry pays the approved requests against attendance and raises
@@ -403,6 +407,7 @@ _SIDEBAR_LAYOUT = (
 
 	{"type": "Link", "link_type": "DocType", "link_to": "Attendance", "label": "Attendance", "icon": "calendar-check"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Gate Pass", "label": "Gate Pass", "icon": "unlock"},
+	{"type": "Link", "link_type": "DocType", "link_to": "Meal Checkin", "label": "Meal Checkin", "icon": "utensils"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Biometric Logs", "label": "Biometric Logs", "icon": "list"},
 
 	{"type": "Link", "link_type": "DocType", "link_to": "Shift Type", "label": "Shift Type", "icon": "clock"},
@@ -569,8 +574,12 @@ _DROP_WORKSPACE_CHARTS = ("Attendance Count",)
 # doctype's link_type is a Select limited to those -- so the Attendance Insights
 # web page stays a sidebar-only entry.
 _WORKSPACE_CARD_LINKS = (
-	("Attendance", (("DocType", "Gate Pass"),)),
-	("Shifts", (("DocType", "Bulk Week Off"), ("DocType", "Holiday Assignment Tool"))),
+	("Attendance", (("DocType", "Gate Pass"), ("DocType", "Meal Checkin"))),
+	("Shifts", (
+		("DocType", "Bulk Week Off"),
+		("DocType", "Holiday Assignment Tool"),
+		("DocType", "Holiday List Assignment"),
+	)),
 	("Overtime", (("DocType", "Overtime Request"), ("DocType", "Bulk Overtime"))),
 	("Biometrics", (
 		("DocType", "Biometric Logs"),

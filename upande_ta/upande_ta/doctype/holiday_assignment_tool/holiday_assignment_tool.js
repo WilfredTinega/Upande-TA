@@ -11,9 +11,14 @@
  * from their own list if a run has to be reversed. The Employees table is only
  * the work list for the next run; the server clears it when the run finishes.
  *
- * Company and Unit/Division live in the Select Employees dialog, not on the
- * form. The chosen Company is copied onto the form's hidden `company` field
- * when employees are added, because the run is validated against it.
+ * Company, Unit/Division, Department, Designation and a single-Employee
+ * filter all live in the Select Employees dialog, not on the form. The chosen
+ * Company is copied onto the form's hidden `company` field when employees are
+ * added, because the run is validated against it.
+ *
+ * Nothing here freezes the desk. The employee fetch can run to thousands of
+ * rows and the assignment run can take minutes; both report progress in place
+ * and leave the rest of the page usable.
  */
 
 const FETCH_METHOD = "upande_ta.upande_ta.api.holiday_assignment_employees.get_holiday_assignment_employees";
@@ -32,6 +37,48 @@ const esc = (value) =>
 		: frappe.utils.escape_html(String(value));
 
 const entry_label = (entry) => esc(entry.employee_name || entry.employee);
+
+/** An inline bar for work whose length cannot be known in advance: it sweeps
+ * towards the end rather than pretending to measure, and leaves the rest of
+ * the page usable — which a freeze does not. Returns a stop(). */
+function inline_progress($area, label) {
+	$area.html(`
+		<div class="ha-progress" style="margin-bottom:8px;">
+			<div class="text-muted small" style="margin-bottom:4px;">${esc(label)}</div>
+			<div class="progress" style="margin:0;">
+				<div class="progress-bar" style="width:8%; transition:width .4s ease;"></div>
+			</div>
+		</div>`);
+	const $bar = $area.find(".progress-bar");
+	let width = 8;
+	let stopped = false;
+	const timer = setInterval(() => {
+		width = Math.min(92, width + (92 - width) / 6);
+		$bar.css("width", `${width}%`);
+	}, 400);
+	return () => {
+		if (stopped) return;
+		stopped = true;
+		clearInterval(timer);
+		$bar.css("width", "100%");
+	};
+}
+
+/** The filter row has to paint over the DataTable below it: the table's sticky
+ * checkbox column, its header and its column menus all carry z-indexes of
+ * their own (up to 10), and a suggestion list that loses to them is drawn
+ * behind the rows. Lifting the whole filter section into its own stacking
+ * context above them puts every dropdown on top, whichever field it belongs
+ * to. Installed once per session, not once per dialog. */
+function ensure_picker_styles() {
+	frappe.dom.set_style(
+		`.ha-employee-picker .ha-filters { position: relative; z-index: 100; overflow: visible; }
+		 .ha-employee-picker .ha-filters .form-column,
+		 .ha-employee-picker .ha-filters .frappe-control { overflow: visible; }
+		 .ha-employee-picker .ha-filters .awesomplete > ul { z-index: 101; }`,
+		"ha-employee-picker-style",
+	);
+}
 
 function truncation_note(entries) {
 	const remaining = entries.length - MAX_ROWS_IN_MESSAGE;
@@ -106,10 +153,30 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 		frm.events.listen_for_completion(frm);
 	},
 
+	/** A Single keeps whatever the last run left in it. The server blanks the
+	 * company and the window when a run finishes; this covers everything that
+	 * happened before it did — a document saved by an older version, or a run
+	 * that never reached the end. */
+	onload(frm) {
+		frm.events.clear_run_scope(frm);
+	},
+
+	clear_run_scope(frm) {
+		const stale = ["company", "from_date", "to_date"].filter((field) => frm.doc[field]);
+		if (!stale.length) return;
+		stale.forEach((field) => {
+			frm.doc[field] = null;
+		});
+		frm.refresh_fields(stale);
+		// nothing was written: the form never saves from here
+		frm.doc.__unsaved = 0;
+		if (frm.page) frm.page.clear_indicator();
+	},
+
 	clear_filters(frm) {
 		// The Single is never saved from here, so resetting the local doc is
 		// enough; nothing is written until Assign Holidays runs.
-		frm._last_unit = null;
+		frm._last_filters = null;
 		frm.clear_table("employees");
 		frm.set_value({ holiday_list: "", from_date: "", to_date: "", company: "" }).then(() => {
 			frm.refresh_fields();
@@ -145,14 +212,17 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 		frappe.confirm(
 			__("Assign <b>{0}</b> to {1} employee(s)?", [esc(frm.doc.holiday_list), employees.length]),
 			() => {
+				// the desk stays usable while this runs; the primary action is
+				// disabled instead, so the run cannot be started twice
+				const $primary = frm.page.btn_primary;
+				$primary.prop("disabled", true);
+				frappe.show_alert({ message: __("Assigning Holidays..."), indicator: "blue" });
+
 				// posts the in-memory document, rows and all; the controller saves
 				// it (running validate) before it writes anything
-				frm.call({
-					method: "assign_holidays",
-					doc: frm.doc,
-					freeze: true,
-					freeze_message: __("Assigning Holidays..."),
-				}).then(() => frm.reload_doc());
+				Promise.resolve(frm.call({ method: "assign_holidays", doc: frm.doc }))
+					.then(() => frm.reload_doc())
+					.finally(() => $primary.prop("disabled", false));
 			},
 		);
 	},
@@ -211,38 +281,29 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 			return;
 		}
 
-		// last company used, else the user's default; the unit is remembered
-		// for the session only
-		const scope = {
-			company: frm.doc.company || frappe.defaults.get_user_default("Company") || "",
-			custom_farm: frm._last_unit || null,
-		};
-		const load = scope.company ? frm.events.request_employees(frm, scope) : Promise.resolve({});
-		load.then((result) => frm.events.show_selection_dialog(frm, result, scope));
+		frm.events.show_selection_dialog(frm);
 	},
 
-	request_employees(frm, scope) {
-		return new Promise((resolve) => {
+	request_employees(frm, filters) {
+		// Promise.resolve(): frappe.call hands back a jQuery promise, which has
+		// no .finally() for the caller to stop its progress bar with.
+		return Promise.resolve(
 			frappe.call({
 				method: FETCH_METHOD,
 				args: {
-					company: scope.company,
+					company: filters.company,
 					from_date: frm.doc.from_date,
 					to_date: frm.doc.to_date || null,
-					custom_farm: scope.custom_farm || null,
+					employee: filters.employee || null,
+					custom_farm: filters.custom_farm || null,
+					department: filters.department || null,
+					designation: filters.designation || null,
 				},
-				freeze: true,
-				freeze_message: __("Fetching Employees..."),
-				callback(r) {
-					resolve(r.message || {});
-				},
-			});
-		});
+			}),
+		).then((r) => (r && r.message) || {});
 	},
 
-	show_selection_dialog(frm, result, scope) {
-		let employees = result.employees || [];
-
+	show_selection_dialog(frm) {
 		if (frm._employee_selection_dialog) {
 			try {
 				frm._employee_selection_dialog.hide();
@@ -254,32 +315,79 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 		// `dialog` is declared before construction because Link fields can fire
 		// change during setup, before `new frappe.ui.Dialog(...)` returns.
 		let dialog;
-		let refetching = false;
 
-		const show = (res) => {
-			employees = res.employees || [];
-			dialog.set_title(__("Select Employees ({0})", [employees.length]));
-			dialog.get_field("summary").$wrapper.html(frm.events.get_summary_html(frm, res, scope));
-			frm.events.render_datatable(frm, dialog, employees);
+		// last company used, else the user's default; the rest of the filters are
+		// remembered for the session. Employee is not: picking one person out of a
+		// unit is a one-off, and remembering it would silently hide everyone else
+		// the next time the dialog opens.
+		const remembered = frm._last_filters || {};
+		const filters = {
+			company: frm.doc.company || remembered.company || frappe.defaults.get_user_default("Company") || "",
+			custom_farm: remembered.custom_farm || null,
+			department: remembered.department || null,
+			designation: remembered.designation || null,
+			employee: null,
 		};
 
-		const refetch = () => {
-			if (!dialog || refetching) return;
-			const company = dialog.get_value("company");
-			const custom_farm = dialog.get_value("custom_farm") || null;
-			if (!company) return;
-			if (company === scope.company && custom_farm === (scope.custom_farm || null)) return;
-			scope = { company, custom_farm };
-			refetching = true;
-			frm.events.request_employees(frm, scope).then((res) => {
-				refetching = false;
-				show(res);
-				refetch(); // a picker changed while that fetch was in flight
-			});
+		// Every filter change starts a fetch; only the newest one may paint, so a
+		// slow early request cannot overwrite the list the user is now asking for.
+		let ticket = 0;
+
+		const load = () => {
+			const mine = ++ticket;
+			const $summary = dialog.get_field("summary").$wrapper;
+
+			if (!filters.company) {
+				dialog.set_title(__("Select Employees"));
+				$summary.html(frm.events.get_summary_html(frm, {}, filters));
+				frm.events.render_datatable(frm, dialog, []);
+				return Promise.resolve();
+			}
+
+			// the list can run to thousands, so it reports progress in the dialog
+			// rather than freezing the desk behind a modal
+			const stop = inline_progress($summary, __("Fetching employees..."));
+			dialog.disable_primary_action();
+
+			return frm.events
+				.request_employees(frm, filters)
+				.then((result) => {
+					if (mine !== ticket) return; // a newer fetch is already in flight
+					const employees = result.employees || [];
+					dialog.set_title(__("Select Employees ({0})", [employees.length]));
+					dialog.get_field("summary").$wrapper.html(frm.events.get_summary_html(frm, result, filters));
+					frm.events.render_datatable(frm, dialog, employees);
+				})
+				.finally(() => {
+					stop();
+					if (mine === ticket) dialog.enable_primary_action();
+				});
 		};
+
+		/** Every filter reloads the list the same way. All five share one
+		 * section, so they lay out as a single row of columns — frappe widens a
+		 * five-column section to col-sm-20 rather than wrapping it. */
+		const filter_field = (fieldname, label, doctype, get_query) => ({
+			fieldtype: "Link",
+			fieldname,
+			label,
+			options: doctype,
+			default: filters[fieldname] || "",
+			get_query,
+			change() {
+				const value = (dialog && dialog.get_value(fieldname)) || null;
+				if (!dialog || value === filters[fieldname]) return;
+				filters[fieldname] = value;
+				load();
+			},
+		});
+
+		/** The company scopes the other pickers, so it is read live off the
+		 * dialog rather than closed over. */
+		const in_company = () => ({ filters: { company: filters.company } });
 
 		dialog = new frappe.ui.Dialog({
-			title: __("Select Employees ({0})", [employees.length]),
+			title: __("Select Employees"),
 			size: "extra-large",
 			fields: [
 				{
@@ -288,31 +396,40 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 					label: __("Company"),
 					options: "Company",
 					reqd: 1,
-					default: scope.company,
+					default: filters.company,
 					change() {
-						// a unit belongs to one company: drop it when the company moves
-						if (dialog && dialog.get_value("custom_farm")) {
-							dialog.set_value("custom_farm", "");
-							return; // clearing the unit fires its own change -> refetch
-						}
-						refetch();
+						const value = (dialog && dialog.get_value("company")) || "";
+						if (!dialog || value === filters.company) return;
+						filters.company = value;
+						// a unit, a department and a person all belong to one company.
+						// filters is cleared first so each field's own change handler
+						// sees nothing new and does not fire a second fetch.
+						["custom_farm", "department", "employee"].forEach((field) => {
+							filters[field] = null;
+							if (dialog.get_value(field)) dialog.set_value(field, "");
+						});
+						load();
 					},
 				},
 				{ fieldtype: "Column Break" },
-				{
-					fieldtype: "Link",
-					fieldname: "custom_farm",
-					label: __("Unit/Division"),
-					options: "Farm",
-					default: scope.custom_farm || "",
-					get_query: () => {
-						const company = dialog && dialog.get_value("company");
-						return company ? { filters: { company } } : {};
+				filter_field("custom_farm", __("Unit/Division"), "Farm", in_company),
+				{ fieldtype: "Column Break" },
+				filter_field("department", __("Department"), "Department", in_company),
+				{ fieldtype: "Column Break" },
+				filter_field("designation", __("Designation"), "Designation"),
+				{ fieldtype: "Column Break" },
+				filter_field("employee", __("Employee"), "Employee", () => ({
+					filters: {
+						company: filters.company,
+						status: "Active",
+						...(filters.department ? { department: filters.department } : {}),
+						...(filters.designation ? { designation: filters.designation } : {}),
+						// custom_farm belongs to upande_kaitet, so it is absent on some sites
+						...(filters.custom_farm && frappe.meta.has_field("Employee", "custom_farm")
+							? { custom_farm: filters.custom_farm }
+							: {}),
 					},
-					change() {
-						refetch();
-					},
-				},
+				})),
 				{ fieldtype: "Section Break" },
 				{ fieldtype: "HTML", fieldname: "summary" },
 				{ fieldtype: "HTML", fieldname: "employees_table" },
@@ -330,28 +447,29 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 				}
 				// the run is validated against the form's company, so it must be
 				// the one these employees were fetched from
-				if (scope.company !== frm.doc.company) frm.set_value("company", scope.company);
-				frm._last_unit = scope.custom_farm || null;
+				if (filters.company !== frm.doc.company) frm.set_value("company", filters.company);
+				frm._last_filters = Object.assign({}, filters, { employee: null });
 				frm.events.set_employees(frm, selected);
 				dialog.hide();
 			},
 		});
 
-		// The DataTable's sticky checkbox column is positioned and would paint
-		// over the Company/Unit dropdowns; lift the picker section above it.
-		dialog.get_field("company").$wrapper.closest(".form-section").css({ position: "relative", zIndex: 10 });
+		ensure_picker_styles();
+		dialog.$wrapper.addClass("ha-employee-picker");
+		// only the filter section is lifted: give the table's own section the
+		// same z-index and it would win on DOM order instead.
+		dialog.get_field("company").$wrapper.closest(".form-section").addClass("ha-filters");
 
-		dialog.get_field("summary").$wrapper.html(frm.events.get_summary_html(frm, result, scope));
 		dialog.show();
 		frm._employee_selection_dialog = dialog;
 
 		// The DataTable measures its own width, so it is built after the modal
 		// is laid out; built against a fading-in dialog every column is 0 wide.
-		setTimeout(() => frm.events.render_datatable(frm, dialog, employees), 150);
+		setTimeout(load, 150);
 	},
 
-	get_summary_html(frm, result, scope) {
-		if (!scope.company) {
+	get_summary_html(frm, result, filters) {
+		if (!filters.company) {
 			return `<div class="text-muted small" style="margin-bottom: 8px;">${__("Pick a Company to list its employees.")}</div>`;
 		}
 		if (!(result.employees || []).length) {
@@ -362,7 +480,7 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 		}
 		if (result.truncated) {
 			return `<div class="alert alert-warning" style="padding: 8px 12px; margin-bottom: 8px;">${__(
-				"Showing the first <b>{0}</b> of <b>{1}</b> matching employees. Pick a Unit/Division to narrow the list.",
+				"Showing the first <b>{0}</b> of <b>{1}</b> matching employees. Narrow by Unit/Division, Department, Designation or Employee.",
 				[result.count, result.total],
 			)}</div>`;
 		}

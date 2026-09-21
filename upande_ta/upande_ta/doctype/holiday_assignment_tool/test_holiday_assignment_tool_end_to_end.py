@@ -178,21 +178,41 @@ class IntegrationTestHolidayAssignmentToolEndToEnd(_TestCase):
 
 	@classmethod
 	def _make_employee(cls, date_of_joining) -> str:
-		return (
-			frappe.get_doc(
-				{
-					"doctype": "Employee",
-					"first_name": f"{PREFIX} Employee",
-					"company": cls.company,
-					"gender": cls.gender,
-					"status": "Active",
-					"date_of_birth": "1990-01-01",
-					"date_of_joining": date_of_joining,
-				}
-			)
-			.insert(ignore_permissions=True)
-			.name
+		employee = frappe.get_doc(
+			{
+				"doctype": "Employee",
+				"first_name": f"{PREFIX} Employee",
+				"company": cls.company,
+				"gender": cls.gender,
+				"status": "Active",
+				"date_of_birth": "1990-01-01",
+				"date_of_joining": date_of_joining,
+			}
 		)
+		cls._fill_site_mandatory_data(employee)
+		# ignore_mandatory/ignore_links: other apps make their own fields
+		# mandatory on Employee — Kaitet adds Unit/Division, Business Unit and
+		# Employee Category, the last of them pointing at a doctype that is not
+		# even installed here. None of them mean anything to these tests, and
+		# without this the whole suite errors out in setUpClass on any site that
+		# installs those apps.
+		return employee.insert(ignore_permissions=True, ignore_mandatory=True, ignore_links=True).name
+
+	@classmethod
+	def _fill_site_mandatory_data(cls, doc) -> None:
+		"""Fill mandatory Data/number fields another app added to the doctype.
+
+		These are filled rather than ignored because a site may name its records
+		after one of them (Kaitet names Employee after its Employee Number), and
+		a blank would collide on the second insert.
+		"""
+		for field in doc.meta.fields:
+			if not field.reqd or doc.get(field.fieldname):
+				continue
+			if field.fieldtype in ("Data", "Small Text", "Text"):
+				doc.set(field.fieldname, f"{PREFIX}-{frappe.generate_hash(length=8)}")
+			elif field.fieldtype in ("Int", "Float", "Currency"):
+				doc.set(field.fieldname, 1)
 
 	@classmethod
 	def _assign_holiday_list(cls, employee: str, holiday_list: str, from_date) -> str:
@@ -296,6 +316,18 @@ class IntegrationTestHolidayAssignmentToolEndToEnd(_TestCase):
 		self.assertFalse(
 			frappe.db.count("Holiday Assignment Tool Employee", {"parent": "Holiday Assignment Tool"})
 		)
+
+	def test_company_and_window_are_cleared_after_the_run(self):
+		"""The tool is a Single: a company and a window left behind would be the
+		next person's defaults, and they belong to the run that just ended. The
+		Holiday List is kept on purpose."""
+		self.make_document()
+
+		reloaded = frappe.get_single("Holiday Assignment Tool")
+		self.assertIsNone(reloaded.company)
+		self.assertIsNone(reloaded.from_date)
+		self.assertIsNone(reloaded.to_date)
+		self.assertTrue(reloaded.holiday_list)
 
 	def test_rerun_replaces_the_earlier_run(self):
 		"""Running again over the same window swaps the list — no undo needed.

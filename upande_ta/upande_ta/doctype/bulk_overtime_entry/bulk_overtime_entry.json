@@ -94,7 +94,6 @@
   },
   {
    "columns": 1,
-   "description": "Set by the engine. Tick Manual Override on the row to set it by hand.",
    "fieldname": "approved_hours",
    "fieldtype": "Float",
    "in_list_view": 1,
@@ -191,7 +190,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-09-22 03:50:00.000000",
+ "modified": "2026-09-22 03:56:21.926428",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime Entry",

@@ -107,6 +107,8 @@
   "absent_preview",
   "absent_run_now",
   "attendance_filters_tab",
+  "attendance_columns_section",
+  "show_employee_summary",
   "attendance_payroll_section",
   "attendance_payroll_periods",
   "attendance_filters_section",
@@ -722,13 +724,24 @@
    "fieldname": "attendance_employee_filters",
    "fieldtype": "Table",
    "options": "Attendance Filter Employee"
+  },
+  {
+   "fieldname": "attendance_columns_section",
+   "fieldtype": "Section Break",
+   "label": "Monthly Attendance Sheet Columns"
+  },
+  {
+   "default": "1",
+   "fieldname": "show_employee_summary",
+   "fieldtype": "Check",
+   "label": "Summary per Employee"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-19 20:00:00.000000",
+ "modified": "2026-09-22 04:44:35.582845",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",
