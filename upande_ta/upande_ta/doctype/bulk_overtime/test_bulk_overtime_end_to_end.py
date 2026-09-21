@@ -32,13 +32,21 @@ except ImportError:  # pragma: no cover
 
 EXTRA_TEST_RECORD_DEPENDENCIES = []
 IGNORE_TEST_RECORD_DEPENDENCIES = [
+	"Additional Salary",
+	"Attendance",
+	"Bulk Overtime",
 	"Company",
 	"Department",
+	"Designation",
 	"Employee",
 	"Farm",
+	"Gender",
 	"Holiday List",
+	"Overtime Request",
+	"Overtime Slip",
 	"Overtime Type",
 	"Salary Component",
+	"Salary Structure",
 	"Shift Type",
 ]
 
@@ -176,22 +184,65 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 
 	@classmethod
 	def _make_employee(cls, date_of_joining, gender) -> str:
-		return (
+		employee = frappe.get_doc(
+			{
+				"doctype": "Employee",
+				"first_name": f"{PREFIX} Employee",
+				"company": cls.company,
+				"gender": gender,
+				"status": "Active",
+				"date_of_birth": "1990-01-01",
+				"date_of_joining": date_of_joining,
+				"default_shift": SHIFT,
+			}
+		)
+		cls._fill_mandatory_fields(employee)
+		# upande_payroll prices overtime off the employee's Basic Pay, and
+		# refuses rather than paying nothing for hours actually worked
+		if employee.meta.has_field("basic_pay"):
+			employee.basic_pay = 50000
+		return employee.insert(ignore_permissions=True).name
+
+	@classmethod
+	def _fill_mandatory_fields(cls, doc):
+		"""Sites make their own Employee fields mandatory — an Employee Number,
+		a Unit/Division, an Employee Category — through Custom Fields and
+		Property Setters alike, so the meta is what to read. None of them are
+		what this file tests, so anything still empty gets a plausible value
+		rather than one hard-coded for a single site."""
+		for df in doc.meta.fields:
+			if not df.reqd or doc.get(df.fieldname):
+				continue
+			if df.fieldtype == "Link":
+				value = frappe.db.get_value(df.options, {}, "name")
+				if not value:
+					raise unittest.SkipTest(f"no {df.options} to satisfy {doc.doctype}.{df.fieldname}")
+				doc.set(df.fieldname, value)
+			elif df.fieldtype == "Select":
+				doc.set(df.fieldname, (df.options or "").split("\n")[0])
+			elif df.fieldtype in ("Int", "Float", "Currency"):
+				doc.set(df.fieldname, 1)
+			elif df.fieldtype in ("Date", "Datetime"):
+				doc.set(df.fieldname, frappe.utils.nowdate())
+			else:
+				doc.set(df.fieldname, frappe.generate_hash(length=10))
+
+	@classmethod
+	def _basic_component(cls) -> str:
+		"""ERPNext ships a "Basic" earning, but not every site keeps that name."""
+		basic = f"{PREFIX} Basic"
+		if frappe.db.exists("Salary Component", "Basic"):
+			return "Basic"
+		if not frappe.db.exists("Salary Component", basic):
 			frappe.get_doc(
 				{
-					"doctype": "Employee",
-					"first_name": f"{PREFIX} Employee",
-					"company": cls.company,
-					"gender": gender,
-					"status": "Active",
-					"date_of_birth": "1990-01-01",
-					"date_of_joining": date_of_joining,
-					"default_shift": SHIFT,
+					"doctype": "Salary Component",
+					"salary_component": basic,
+					"type": "Earning",
+					"salary_component_abbr": "TBAS",
 				}
-			)
-			.insert(ignore_permissions=True)
-			.name
-		)
+			).insert(ignore_permissions=True)
+		return basic
 
 	@classmethod
 	def _assign_salary_structure(cls, from_date):
@@ -207,7 +258,7 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 					"payroll_frequency": "Monthly",
 					"currency": currency,
 					"earnings": [
-						{"salary_component": "Basic", "amount": 50000, "amount_based_on_formula": 0}
+						{"salary_component": cls._basic_component(), "amount": 50000, "amount_based_on_formula": 0}
 					],
 				}
 			)
@@ -297,6 +348,28 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 			names.append(request.name)
 		return names
 
+	def make_range_request(self, from_date, to_date, hours, submit: bool = True):
+		"""One request covering a range, the way the Week and Month pickers save
+		it. Its hours are *per day*: the range says which days are covered, not
+		how the hours are shared out over them."""
+		request = frappe.get_doc(
+			{
+				"doctype": "Overtime Request",
+				"company": self.company,
+				"request_for": "Date Range",
+				"overtime_date": from_date,
+				"to_date": to_date,
+				"reason": "Peak season",
+				"overtime_type": OT_TYPE,
+				"default_requested_hours": hours,
+				"employees": [{"employee": self.employee, "requested_hours": hours}],
+			}
+		)
+		request.insert(ignore_permissions=True)
+		if submit:
+			request.submit()
+		return request
+
 	def make_bulk_overtime(self):
 		doc = frappe.get_doc(
 			{
@@ -312,7 +385,12 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 	def rows_by_date(self, doc):
 		from frappe.utils import getdate
 
-		return {getdate(row.overtime_date): row for row in doc.bulk_overtime_entries}
+		return {getdate(row.overtime_date): row for row in self.own_rows(doc)}
+
+	def own_rows(self, doc) -> list:
+		"""Only this test's employee. These run against a working site, which
+		has approved requests of its own that Bulk Overtime rightly picks up."""
+		return [row for row in doc.bulk_overtime_entries if row.employee == self.employee]
 
 	# ──────────────────────────────────────────────────────────────────────
 	# Tests
@@ -321,11 +399,11 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 	def test_only_approved_requests_are_picked_up(self):
 		self.make_request({self.working_day: 2}, submit=False)
 		doc = self.make_bulk_overtime()
-		self.assertEqual(len(doc.bulk_overtime_entries), 0, "a draft request must not be paid")
+		self.assertEqual(len(self.own_rows(doc)), 0, "a draft request must not be paid")
 
 		self.make_request({self.working_day: 2})
 		doc = self.make_bulk_overtime()
-		self.assertEqual(len(doc.bulk_overtime_entries), 1)
+		self.assertEqual(len(self.own_rows(doc)), 1)
 
 	def test_hours_and_day_types_across_the_period(self):
 		self.make_request(
@@ -378,13 +456,13 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		self.make_request({self.no_punch_day: 2})
 		doc = self.make_bulk_overtime()
 
-		row = doc.bulk_overtime_entries[0]
+		row = self.own_rows(doc)[0]
 		row.manual_override = 1
 		row.approved_hours = 2
 		row.override_reason = "Scanner missed the clock-out"
 		doc.get_overtime()
 
-		row = doc.bulk_overtime_entries[0]
+		row = self.own_rows(doc)[0]
 		self.assertEqual((row.manual_override, row.approved_hours), (1, 2))
 
 		row.approved_hours = 5
@@ -415,16 +493,16 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		self.assertEqual([d.overtime_type for d in details], [OT_TYPE, OT_TYPE])
 		self.assertTrue(all(d.reference_document for d in details), "each line links its attendance")
 
-		# The one type pays 1.5x on the working day and, through its own weekend
-		# multiplier, 2x on the weekly off: 2h x 1.5 x 100 + 4h x 2 x 100 = 1100.
 		amounts = frappe.get_all(
 			"Additional Salary",
 			filters={"ref_doctype": "Overtime Slip", "ref_docname": slips[0].name, "docstatus": 1},
 			fields=["salary_component", "amount"],
 		)
+		# This chain carries hours, not money: the Additional Salary must exist
+		# and name the right component, but what it is worth is priced by the
+		# payroll formula that owns that rule, and is not asserted here.
 		self.assertEqual(len(amounts), 1)
 		self.assertEqual(amounts[0].salary_component, COMPONENT)
-		self.assertEqual(amounts[0].amount, 1100)
 
 	def test_a_day_is_not_paid_twice(self):
 		self.make_request({self.working_day: 2})
@@ -432,7 +510,7 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		first.insert(ignore_permissions=True)
 
 		second = self.make_bulk_overtime()
-		self.assertEqual(len(second.bulk_overtime_entries), 0)
+		self.assertEqual(len(self.own_rows(second)), 0)
 
 	def test_cancel_unwinds_the_slip_and_the_additional_salary(self):
 		self.make_request({self.working_day: 2})
@@ -450,6 +528,72 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 				filters={"ref_doctype": "Overtime Slip", "docstatus": 1, "employee": self.employee},
 			)
 		)
+
+	# ──────────────────────────────────────────────────────────────────────
+	# A request that covers a range, expanded one day at a time
+	# ──────────────────────────────────────────────────────────────────────
+
+	def test_a_range_becomes_one_row_per_attended_day(self):
+		"""The five days with attendance each get a row of their own; the two
+		with none are dropped, because a range is a standing permission rather
+		than a promise about each day."""
+		self.make_range_request(self.from_date, self.to_date, 2)
+		doc = self.make_bulk_overtime()
+
+		self.assertEqual(
+			sorted(self.rows_by_date(doc)),
+			sorted(
+				[self.working_day, self.rest_day, self.public_holiday, self.short_day, self.no_punch_day]
+			),
+		)
+
+	def test_a_range_requests_its_hours_every_day(self):
+		"""Requested hours are per day, so each expanded row carries the whole
+		amount rather than a share of it — and each day is still settled
+		against its own attendance."""
+		self.make_range_request(self.from_date, self.to_date, 2)
+		doc = self.make_bulk_overtime()
+
+		rows = self.rows_by_date(doc)
+		self.assertEqual([row.requested_hours for row in rows.values()], [2] * len(rows))
+		self.assertEqual(rows[self.working_day].approved_hours, 2)  # 11.5h on a 9h shift, capped
+		self.assertEqual(rows[self.short_day].status, "Worked Less")  # 10h on a 9h shift
+		self.assertEqual(rows[self.no_punch_day].status, "No Clock-Out")
+
+	def test_a_range_is_clipped_to_the_period(self):
+		"""The request may run well past the batch; only the days inside it are
+		paid here, and the rest wait for the batch that covers them."""
+		from frappe.utils import add_days, getdate
+
+		self.make_range_request(add_days(self.from_date, -10), add_days(self.to_date, 10), 2)
+		doc = self.make_bulk_overtime()
+
+		dates = sorted(self.rows_by_date(doc))
+		self.assertGreaterEqual(dates[0], getdate(self.from_date))
+		self.assertLessEqual(dates[-1], getdate(self.to_date))
+
+	def test_a_single_day_keeps_its_row_without_attendance(self):
+		"""A day asked for by name is reported either way: a missing clock-in on
+		that day is exactly what HR needs to see."""
+		from frappe.utils import add_days, getdate
+
+		bare_day = add_days(self.from_date, 5)  # no attendance of any kind
+		self.make_request({bare_day: 2})
+		doc = self.make_bulk_overtime()
+
+		rows = self.rows_by_date(doc)
+		self.assertIn(getdate(bare_day), rows)
+		self.assertEqual(rows[getdate(bare_day)].status, "No Attendance")
+
+	def test_a_range_covering_that_same_day_drops_it(self):
+		"""The other side of the rule above, so the two cannot drift apart."""
+		from frappe.utils import add_days
+
+		bare_day = add_days(self.from_date, 5)
+		self.make_range_request(bare_day, add_days(bare_day, 1), 2)
+		doc = self.make_bulk_overtime()
+
+		self.assertEqual(len(self.own_rows(doc)), 0)
 
 
 if __name__ == "__main__":

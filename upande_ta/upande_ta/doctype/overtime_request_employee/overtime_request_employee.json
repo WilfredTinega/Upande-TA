@@ -7,6 +7,7 @@
   "employee",
   "employee_name",
   "department",
+  "designation",
   "custom_farm",
   "requested_hours"
  ],
@@ -40,6 +41,14 @@
    "columns": 2
   },
   {
+   "fieldname": "designation",
+   "fieldtype": "Link",
+   "label": "Designation",
+   "options": "Designation",
+   "fetch_from": "employee.designation",
+   "read_only": 1
+  },
+  {
    "fieldname": "custom_farm",
    "fieldtype": "Link",
    "label": "Unit/Division",
@@ -58,7 +67,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-19 19:00:00.000000",
+ "modified": "2026-09-21 19:47:26.903173",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Overtime Request Employee",
