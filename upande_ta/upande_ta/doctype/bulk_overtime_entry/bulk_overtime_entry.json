@@ -2,6 +2,7 @@
  "actions": [],
  "creation": "2026-09-19 19:00:00",
  "doctype": "DocType",
+ "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "employee",
@@ -77,8 +78,6 @@
    "columns": 1,
    "fieldname": "requested_hours",
    "fieldtype": "Float",
-   "label": "Requested",
-   "read_only": 1,
    "in_list_view": 1,
    "label": "Requested",
    "read_only": 1
@@ -87,8 +86,6 @@
    "columns": 1,
    "fieldname": "biometric_hours",
    "fieldtype": "Float",
-   "label": "Biometric",
-   "read_only": 1,
    "in_list_view": 1,
    "label": "Biometric",
    "read_only": 1
@@ -106,9 +103,6 @@
    "columns": 1,
    "fieldname": "status",
    "fieldtype": "Select",
-   "label": "Status",
-   "options": "\nMatched\nCapped at Request\nWorked Less\nNo Clock-Out\nNo Shift\nNo Attendance",
-   "read_only": 1,
    "in_list_view": 1,
    "label": "Status",
    "options": "\nMatched\nCapped at Request\nWorked Less\nNo Clock-Out\nNo Shift\nNo Attendance",
@@ -194,7 +188,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-09-22 03:56:21.926428",
+ "modified": "2026-09-22 05:17:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime Entry",
@@ -203,7 +197,5 @@
  "row_format": "Dynamic",
  "sort_field": "creation",
  "sort_order": "DESC",
- "states": [],
- "editable_grid": 0,
- "istable": 1
+ "states": []
 }
