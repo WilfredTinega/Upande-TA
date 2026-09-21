@@ -18,3 +18,4 @@ upande_ta.patches.v1.restore_upande_ta_workspace
 upande_ta.patches.v1.backfill_bio_type_codes
 upande_ta.patches.v1.create_overtime_workflows
 upande_ta.patches.v1.move_overtime_reason_to_parent
+upande_ta.patches.v1.index_employee_checkin_for_insights
