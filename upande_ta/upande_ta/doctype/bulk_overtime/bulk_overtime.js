@@ -5,6 +5,42 @@ const PAYROLL_PERIOD_METHOD = "upande_ta.upande_ta.doctype.biometric_setting.bio
 
 const bo_esc = (value) => frappe.utils.escape_html(value == null ? "" : String(value));
 
+/** An inline bar on the form's own dashboard, for work whose length cannot be
+ * known in advance: it sweeps towards the end rather than pretending to
+ * measure, and leaves the rest of the page usable — which a freeze does not.
+ * Returns a stop(). */
+const bo_progress = (frm, title, message) => {
+	let percent = 8;
+	let stopped = false;
+	frm.dashboard.show_progress(title, percent, message);
+	const timer = setInterval(() => {
+		percent = Math.min(92, percent + (92 - percent) / 6);
+		frm.dashboard.show_progress(title, percent, message);
+	}, 400);
+	// stop() is called on both the happy path and in finally(), and
+	// hide_progress throws on a bar it has already removed
+	return () => {
+		if (stopped) return;
+		stopped = true;
+		clearInterval(timer);
+		frm.dashboard.show_progress(title, 100, message);
+		setTimeout(() => {
+			try {
+				frm.dashboard.hide_progress(title);
+			} catch (e) {
+				// the form was refreshed or routed away from under it
+			}
+		}, 400);
+	};
+};
+
+/** The button must not be clickable twice while its own fetch is running —
+ * nothing is blocking the page any more. */
+const bo_busy = (frm, fieldname, busy) => {
+	const field = frm.fields_dict[fieldname];
+	if (field && field.$input) field.$input.prop("disabled", busy);
+};
+
 const STATUS_INDICATOR = {
 	Matched: "green",
 	"Capped at Request": "blue",
@@ -28,6 +64,7 @@ frappe.ui.form.on("Bulk Overtime", {
 		// rows only come from the Get Overtime picker
 		frm.set_df_property("bulk_overtime_entries", "cannot_add_rows", 1);
 		frm.toggle_display("get_from_overtime_request", frm.doc.docstatus === 0);
+		frm.events.apply_worked_hours_lock(frm);
 
 		if (frm.doc.docstatus === 1) {
 			frm.add_custom_button(__("Overtime Slips"), () =>
@@ -78,19 +115,26 @@ frappe.ui.form.on("Bulk Overtime", {
 	/** The one way rows get here: pick the approved requests to pay. Sweeping
 	 * the whole period blindly is what "Select All" in the dialog does, and
 	 * this way the cost is paid once, with the list in front of you. */
-	/** Worked Hours is what the biometric read, so it is read-only until asked
-	 * for — a scanner that missed a clock-out is the case this is for. */
+	/** Worked Hours is what the biometric read, so it stays read-only until
+	 * asked for — a scanner that missed a clock-out is the case this is for. */
 	edit_worked_hours(frm) {
-		frm._worked_hours_unlocked = !frm._worked_hours_unlocked;
+		frm.events.apply_worked_hours_lock(frm);
+		if (frm.doc.edit_worked_hours) {
+			frappe.show_alert({
+				message: __("Worked Hours can now be typed straight into the table. Each row you change needs a reason."),
+				indicator: "orange",
+			});
+		}
+	},
+
+	/** Editable in the grid itself, so a correction is a click and a number
+	 * rather than opening every row. */
+	apply_worked_hours_lock(frm) {
 		const grid = frm.fields_dict.bulk_overtime_entries.grid;
-		grid.update_docfield_property("working_hours", "read_only", frm._worked_hours_unlocked ? 0 : 1);
-		grid.refresh();
-		frappe.show_alert({
-			message: frm._worked_hours_unlocked
-				? __("Worked Hours can now be edited on a row. Give a reason for each one you change.")
-				: __("Worked Hours locked again."),
-			indicator: frm._worked_hours_unlocked ? "orange" : "green",
-		});
+		if (!grid) return;
+		const editable = frm.doc.edit_worked_hours && frm.doc.docstatus === 0;
+		grid.update_docfield_property("working_hours", "read_only", editable ? 0 : 1);
+		frm.refresh_field("bulk_overtime_entries");
 	},
 
 	get_from_overtime_request(frm) {
@@ -103,12 +147,14 @@ frappe.ui.form.on("Bulk Overtime", {
 			return;
 		}
 
+		const stop = bo_progress(frm, __("Get Overtime"), __("Looking for approved requests..."));
+		bo_busy(frm, "get_from_overtime_request", true);
 		frm.call({
 			doc: frm.doc,
 			method: "get_approved_requests",
-			freeze: true,
-			freeze_message: __("Looking for approved requests..."),
-		}).then((r) => {
+		})
+		.then((r) => {
+			stop();
 			const requests = r.message || [];
 			if (!requests.length) {
 				frappe.msgprint({
@@ -121,6 +167,10 @@ frappe.ui.form.on("Bulk Overtime", {
 				return;
 			}
 			frm.events.show_request_dialog(frm, requests);
+		})
+		.finally(() => {
+			stop();
+			bo_busy(frm, "get_from_overtime_request", false);
 		});
 	},
 
@@ -221,13 +271,15 @@ frappe.ui.form.on("Bulk Overtime", {
 			return;
 		}
 
+		const stop = bo_progress(frm, __("Get Overtime"), __("Checking requests against attendance..."));
+		bo_busy(frm, "get_from_overtime_request", true);
 		frm.call({
 			doc: frm.doc,
 			method: "get_overtime",
 			args: { overtime_requests: overtime_requests || null },
-			freeze: true,
-			freeze_message: __("Checking requests against attendance..."),
-		}).then((r) => {
+		})
+		.then((r) => {
+			stop();
 			frm.dirty();
 			frm.refresh_fields();
 			const result = r.message || {};
@@ -261,6 +313,10 @@ frappe.ui.form.on("Bulk Overtime", {
 				return;
 			}
 			frappe.show_alert({ message: __("{0} row(s) loaded.", [result.rows]), indicator: "green" });
+		})
+		.finally(() => {
+			stop();
+			bo_busy(frm, "get_from_overtime_request", false);
 		});
 	},
 });
@@ -276,11 +332,11 @@ frappe.ui.form.on("Bulk Overtime Entry", {
 		frm.events.clear_reason_if_untouched(frm, cdt, cdn);
 	},
 
-	/** Typing a figure is the same statement as ticking the box, so the box
-	 * follows the typing rather than having to be found first. */
+	/** Typing a figure is the same statement as ticking the row's box, so the
+	 * box follows the typing rather than having to be found first. */
 	working_hours(frm, cdt, cdn) {
 		const row = locals[cdt][cdn];
-		if (frm._worked_hours_unlocked && !row.manual_working_hours) {
+		if (frm.doc.edit_worked_hours && !row.manual_working_hours) {
 			frappe.model.set_value(cdt, cdn, "manual_working_hours", 1);
 		}
 	},

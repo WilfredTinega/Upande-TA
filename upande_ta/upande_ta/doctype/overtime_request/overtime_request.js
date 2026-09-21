@@ -7,6 +7,32 @@ const ot_esc = (value) => frappe.utils.escape_html(value == null ? "" : String(v
 
 const ot_ymd = (date) => moment(date).format("YYYY-MM-DD");
 
+/** An inline bar for work whose length cannot be known in advance: it sweeps
+ * towards the end rather than pretending to measure, and leaves the rest of
+ * the page usable — which a freeze does not. Returns a stop(). */
+const ot_inline_progress = ($area, label) => {
+	$area.html(`
+		<div class="ot-progress" style="margin-bottom:8px;">
+			<div class="text-muted small" style="margin-bottom:4px;">${frappe.utils.escape_html(label)}</div>
+			<div class="progress" style="margin:0;">
+				<div class="progress-bar" style="width:8%; transition:width .4s ease;"></div>
+			</div>
+		</div>`);
+	const $bar = $area.find(".progress-bar");
+	let width = 8;
+	let stopped = false;
+	const timer = setInterval(() => {
+		width = Math.min(92, width + (92 - width) / 6);
+		$bar.css("width", `${width}%`);
+	}, 400);
+	return () => {
+		if (stopped) return;
+		stopped = true;
+		clearInterval(timer);
+		$bar.css("width", "100%");
+	};
+};
+
 // Week is picked by its ISO number — "Week 38" — alongside the year that
 // numbers it. Month keeps the browser's own picker, which writes "2026-09".
 const ot_week_label = (number) => `Week ${String(number).padStart(2, "0")}`;
@@ -258,8 +284,6 @@ frappe.ui.form.on("Overtime Request", {
 					designation: filters.designation || null,
 					with_holiday_list: 0,
 				},
-				freeze: true,
-				freeze_message: __("Fetching Employees..."),
 			})
 			.then((r) => r.message || {});
 	},
@@ -278,21 +302,36 @@ frappe.ui.form.on("Overtime Request", {
 		);
 		const already = new Set((frm.doc.employees || []).map((row) => row.employee));
 
-		const load = () =>
-			frm.events.request_employees(frm, filters).then((result) => {
-				// someone already on the request is not offered twice
-				const employees = (result.employees || []).filter((e) => !already.has(e.employee));
-				dialog.set_title(__("Select Employees ({0})", [employees.length]));
-				dialog.get_field("summary").$wrapper.html(
-					result.truncated
-						? `<div class="alert alert-warning" style="padding: 8px 12px; margin-bottom: 8px;">${__(
-								"Showing the first <b>{0}</b> of <b>{1}</b> employees. Narrow by Unit/Division, Department or Designation.",
-								[result.count, result.total],
-						  )}</div>`
-						: "",
-				);
-				frm.events.render_datatable(dialog, employees);
-			});
+		const load = () => {
+			// the list can run to thousands, so it reports progress in the
+			// dialog rather than freezing the desk behind a modal
+			const stop = ot_inline_progress(
+				dialog.get_field("summary").$wrapper,
+				__("Fetching employees..."),
+			);
+			dialog.disable_primary_action();
+			return frm.events
+				.request_employees(frm, filters)
+				.then((result) => {
+					stop();
+					// someone already on the request is not offered twice
+					const employees = (result.employees || []).filter((e) => !already.has(e.employee));
+					dialog.set_title(__("Select Employees ({0})", [employees.length]));
+					dialog.get_field("summary").$wrapper.html(
+						result.truncated
+							? `<div class="alert alert-warning" style="padding: 8px 12px; margin-bottom: 8px;">${__(
+									"Showing the first <b>{0}</b> of <b>{1}</b> employees. Narrow by Unit/Division, Department or Designation.",
+									[result.count, result.total],
+							  )}</div>`
+							: "",
+					);
+					frm.events.render_datatable(dialog, employees);
+				})
+				.finally(() => {
+					stop();
+					dialog.enable_primary_action();
+				});
+		};
 
 		/** Every filter reloads the list the same way. */
 		const filter_field = (fieldname, label, doctype, get_query) => ({
