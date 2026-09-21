@@ -786,6 +786,20 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 
 		self.assertEqual(getdate(doc.to_date), getdate(today()))
 
+	def test_a_request_not_yet_worked_cannot_start_a_batch(self):
+		"""What Create Bulk Overtime hits when the request is still ahead of
+		the clock: there is no period to pay, so it says so rather than
+		building an empty batch."""
+		from frappe.utils import add_days, getdate, today
+
+		future = add_days(getdate(today()), 5)
+		names = self.make_request({future: 2})
+
+		doc = frappe.get_doc({"doctype": "Bulk Overtime", "company": self.company})
+		with self.assertRaises(frappe.ValidationError) as caught:
+			doc.get_overtime(overtime_requests=names)
+		self.assertIn("not been worked yet", frappe.utils.strip_html(str(caught.exception)))
+
 	def test_a_fetch_with_nothing_picked_asks_for_a_request(self):
 		doc = frappe.get_doc({"doctype": "Bulk Overtime", "company": self.company})
 		with self.assertRaises(frappe.ValidationError):

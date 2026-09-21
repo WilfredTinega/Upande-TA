@@ -21,6 +21,7 @@
   "get_from_overtime_request",
   "column_break_xmdk",
   "edit_worked_hours",
+  "column_break_ufns",
   "override_reason",
   "section_break_entries",
   "bulk_overtime_entries",
@@ -117,7 +118,6 @@
   },
   {
    "depends_on": "eval:doc.edit_worked_hours || (doc.bulk_overtime_entries || []).some(r => r.manual_override || r.manual_working_hours)",
-   "description": "Why any row was changed by hand. Asked for once, on the batch, before it can be submitted.",
    "fieldname": "override_reason",
    "fieldtype": "Small Text",
    "label": "Reason for Manual Changes"
@@ -197,6 +197,10 @@
   {
    "fieldname": "column_break_uwap",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_ufns",
+   "fieldtype": "Column Break"
   }
  ],
  "index_web_pages_for_search": 1,
@@ -208,7 +212,7 @@
    "link_fieldname": "custom_bulk_overtime"
   }
  ],
- "modified": "2026-09-22 03:40:00.000000",
+ "modified": "2026-09-22 03:54:49.197257",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime",

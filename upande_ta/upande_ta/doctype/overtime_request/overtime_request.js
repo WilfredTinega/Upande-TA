@@ -76,13 +76,39 @@ frappe.ui.form.on("Overtime Request", {
 		frm.toggle_display(["get_employees", "default_requested_hours"], frm.doc.docstatus === 0);
 		frm.events.dress_period_fields(frm);
 
-		if (frm.doc.docstatus === 1) {
-			frm.add_custom_button(
-				__("Bulk Overtime"),
-				() => frm.events.start_bulk_overtime(frm),
-				__("Create"),
-			);
-		}
+		if (frm.doc.docstatus === 1) frm.events.show_bulk_overtime_button(frm);
+	},
+
+	/** An approved request exists to be paid, so the way to its Bulk Overtime
+	 * belongs on the request itself rather than inside a Create menu. Once a
+	 * batch holds it the button goes to that batch instead: a day is paid
+	 * once, so a second batch could only come up empty. */
+	show_bulk_overtime_button(frm) {
+		frappe.db
+			.get_list("Bulk Overtime Entry", {
+				parent: "Bulk Overtime",
+				filters: { overtime_request: frm.doc.name, parenttype: "Bulk Overtime" },
+				fields: ["parent"],
+				limit: 1,
+			})
+			.then((rows) => {
+				const batch = (rows || [])[0] && rows[0].parent;
+				if (batch) {
+					frm.add_custom_button(__("Go to Bulk Overtime"), () =>
+						frappe.set_route("Form", "Bulk Overtime", batch),
+					);
+				} else {
+					frm.add_custom_button(__("Create Bulk Overtime"), () =>
+						frm.events.start_bulk_overtime(frm),
+					).addClass("btn-primary");
+				}
+			})
+			.catch(() => {
+				// the link lookup is a convenience, not a gate
+				frm.add_custom_button(__("Create Bulk Overtime"), () =>
+					frm.events.start_bulk_overtime(frm),
+				).addClass("btn-primary");
+			});
 	},
 
 	/** Open a new Bulk Overtime that pays this request. The batch takes its
