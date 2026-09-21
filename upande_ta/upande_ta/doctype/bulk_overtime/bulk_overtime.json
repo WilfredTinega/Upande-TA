@@ -64,18 +64,22 @@
    "fieldtype": "Column Break"
   },
   {
+   "description": "Taken from the Overtime Requests this batch pays.",
    "fieldname": "from_date",
    "fieldtype": "Date",
+   "in_list_view": 1,
    "label": "From Date",
-   "reqd": 1,
-   "in_list_view": 1
+   "read_only": 1,
+   "reqd": 1
   },
   {
+   "description": "Taken from the Overtime Requests this batch pays.",
    "fieldname": "to_date",
    "fieldtype": "Date",
+   "in_list_view": 1,
    "label": "To Date",
-   "reqd": 1,
-   "in_list_view": 1
+   "read_only": 1,
+   "reqd": 1
   },
   {
    "fieldname": "column_break_title",
@@ -209,7 +213,7 @@
    "link_fieldname": "custom_bulk_overtime"
   }
  ],
- "modified": "2026-09-22 03:54:49.197257",
+ "modified": "2026-09-22 05:17:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime",
