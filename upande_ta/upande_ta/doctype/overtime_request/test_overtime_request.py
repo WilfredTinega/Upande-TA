@@ -123,11 +123,35 @@ class IntegrationTestOvertimeRequest(_TestCase):
 		# carries mandatory custom fields on some sites (Employee Number,
 		# Unit/Division, Employee Category), and none of them are what is under
 		# test here.
+		cls._quieten_workflow_emails("Overtime Request")
+
 		cls.overtime_type = frappe.db.get_value("Overtime Type", {}, "name") or cls._make_overtime_type()
 
 		cls.company, cls.employees = cls._pick_employees()
 		if len(cls.employees) < 2:
 			raise unittest.SkipTest("need two active employees with no approved overtime")
+
+	@classmethod
+	def _quieten_workflow_emails(cls, *doctypes):
+		"""Stop the approval workflow's e-mail from taking the submit with it.
+
+		``process_workflow_actions`` enqueues the approver e-mail with
+		``now=frappe.in_test`` (frappe/workflow/doctype/workflow_action), so
+		under the test runner it runs inline inside this transaction rather
+		than in a worker after commit — and when it unwinds, the submit that
+		triggered it is rolled back with it, leaving a document that reports
+		docstatus 1 in memory and 0 in the database.
+
+		Production is unaffected: there the job is enqueued after commit. The
+		workflow itself stays active, so these tests still exercise the part
+		that matters — Approved mapping to docstatus 1.
+		"""
+		for doctype in doctypes:
+			for name in frappe.get_all(
+				"Workflow", filters={"document_type": doctype, "is_active": 1}, pluck="name"
+			):
+				frappe.db.set_value("Workflow", name, "send_email_alert", 0)
+				frappe.clear_document_cache("Workflow", name)
 
 	@classmethod
 	def _make_overtime_type(cls) -> str:

@@ -15,6 +15,13 @@ are the lower of what was requested and what the biometric shows was worked
 (see ``upande_ta.upande_ta.overtime_engine``). HR may override a row by hand,
 with a reason, up to the requested hours — for a missing clock-out, say.
 
+**Get from Overtime Request** narrows that to the requests HR picks, and the
+Overtime Request form can start a batch over its own period. Either way the
+period governs: a request is always clipped to this document's dates.
+
+Approval runs through the **Bulk Overtime Approval** workflow, and approving is
+what submits the batch — so a rejection stays at docstatus 0 and cuts no slips.
+
 On submit this document creates one Overtime Slip per employee, one line per
 date, and nothing else. **It computes no money.** The Overtime Slip prices
 itself when it is submitted — upande_payroll's rule where that app is
@@ -92,12 +99,22 @@ class BulkOvertime(Document):
 	# ──────────────────────────────────────────────────────────────────────
 
 	@frappe.whitelist()
-	def get_overtime(self):
+	def get_overtime(self, overtime_requests=None):
 		"""Rebuild the table from the approved requests in the period. Rows HR
-		has overridden by hand keep their hours and reason."""
+		has overridden by hand keep their hours and reason.
+
+		``overtime_requests`` narrows the sweep to the requests named — what
+		**Get from Overtime Request** sends when HR picks them by hand. The
+		period still governs either way: a chosen request is clipped to it
+		exactly as a swept one is, so the batch can never pay outside its own
+		dates.
+		"""
 		if not (self.company and self.from_date and self.to_date):
 			frappe.throw(_("Set the Company, From Date and To Date first."))
 		self.validate_dates()
+
+		chosen = frappe.parse_json(overtime_requests) if isinstance(overtime_requests, str) else overtime_requests
+		chosen = [name for name in (chosen or []) if name]
 
 		manual = {
 			(row.employee, str(getdate(row.overtime_date))): row
@@ -106,7 +123,7 @@ class BulkOvertime(Document):
 		}
 
 		found = frappe._dict(requests=0, days_without_attendance=0)
-		requests = self._approved_request_rows(found)
+		requests = self._approved_request_rows(found, chosen=chosen)
 		claimed = self._claimed_elsewhere(requests)
 		blocked = self._employees_with_overlapping_slips({r.employee for r in requests})
 
@@ -150,9 +167,65 @@ class BulkOvertime(Document):
 			"left_out": sorted(set(left_out)),
 			"approved_requests": found.requests,
 			"days_without_attendance": found.days_without_attendance,
+			"picked": len(chosen),
 		}
 
-	def _approved_request_rows(self, found=None):
+	def _request_scope(self):
+		"""The company/unit the batch pays for, as a join and a filter both the
+		picker and the fetch run through — so what the picker offers is exactly
+		what the fetch would take."""
+		farm_join = farm_filter = ""
+		values = {"company": self.company, "from_date": self.from_date, "to_date": self.to_date}
+		if self.custom_farm and "custom_farm" in frappe.db.get_table_columns("Employee"):
+			farm_join = "join `tabEmployee` emp on emp.name = row.employee"
+			farm_filter = "and emp.custom_farm = %(custom_farm)s"
+			values["custom_farm"] = self.custom_farm
+		return farm_join, farm_filter, values
+
+	@frappe.whitelist()
+	def get_approved_requests(self):
+		"""The approved requests this batch could pay from, for the picker.
+
+		One row per request rather than per employee per day: what is being
+		chosen is the request, and the fetch does the expanding. ``days`` is
+		how much of the request this period actually covers, which is the part
+		HR is agreeing to pay now.
+		"""
+		if not (self.company and self.from_date and self.to_date):
+			frappe.throw(_("Set the Company, From Date and To Date first."))
+
+		farm_join, farm_filter, values = self._request_scope()
+		requests = frappe.db.sql(
+			f"""
+			select req.name, req.request_for, req.overtime_date,
+				coalesce(req.to_date, req.overtime_date) as to_date,
+				req.overtime_type, req.reason, req.default_requested_hours,
+				count(distinct row.employee) as employees,
+				sum(row.requested_hours) as hours_per_day
+			from `tabOvertime Request` req
+			join `tabOvertime Request Employee` row
+				on row.parent = req.name and row.parenttype = 'Overtime Request'
+			{farm_join}
+			where req.docstatus = 1
+				and req.company = %(company)s
+				and req.overtime_date <= %(to_date)s
+				and coalesce(req.to_date, req.overtime_date) >= %(from_date)s
+				{farm_filter}
+			group by req.name
+			order by req.overtime_date, req.name
+			""",
+			values,
+			as_dict=True,
+		)
+
+		period_start, period_end = getdate(self.from_date), getdate(self.to_date)
+		for request in requests:
+			start = max(getdate(request.overtime_date), period_start)
+			end = min(getdate(request.to_date), period_end)
+			request.days_in_period = (end - start).days + 1
+		return requests
+
+	def _approved_request_rows(self, found=None, chosen=None):
 		"""One row per employee per date, from every approved request that
 		overlaps this period.
 
@@ -164,12 +237,11 @@ class BulkOvertime(Document):
 		row either way, because that day was asked for by name and a missing
 		clock-in is what HR needs to see.
 		"""
-		farm_join = farm_filter = ""
-		values = {"company": self.company, "from_date": self.from_date, "to_date": self.to_date}
-		if self.custom_farm and "custom_farm" in frappe.db.get_table_columns("Employee"):
-			farm_join = "join `tabEmployee` emp on emp.name = row.employee"
-			farm_filter = "and emp.custom_farm = %(custom_farm)s"
-			values["custom_farm"] = self.custom_farm
+		farm_join, farm_filter, values = self._request_scope()
+		chosen_filter = ""
+		if chosen:
+			chosen_filter = "and req.name in %(chosen)s"
+			values["chosen"] = tuple(chosen)
 
 		requests = frappe.db.sql(
 			f"""
@@ -185,6 +257,7 @@ class BulkOvertime(Document):
 				and req.overtime_date <= %(to_date)s
 				and coalesce(req.to_date, req.overtime_date) >= %(from_date)s
 				{farm_filter}
+				{chosen_filter}
 			order by row.employee_name, req.overtime_date
 			""",
 			values,

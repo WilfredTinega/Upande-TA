@@ -14,6 +14,7 @@
   "bulk_overtime_title",
   "section_break_entries",
   "get_overtime",
+  "get_from_overtime_request",
   "bulk_overtime_entries",
   "section_break_totals",
   "number_of_employees",
@@ -93,6 +94,13 @@
    "description": "Pulls every approved Overtime Request in the period and checks it against attendance."
   },
   {
+   "fieldname": "get_from_overtime_request",
+   "fieldtype": "Button",
+   "label": "Get from Overtime Request",
+   "description": "Pick the approved requests to pay, instead of taking every one in the period.",
+   "depends_on": "eval:doc.docstatus===0"
+  },
+  {
    "fieldname": "bulk_overtime_entries",
    "fieldtype": "Table",
    "label": "Entries",
@@ -167,7 +175,7 @@
    "link_fieldname": "custom_bulk_overtime"
   }
  ],
- "modified": "2026-09-21 19:58:15.505205",
+ "modified": "2026-09-21 23:05:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime",

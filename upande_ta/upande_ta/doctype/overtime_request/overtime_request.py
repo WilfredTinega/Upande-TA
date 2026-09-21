@@ -10,8 +10,11 @@ Hours are per day** — the range says which days are covered, not how the hours
 are shared out over them. Bulk Overtime expands the range one
 day at a time and pays each day against what the attendance shows was worked.
 
-Submitting the request is the approval: only roles with submit permission
-(HR Manager by default) can do it.
+Approval runs through the **Overtime Request Approval** workflow: HR User
+raises it, HR Manager approves or rejects, and each step is a Workflow Action
+on the record. Approving is what submits the document, and docstatus 1 is what
+Bulk Overtime pays from — which is why a rejection stays at docstatus 0 rather
+than submitting. See ``upande_ta.patches.v1.create_overtime_workflows``.
 """
 
 import datetime
