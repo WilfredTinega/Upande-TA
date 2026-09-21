@@ -2,7 +2,6 @@
  "actions": [],
  "creation": "2026-09-19 19:00:00",
  "doctype": "DocType",
- "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "employee",
@@ -33,7 +32,6 @@
    "columns": 1,
    "fieldname": "employee",
    "fieldtype": "Link",
-   "in_list_view": 1,
    "label": "Employee",
    "options": "Employee",
    "read_only": 1,
@@ -44,7 +42,6 @@
    "fetch_from": "employee.employee_name",
    "fieldname": "employee_name",
    "fieldtype": "Data",
-   "in_list_view": 1,
    "label": "Employee Name",
    "read_only": 1
   },
@@ -80,6 +77,8 @@
    "columns": 1,
    "fieldname": "requested_hours",
    "fieldtype": "Float",
+   "label": "Requested",
+   "read_only": 1,
    "in_list_view": 1,
    "label": "Requested",
    "read_only": 1
@@ -88,6 +87,8 @@
    "columns": 1,
    "fieldname": "biometric_hours",
    "fieldtype": "Float",
+   "label": "Biometric",
+   "read_only": 1,
    "in_list_view": 1,
    "label": "Biometric",
    "read_only": 1
@@ -105,6 +106,9 @@
    "columns": 1,
    "fieldname": "status",
    "fieldtype": "Select",
+   "label": "Status",
+   "options": "\nMatched\nCapped at Request\nWorked Less\nNo Clock-Out\nNo Shift\nNo Attendance",
+   "read_only": 1,
    "in_list_view": 1,
    "label": "Status",
    "options": "\nMatched\nCapped at Request\nWorked Less\nNo Clock-Out\nNo Shift\nNo Attendance",
@@ -199,5 +203,7 @@
  "row_format": "Dynamic",
  "sort_field": "creation",
  "sort_order": "DESC",
- "states": []
+ "states": [],
+ "editable_grid": 0,
+ "istable": 1
 }

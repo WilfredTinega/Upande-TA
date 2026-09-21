@@ -362,6 +362,9 @@ class BulkOvertime(Document):
 			values,
 			as_dict=True,
 		)
+		return {
+			(row.employee, str(row.overtime_date)): get_link_to_form("Bulk Overtime", row.name) for row in rows
+		}
 
 		if found is not None:
 			found.requests = len({row.request for row in requests})

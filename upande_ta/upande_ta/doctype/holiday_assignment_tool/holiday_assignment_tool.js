@@ -483,6 +483,7 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 		// same z-index and it would win on DOM order instead.
 		dialog.get_field("company").$wrapper.closest(".form-section").addClass("ha-filters");
 
+		dialog.get_field("summary").$wrapper.html(frm.events.get_summary_html(frm, result, scope));
 		dialog.show();
 		frm._employee_selection_dialog = dialog;
 
@@ -531,12 +532,7 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 			{ id: "custom_farm", name: "custom_farm", content: __("Unit/Division"), width: 140 },
 			{ id: "department", name: "department", content: __("Department"), width: 160 },
 			{ id: "designation", name: "designation", content: __("Designation"), width: 150 },
-			{
-				id: "prior_holiday_list",
-				name: "prior_holiday_list",
-				content: __("Current Holiday List"),
-				width: 200,
-			},
+			{ id: "prior_holiday_list", name: "prior_holiday_list", content: __("Current Holiday List"), width: 200 },
 		].map((column) => ({
 			...column,
 			editable: false,
