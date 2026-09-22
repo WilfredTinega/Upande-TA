@@ -109,6 +109,7 @@
   "attendance_filters_tab",
   "attendance_payroll_section",
   "show_employee_summary",
+  "attendance_active_only",
   "attendance_payroll_periods",
   "attendance_filters_section",
   "attendance_employment_type_filters",
@@ -729,13 +730,19 @@
    "fieldname": "show_employee_summary",
    "fieldtype": "Check",
    "label": "Summary per Employee"
+  },
+  {
+   "default": "0",
+   "fieldname": "attendance_active_only",
+   "fieldtype": "Check",
+   "label": "Active Employees Only"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-22 04:55:52.530926",
+ "modified": "2026-09-22 15:27:00.079047",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",
