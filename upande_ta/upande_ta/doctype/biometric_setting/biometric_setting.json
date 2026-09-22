@@ -14,20 +14,6 @@
   "get_checkin",
   "poll_devices_section",
   "poll_devices",
-  "checkin_events_section",
-  "checkin_column",
-  "enable_checkin",
-  "checkin_event_frequency",
-  "checkin_cron_format",
-  "checkin_events_column_flip",
-  "enable_flip",
-  "flip_event_frequency",
-  "flip_cron_format",
-  "flip_lookback_days",
-  "flip_lookback_hours",
-  "checkins_column",
-  "date",
-  "update",
   "users_tab",
   "enable_users",
   "column_break_zgkt",
@@ -39,17 +25,10 @@
   "section_break_ztmk",
   "users_html",
   "biodata_tab",
-  "section_break_axpd",
-  "enable_bio_templates",
-  "column_break_oxed",
-  "biodata_event_frequency",
-  "column_break_tajv",
-  "biodata_cron_format",
-  "column_break_biodata",
-  "get_bio",
-  "column_break_yqif",
-  "detect_capabilities",
   "section_break_znbu",
+  "get_bio",
+  "detect_capabilities",
+  "column_break_tkem",
   "biodata_device_picker",
   "column_break_fwjy",
   "biodata_device_sn",
@@ -116,7 +95,28 @@
   "attendance_filters_column_break",
   "attendance_employee_category_filters",
   "attendance_employee_filters_section",
-  "attendance_employee_filters"
+  "attendance_employee_filters",
+  "scheduler_tab",
+  "section_break_axpd",
+  "enable_bio_templates",
+  "column_break_oxed",
+  "biodata_event_frequency",
+  "column_break_tajv",
+  "biodata_cron_format",
+  "checkin_events_section",
+  "checkin_column",
+  "enable_checkin",
+  "checkin_event_frequency",
+  "checkin_cron_format",
+  "checkin_events_column_flip",
+  "enable_flip",
+  "flip_event_frequency",
+  "flip_cron_format",
+  "flip_lookback_days",
+  "flip_lookback_hours",
+  "checkins_column",
+  "date",
+  "update"
  ],
  "fields": [
   {
@@ -196,10 +196,6 @@
    "fieldname": "biodata_device_picker",
    "fieldtype": "Select",
    "label": "Device Location"
-  },
-  {
-   "fieldname": "column_break_biodata",
-   "fieldtype": "Column Break"
   },
   {
    "fieldname": "biodata_device_sn",
@@ -284,6 +280,7 @@
    "label": "Enable Bio Templates?"
   },
   {
+   "collapsible": 1,
    "fieldname": "checkin_events_section",
    "fieldtype": "Section Break",
    "label": "Schedule"
@@ -403,8 +400,10 @@
    "fieldtype": "Column Break"
   },
   {
+   "collapsible": 1,
    "fieldname": "section_break_axpd",
-   "fieldtype": "Section Break"
+   "fieldtype": "Section Break",
+   "label": "Biometric Templates"
   },
   {
    "collapsible": 1,
@@ -658,10 +657,6 @@
    "label": "Detect Capabilities"
   },
   {
-   "fieldname": "column_break_yqif",
-   "fieldtype": "Column Break"
-  },
-  {
    "default": "7",
    "depends_on": "eval:doc.enable_flip",
    "description": "How far back each run re-scans. 0 days + 0 hours falls back to 1 day.",
@@ -736,13 +731,22 @@
    "fieldname": "attendance_active_only",
    "fieldtype": "Check",
    "label": "Active Employees Only"
+  },
+  {
+   "fieldname": "scheduler_tab",
+   "fieldtype": "Tab Break",
+   "label": "Scheduler"
+  },
+  {
+   "fieldname": "column_break_tkem",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-22 15:27:00.079047",
+ "modified": "2026-09-23 01:57:33.645014",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",
