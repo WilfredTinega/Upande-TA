@@ -101,6 +101,27 @@ def payroll_window(on_date, from_day, to_day):
 	return start, _month_day(end_year, end_month, to_day)
 
 
+#: Used when a company has no Payroll Dates row and there is no blank-Company
+#: default either. One value, so the two dashboards cannot disagree about what
+#: an unconfigured site's period is — they used to fall back to 21/20 and 23/22
+#: respectively while showing the same figures.
+DEFAULT_PAYROLL_DAYS = (21, 20)
+
+
+def payroll_window_for(company=None, on_date=None):
+	"""The payroll window covering ``on_date`` for ``company``.
+
+	The one way to ask the question: it resolves the per-company day-of-month
+	pair, falls back to :data:`DEFAULT_PAYROLL_DAYS`, and returns the window
+	that contains the date. Both dashboards and the Monthly Attendance Sheet
+	read it, so a company's cycle means the same thing everywhere.
+	"""
+	from_day, to_day = get_payroll_period_days(company)
+	if not (from_day and to_day):
+		from_day, to_day = DEFAULT_PAYROLL_DAYS
+	return payroll_window(getdate(on_date or nowdate()), from_day, to_day)
+
+
 @frappe.whitelist()
 def get_payroll_period(company=None):
 	"""Client-facing: the payroll period for `company` as both day-of-month

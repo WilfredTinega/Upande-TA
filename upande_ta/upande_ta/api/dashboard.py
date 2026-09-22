@@ -487,23 +487,19 @@ def _month_day(year, month, day):
 
 def _default_payroll_range(company=None):
 	"""The payroll window covering today, from the day-of-month values on
-	Biometric Setting's per-company Payroll Dates table. Falls back to the 23rd
-	.. the 22nd when they are not set for `company` (or no default row exists).
+	Biometric Setting's per-company Payroll Dates table, falling back to
+	``DEFAULT_PAYROLL_DAYS`` when `company` has no row and there is no
+	blank-Company default either.
 
 	The window rolls as soon as a period closes — see
 	``biometric_setting.payroll_window``, which the Monthly Attendance Sheet
 	default reads from too, so the two can never disagree.
 	"""
 	from upande_ta.upande_ta.doctype.biometric_setting.biometric_setting import (
-		get_payroll_period_days,
-		payroll_window,
+		payroll_window_for,
 	)
 
-	from_day, to_day = get_payroll_period_days(company)
-	if not (from_day and to_day):
-		from_day, to_day = 23, 22
-
-	return payroll_window(getdate(nowdate()), from_day, to_day)
+	return payroll_window_for(company)
 
 
 @frappe.whitelist()

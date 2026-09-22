@@ -1436,20 +1436,16 @@ def attendance_register():
 
 		# ── payroll period from Biometric Setting's per-company Payroll Dates
 		# table (day-of-month boundaries, e.g. 21 -> 20). Company-specific when
-		# the register's Company filter is set, else the blank-Company default row. ──
+		# the register's Company filter is set, else the blank-Company default
+		# row. Resolved through the one shared helper, so this dashboard, the TA
+		# dashboard and the Monthly Attendance Sheet cannot drift apart — and so
+		# a cycle starting on the 31st is clamped to the month instead of
+		# raising out of date.replace(). ──
 		from upande_ta.upande_ta.doctype.biometric_setting.biometric_setting import (
-			get_payroll_period_days,
+			payroll_window_for,
 		)
-		p_from_day, p_to_day = get_payroll_period_days(company or None)
-		p_from_day = p_from_day or 21
-		p_to_day = p_to_day or 20
-		rd = frappe.utils.getdate(reg_date)
-		if rd.day >= p_from_day:
-			payroll_start = rd.replace(day=p_from_day)
-			payroll_end = frappe.utils.add_months(rd, 1).replace(day=p_to_day)
-		else:
-			payroll_start = frappe.utils.add_months(rd, -1).replace(day=p_from_day)
-			payroll_end = rd.replace(day=p_to_day)
+
+		payroll_start, payroll_end = payroll_window_for(company or None, reg_date)
 
 		# Access-only, like acond in attendance_dashboard_data: the sidebar tree
 		# is a navigation picker and must show every company the caller is

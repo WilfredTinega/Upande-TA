@@ -9,7 +9,18 @@ from a date and two day-of-month numbers and nothing else.
 import datetime
 import unittest
 
-from upande_ta.upande_ta.doctype.biometric_setting.biometric_setting import payroll_window
+import frappe
+
+from upande_ta.upande_ta.doctype.biometric_setting.biometric_setting import (
+    DEFAULT_PAYROLL_DAYS,
+    payroll_window,
+    payroll_window_for,
+)
+
+#: Plain unittest, not IntegrationTestCase: living in a doctype folder makes
+#: frappe generate test records for Biometric Setting, which drags in Sales
+#: Invoice fixtures. Nothing here needs a fixture — it writes one Single and
+#: rolls it back.
 
 #: The two cycles actually configured on Kaitet, plus the code's own fallback.
 CYCLES = ((20, 19), (21, 20), (23, 22))
@@ -88,3 +99,71 @@ class TestPayrollWindow(unittest.TestCase):
 				next_start, _next_end = payroll_window(end + datetime.timedelta(days=1), from_day, to_day)
 				self.assertEqual(next_start, end + datetime.timedelta(days=1))
 				day = end + datetime.timedelta(days=1)
+
+
+class TestPayrollWindowPerCompany(unittest.TestCase):
+	"""Resolving the window for a company, from the Payroll Dates table.
+
+	The same answer has to come back on the TA dashboard, the Attendance
+	Insights register and the Monthly Attendance Sheet — they all read this one
+	function, so a company's cycle means one thing everywhere.
+	"""
+
+	def setUp(self):
+		self.settings = frappe.get_single("Biometric Setting")
+		if not self.settings.meta.has_field("attendance_payroll_periods"):
+			raise unittest.SkipTest("this site has no Payroll Dates table")
+
+	def tearDown(self):
+		# the rows written here are a fixture, not a change to the site
+		frappe.db.rollback()
+		frappe.clear_document_cache("Biometric Setting", "Biometric Setting")
+
+	def _set_rows(self, rows):
+		self.settings.set("attendance_payroll_periods", [])
+		for company, from_day, to_day in rows:
+			self.settings.append(
+				"attendance_payroll_periods",
+				{"company": company, "from": str(from_day), "to": str(to_day)},
+			)
+		self.settings.save(ignore_permissions=True)
+		frappe.clear_document_cache("Biometric Setting", "Biometric Setting")
+
+	def test_each_company_gets_its_own_cycle(self):
+		companies = frappe.get_all("Company", pluck="name", limit=2)
+		if len(companies) < 2:
+			raise unittest.SkipTest("need two companies")
+		first, second = companies
+		self._set_rows([(first, 20, 19), (second, 21, 20)])
+
+		on = datetime.date(2026, 9, 23)
+		self.assertEqual(
+			payroll_window_for(first, on), (datetime.date(2026, 9, 20), datetime.date(2026, 10, 19))
+		)
+		self.assertEqual(
+			payroll_window_for(second, on), (datetime.date(2026, 9, 21), datetime.date(2026, 10, 20))
+		)
+
+	def test_a_blank_company_row_is_the_site_default(self):
+		companies = frappe.get_all("Company", pluck="name", limit=1)
+		self._set_rows([(None, 15, 14)])
+
+		on = datetime.date(2026, 9, 23)
+		expected = (datetime.date(2026, 9, 15), datetime.date(2026, 10, 14))
+		self.assertEqual(payroll_window_for(None, on), expected)
+		# a company with no row of its own falls through to it
+		self.assertEqual(payroll_window_for(companies[0], on), expected)
+
+	def test_nothing_configured_falls_back(self):
+		self._set_rows([])
+		on = datetime.date(2026, 9, 23)
+		self.assertEqual(payroll_window_for(None, on), payroll_window(on, *DEFAULT_PAYROLL_DAYS))
+
+	def test_a_cycle_no_month_can_hold_is_clamped_not_raised(self):
+		"""date.replace(day=31) in February is a ValueError; the window that the
+		Insights register used to build by hand would have raised here."""
+		self._set_rows([(None, 31, 30)])
+		self.assertEqual(
+			payroll_window_for(None, datetime.date(2026, 2, 15)),
+			(datetime.date(2026, 1, 31), datetime.date(2026, 2, 28)),
+		)
