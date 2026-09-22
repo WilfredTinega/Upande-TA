@@ -128,16 +128,19 @@ class TestPayrollWindowPerCompany(unittest.TestCase):
 			)
 		# ignore_mandatory: a bare site (CI) has none of Biometric Setting's
 		# connection fields filled in, and none of them are what is under test
-		# here — only the Payroll Dates rows are
+		# here — only the Payroll Dates rows are.
+		# ignore_links: the company on a row is matched as a string and never
+		# looked up, so these can name companies a fresh site does not have.
 		self.settings.flags.ignore_mandatory = True
+		self.settings.flags.ignore_links = True
 		self.settings.save(ignore_permissions=True)
 		frappe.clear_document_cache("Biometric Setting", "Biometric Setting")
 
 	def test_each_company_gets_its_own_cycle(self):
-		companies = frappe.get_all("Company", pluck="name", limit=2)
-		if len(companies) < 2:
-			raise unittest.SkipTest("need two companies")
-		first, second = companies
+		"""Named companies rather than whatever the site happens to hold: this
+		used to skip on a fresh site, which is exactly where a regression in
+		per-company resolution would go unnoticed."""
+		first, second = "Payroll Cycle A", "Payroll Cycle B"
 		self._set_rows([(first, 20, 19), (second, 21, 20)])
 
 		on = datetime.date(2026, 9, 23)
@@ -149,14 +152,15 @@ class TestPayrollWindowPerCompany(unittest.TestCase):
 		)
 
 	def test_a_blank_company_row_is_the_site_default(self):
-		companies = frappe.get_all("Company", pluck="name", limit=1)
 		self._set_rows([(None, 15, 14)])
 
 		on = datetime.date(2026, 9, 23)
 		expected = (datetime.date(2026, 9, 15), datetime.date(2026, 10, 14))
 		self.assertEqual(payroll_window_for(None, on), expected)
-		# a company with no row of its own falls through to it
-		self.assertEqual(payroll_window_for(companies[0], on), expected)
+		# any company with no row of its own falls through to it. The name is
+		# only matched against the rows, never looked up, so it needs no
+		# Company to exist — a fresh site has none.
+		self.assertEqual(payroll_window_for("Company With No Row Of Its Own", on), expected)
 
 	def test_nothing_configured_falls_back(self):
 		self._set_rows([])
