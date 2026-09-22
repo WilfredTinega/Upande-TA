@@ -245,13 +245,16 @@ def get_attendance_records(filters):
 	# these records -- so the same employee restrictions have to be applied here
 	# or the chart counts people the filters excluded.
 	employee_conditions = get_extra_employee_conditions(filters)
-	if filters.department or filters.branch or employee_conditions:
+	active_only = active_employees_only()
+	if filters.department or filters.branch or employee_conditions or active_only:
 		Employee = frappe.qb.DocType("Employee")
 		query = query.join(Employee).on(Attendance.employee == Employee.name)
 		if filters.department and filters.department != "All Departments":
 			query = query.where(Employee.department == filters.department)
 		if filters.branch:
 			query = query.where(Employee.branch == filters.branch)
+		if active_only:
+			query = query.where(Employee.status == "Active")
 		for employee_field, value in employee_conditions.items():
 			query = query.where(Employee[employee_field] == value)
 
@@ -278,6 +281,17 @@ def get_employee_related_details(filters):
 
 	allowed = get_allowed_employees(filters)
 	disabled = get_disabled_employee_names()
+
+	if active_employees_only():
+		# Grouped, emp_map is {group: {employee: details}}; flat, it is
+		# {employee: details}. Either way only the employees already on the
+		# sheet are asked about.
+		if filters.group_by:
+			names = {name for employees in emp_map.values() for name in employees}
+		else:
+			names = set(emp_map)
+		disabled = disabled | get_inactive_employee_names(names)
+
 	if allowed is None and not disabled:
 		return emp_map, group_by_param_values
 
@@ -553,10 +567,12 @@ _TOTAL_COLUMNS = (
 	("ta_week_off", "weekly_off"),
 )
 
-#: The switch on Biometric Setting > Attendance Filters that decides whether the
-#: total columns are added at all.
-SUMMARY_SETTING_DOCTYPE = "Biometric Setting"
+#: The switches on Biometric Setting > Attendance Filters that this report reads.
+SETTING_DOCTYPE = "Biometric Setting"
+#: "Summary per Employee" — whether the total columns are added at all.
 SUMMARY_SETTING_FIELD = "show_employee_summary"
+#: "Active Employees Only" — whether Left/Inactive/Suspended employees are shown.
+ACTIVE_ONLY_FIELD = "attendance_active_only"
 
 #: Sum of the six above: every day of the period that carries a status. It falls
 #: short of the period length exactly where days are unmarked — before an
@@ -573,13 +589,14 @@ _SUMMARY_ROWS = [
 ]
 
 
-def employee_summary_enabled() -> bool:
-	"""Whether the per-employee total columns are switched on.
+def _setting_enabled(fieldname: str, default: bool) -> bool:
+	"""Read one Check on Biometric Setting, with "never saved" as `default`.
 
 	A Single materialises its field defaults only when it is first saved, so a
-	site that has never opened Biometric Setting has no row for this field at
-	all. That must read as the shipped default — on — or the columns would stay
-	invisible until somebody saved a form they have no reason to open.
+	site that has never opened Biometric Setting has no row for a newly shipped
+	field at all. That must read as the field's own default, or a setting would
+	behave one way until somebody saved a form they have no reason to open and
+	another way afterwards.
 
 	Hence the raw read of `tabSingles` rather than ``get_single_value``, which
 	casts a missing Check to 0 and so cannot tell "switched off" from "never
@@ -589,12 +606,46 @@ def employee_summary_enabled() -> bool:
 	try:
 		row = frappe.db.sql(
 			"""SELECT value FROM tabSingles WHERE doctype = %s AND field = %s""",
-			(SUMMARY_SETTING_DOCTYPE, SUMMARY_SETTING_FIELD),
+			(SETTING_DOCTYPE, fieldname),
 		)
 	except Exception:
 		# the setting doctype is not on this site, or has not synced yet
-		return True
-	return bool(cint(row[0][0])) if row else True
+		return default
+	return bool(cint(row[0][0])) if row else default
+
+
+def employee_summary_enabled() -> bool:
+	"""Whether the per-employee total columns are switched on. On by default."""
+	return _setting_enabled(SUMMARY_SETTING_FIELD, True)
+
+
+def active_employees_only() -> bool:
+	"""Whether the sheet is restricted to employees whose status is Active.
+
+	Off by default: a sheet is routinely run over a period somebody left in, and
+	their worked days have to be on it to be paid. Ticking the box is the site
+	saying it would rather not see them.
+	"""
+	return _setting_enabled(ACTIVE_ONLY_FIELD, False)
+
+
+def get_inactive_employee_names(names) -> set:
+	"""Of `names`, the ones whose Employee.status is not Active.
+
+	Asked of the employees the report already has rather than of the whole
+	Employee table: a site with four thousand employees would otherwise put
+	every leaver it ever had into a NOT IN clause.
+	"""
+	names = list(names)
+	if not names:
+		return set()
+	return set(
+		frappe.get_all(
+			"Employee",
+			filters={"name": ("in", names), "status": ("!=", "Active")},
+			pluck="name",
+		)
+	)
 
 
 def _day_fields(columns) -> list:
