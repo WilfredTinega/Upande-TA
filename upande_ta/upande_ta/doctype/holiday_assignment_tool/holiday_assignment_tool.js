@@ -483,7 +483,9 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 		// same z-index and it would win on DOM order instead.
 		dialog.get_field("company").$wrapper.closest(".form-section").addClass("ha-filters");
 
-		dialog.get_field("summary").$wrapper.html(frm.events.get_summary_html(frm, result, scope));
+		// a placeholder until load() runs 150ms from now: `result` only exists
+		// once a fetch has returned, and load() fills this in either way
+		dialog.get_field("summary").$wrapper.html(frm.events.get_summary_html(frm, {}, filters));
 		dialog.show();
 		frm._employee_selection_dialog = dialog;
 
