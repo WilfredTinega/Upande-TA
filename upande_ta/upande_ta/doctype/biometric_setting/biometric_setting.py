@@ -66,24 +66,53 @@ def _month_day(year, month, day):
 	return getdate(f"{year}-{month:02d}-{min(int(day), last):02d}")
 
 
+def _shift_month(year, month, by):
+	"""(year, month) moved ``by`` months, wrapping the year."""
+	index = (year * 12 + (month - 1)) + by
+	return index // 12, index % 12 + 1
+
+
+def payroll_window(on_date, from_day, to_day):
+	"""The payroll window that *contains* ``on_date``.
+
+	A window runs from ``from_day`` of one month to ``to_day``, which for every
+	cycle configured here (the 20th to the 19th, the 21st to the 20th) falls in
+	the month after.
+
+	This used to be pinned to [last month's ``from_day``, this month's
+	``to_day``], which is the right answer only while today is still inside
+	that window. The day a period closed, every default still offered the
+	period that had just ended — a Monthly Attendance Sheet opened on the 23rd
+	came up showing the 20th of last month to the 19th of this one. It now
+	rolls the moment the period is over.
+
+	Both days are clamped to the length of their month, so a 31st survives
+	February.
+	"""
+	year, month = on_date.year, on_date.month
+	# before the start day, today still belongs to the window that opened last
+	# month; on or after it, the next one has begun
+	if on_date.day < from_day:
+		year, month = _shift_month(year, month, -1)
+
+	start = _month_day(year, month, from_day)
+	# a to_day before the from_day means the window closes in the month after
+	end_year, end_month = (year, month) if to_day >= from_day else _shift_month(year, month, 1)
+	return start, _month_day(end_year, end_month, to_day)
+
+
 @frappe.whitelist()
 def get_payroll_period(company=None):
 	"""Client-facing: the payroll period for `company` as both day-of-month
-	numbers and the actual rolling-window dates (start = `from` day in the
-	PREVIOUS month, end = `to` day in the CURRENT month, relative to today) --
-	used to default the Monthly Attendance Sheet's date range when a Company is
-	picked. {"from": int|None, "to": int|None, "start_date": str|None, "end_date": str|None}
+	numbers and the dates of the window covering today — used to default the
+	Monthly Attendance Sheet's date range when a Company is picked.
+	{"from": int|None, "to": int|None, "start_date": str|None, "end_date": str|None}
 	"""
 	from_day, to_day = get_payroll_period_days(company)
 	if not from_day or not to_day:
 		return {"from": from_day, "to": to_day, "start_date": None, "end_date": None}
 
-	today = getdate(nowdate())
-	py = today.year if today.month > 1 else today.year - 1
-	pm = today.month - 1 if today.month > 1 else 12
-
-	start_date = _month_day(py, pm, from_day)
-	end_date = _month_day(today.year, today.month, to_day)
+	start_date, end_date = payroll_window(getdate(nowdate()), from_day, to_day)
 
 	return {
 		"from": from_day,
