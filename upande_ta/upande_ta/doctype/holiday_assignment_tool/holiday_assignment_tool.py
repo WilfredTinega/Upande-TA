@@ -70,9 +70,11 @@ class HolidayAssignmentTool(Document):
 		self.check_duplicate_employees()
 
 	def validate_mandatory(self):
-		# Employees first: Company is set by the Select Employees dialog, so an
-		# empty table is the real problem and "Company is required" would only
-		# point the user at a field they cannot see.
+		# Employees first: an empty table is the likelier mistake, and it reads
+		# better than a field-level complaint. Company is a field on the form
+		# now — it used to be hidden and set only by the Select Employees
+		# dialog, which meant a run whose company came up empty refused against
+		# something nobody could see, let alone fill in.
 		if not self.employees:
 			frappe.throw(_("Please select employees before assigning holidays."))
 		for fieldname in ("holiday_list", "from_date", "company"):
