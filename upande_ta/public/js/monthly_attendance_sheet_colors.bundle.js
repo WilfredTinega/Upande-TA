@@ -3,6 +3,9 @@ frappe.provide("frappe.views");
 (function () {
 	const REPORT = "Monthly Attendance Sheet";
 
+	const PAYROLL_PERIOD_METHOD =
+		"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.get_payroll_period";
+
 	const DAY_RE = /^\d{2}-\d{2}-\d{4}$/;
 
 	const SUMMARY_LABEL_FIELD = "employee";
@@ -348,7 +351,7 @@ frappe.provide("frappe.views");
 		if (!company) return;
 
 		frappe.call({
-			method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.get_payroll_period",
+			method: PAYROLL_PERIOD_METHOD,
 			args: { company },
 			callback: function (r) {
 				const data = (r && r.message) || {};
@@ -379,6 +382,86 @@ frappe.provide("frappe.views");
 			};
 		} catch (e) {
 			console.warn("[MAS payroll]", e);
+		}
+	}
+
+	// HRMS fills Year from get_attendance_years in its own onload. When the
+	// report opens on Date Range — which it does as soon as a Company is picked
+	// — switching back to Month can find Year still empty, and the report then
+	// runs against no year at all. Give it one: the newest year attendance
+	// exists for, else this one.
+	function ensureYear(report) {
+		try {
+			const year = report.get_filter && report.get_filter("year");
+			if (!year || report.get_filter_value("year")) return;
+
+			const options = String(year.df.options || "")
+				.split("\n")
+				.filter(Boolean);
+			if (!options.length) {
+				year.df.options = String(new Date().getFullYear());
+				year.refresh();
+			}
+			year.set_input(options[0] || String(new Date().getFullYear()));
+		} catch (e) {
+			console.warn("[MAS year]", e);
+		}
+	}
+
+	// Frappe remembers the last filters a user ran, so a report reopened after
+	// the payroll period closed comes back showing the period that has ended.
+	// Roll it forward from the settings — but only when the stored range is
+	// entirely behind the live window, so a range deliberately narrowed inside
+	// the current period is left alone.
+	function refreshStalePayrollPeriod(report) {
+		try {
+			const company = report.get_filter_value("company");
+			const end = report.get_filter_value("end_date");
+			if (!company || !end) return;
+
+			frappe.call({
+				method: PAYROLL_PERIOD_METHOD,
+				args: { company },
+				callback: function (r) {
+					const data = (r && r.message) || {};
+					if (!data.start_date || !data.end_date) return;
+					// still inside the live window, or ahead of it: leave it be
+					if (end >= data.start_date) return;
+
+					report.set_filter_value({
+						start_date: data.start_date,
+						end_date: data.end_date,
+					});
+					report.set_filter_value("filter_based_on", "Date Range");
+					frappe.show_alert({
+						message: __("The payroll period has rolled over — showing {0} to {1}.", [
+							frappe.datetime.str_to_user(data.start_date),
+							frappe.datetime.str_to_user(data.end_date),
+						]),
+						indicator: "blue",
+					});
+				},
+			});
+		} catch (e) {
+			console.warn("[MAS payroll roll]", e);
+		}
+	}
+
+	// Year is only visible under Month, so it is filled the moment that mode is
+	// chosen rather than left to whatever onload managed.
+	function ensureYearOnModeChange(report) {
+		try {
+			const mode = report.get_filter && report.get_filter("filter_based_on");
+			if (!mode || mode.__ta_year_hooked) return;
+			mode.__ta_year_hooked = true;
+			const prior = mode.on_change;
+			mode.on_change = function () {
+				const out = prior ? prior.apply(this, arguments) : undefined;
+				if (report.get_filter_value("filter_based_on") === "Month") ensureYear(report);
+				return out;
+			};
+		} catch (e) {
+			console.warn("[MAS year hook]", e);
 		}
 	}
 
@@ -437,6 +520,9 @@ frappe.provide("frappe.views");
 			if (this.report_name === REPORT) {
 				clearUnitOnCompanyChange(this);
 				applyPayrollOnCompanyChange(this);
+				ensureYearOnModeChange(this);
+				ensureYear(this);
+				refreshStalePayrollPeriod(this);
 			}
 			return out;
 		};

@@ -70,9 +70,11 @@ class HolidayAssignmentTool(Document):
 		self.check_duplicate_employees()
 
 	def validate_mandatory(self):
-		# Employees first: Company is set by the Select Employees dialog, so an
-		# empty table is the real problem and "Company is required" would only
-		# point the user at a field they cannot see.
+		# Employees first: an empty table is the likelier mistake, and it reads
+		# better than a field-level complaint. Company is a field on the form
+		# now — it used to be hidden and set only by the Select Employees
+		# dialog, which meant a run whose company came up empty refused against
+		# something nobody could see, let alone fill in.
 		if not self.employees:
 			frappe.throw(_("Please select employees before assigning holidays."))
 		for fieldname in ("holiday_list", "from_date", "company"):
@@ -137,6 +139,7 @@ class HolidayAssignmentTool(Document):
 		list, or none at all.
 		"""
 		self.save()
+		self.validate_end_date_over_existing()
 
 		if len(self.employees) <= BATCH_THRESHOLD:
 			self.create_assignments()
@@ -156,6 +159,54 @@ class HolidayAssignmentTool(Document):
 			).format(len(self.employees)),
 			alert=True,
 			indicator="blue",
+		)
+
+	def validate_end_date_over_existing(self):
+		"""Refuse an open-ended run over an assignment that is already in force.
+
+		Without a To Date there is no boundary to restore anyone at, so the new
+		list would take over from ``from_date`` and never give the employee
+		back — the arrangement they are on now would simply end, with nothing
+		recorded about when it was meant to. Asking for the end date up front
+		keeps the chain intact: the override is a period, and the list they
+		were on resumes the day after it.
+
+		Checked at run time rather than in ``validate``, so the work list can
+		still be saved while the dates are being decided.
+		"""
+		if self.to_date or not self.from_date or not self.employees:
+			return
+
+		from hrms.utils.holiday_list import get_assigned_holiday_list
+
+		on = getdate(self.from_date)
+		in_force = []
+		for row in self.employees:
+			current = get_assigned_holiday_list(row.employee, as_on=on)
+			if current:
+				in_force.append((row, current))
+
+		if not in_force:
+			return
+
+		shown = "<br>".join(
+			"{0}: {1}".format(
+				frappe.bold(row.employee_name or row.employee), frappe.bold(current)
+			)
+			for row, current in in_force[:10]
+		)
+		if len(in_force) > 10:
+			shown += "<br>" + _("... and {0} more").format(len(in_force) - 10)
+
+		frappe.throw(
+			_(
+				"Set the <b>To Date</b> before changing these employees: each is already on a "
+				"holiday list as of {0}, and with no end date the new list would take over from "
+				"that day and never hand them back.<br><br>{1}<br><br>"
+				"With an end date they move onto {2} for the period and return to their own list "
+				"the day after."
+			).format(frappe.bold(frappe.format(self.from_date, "Date")), shown, frappe.bold(self.holiday_list)),
+			title=_("End Date Required"),
 		)
 
 	def create_assignments(self):

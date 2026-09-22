@@ -166,6 +166,20 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 		frm.events.clear_run_scope(frm);
 	},
 
+	/** The run is validated against this company and the picker is scoped to
+	 * it, so employees fetched under a different one cannot stay behind. */
+	company(frm) {
+		if ((frm.doc.employees || []).length) {
+			frm.clear_table("employees");
+			frm.refresh_field("employees");
+			frappe.show_alert({
+				message: __("Employees cleared — they belonged to the previous company."),
+				indicator: "orange",
+			});
+		}
+		frm._last_filters = null;
+	},
+
 	clear_run_scope(frm) {
 		const stale = ["company", "from_date", "to_date"].filter((field) => frm.doc[field]);
 		if (!stale.length) return;
@@ -483,7 +497,9 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 		// same z-index and it would win on DOM order instead.
 		dialog.get_field("company").$wrapper.closest(".form-section").addClass("ha-filters");
 
-		dialog.get_field("summary").$wrapper.html(frm.events.get_summary_html(frm, result, scope));
+		// a placeholder until load() runs 150ms from now: `result` only exists
+		// once a fetch has returned, and load() fills this in either way
+		dialog.get_field("summary").$wrapper.html(frm.events.get_summary_html(frm, {}, filters));
 		dialog.show();
 		frm._employee_selection_dialog = dialog;
 

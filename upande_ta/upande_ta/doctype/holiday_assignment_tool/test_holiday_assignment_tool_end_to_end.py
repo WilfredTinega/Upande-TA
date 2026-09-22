@@ -363,6 +363,60 @@ class IntegrationTestHolidayAssignmentToolEndToEnd(_TestCase):
 		self.assertEqual(self.resolved_list(frappe.utils.add_days(self.x, 1)), self.list_b)
 		self.assertEqual(self.resolved_list(self.d2_plus_1), self.list_a)
 
+	# ──────────────────────────────────────────────────────────────────────
+	# An open-ended run over an assignment already in force
+	# ──────────────────────────────────────────────────────────────────────
+
+	def run_open_ended(self, holiday_list=None, from_date=None):
+		"""Like make_document, but genuinely open-ended: make_document's own
+		`to_date or self.d2` would fill the blank back in."""
+		doc = frappe.get_single("Holiday Assignment Tool")
+		doc.company = self.company
+		doc.holiday_list = holiday_list or self.list_b
+		doc.from_date = from_date or self.d1
+		doc.to_date = None
+		doc.set("employees", [])
+		doc.append("employees", {"employee": self.employee, "prior_holiday_list": self.list_a})
+		doc.assign_holidays()
+		return doc
+
+	def test_no_end_date_over_an_existing_assignment_is_refused(self):
+		"""Without a To Date there is no boundary to restore anyone at, so the
+		employee would never come back to the list they are on. The run says so
+		instead of quietly ending their current arrangement."""
+		self.assertEqual(self.resolved_list(self.d1), self.list_a, "the fixture is already assigned")
+		before = self.active_assignments()
+
+		with self.assertRaises(frappe.ValidationError) as caught:
+			self.run_open_ended()
+
+		message = frappe.utils.strip_html(str(caught.exception))
+		self.assertIn("To Date", message)
+		self.assertIn(self.list_a, message, "it names the list they are on now")
+		self.assertEqual(self.active_assignments(), before, "nothing may be changed by a refused run")
+
+	def test_the_same_run_with_an_end_date_goes_through(self):
+		self.make_document(to_date=self.d2)
+
+		self.assertEqual(self.resolved_list(self.d1), self.list_b)
+		self.assertEqual(self.resolved_list(self.d2_plus_1), self.list_a, "handed back afterwards")
+
+	def test_an_open_ended_run_is_fine_with_nothing_in_force(self):
+		"""The guard is about not breaking an arrangement, so an employee who
+		has none is left free to be assigned open-ended."""
+		for row in frappe.get_all(
+			"Holiday List Assignment",
+			filters={"assigned_to": self.employee, "docstatus": 1},
+			pluck="name",
+		):
+			assignment = frappe.get_doc("Holiday List Assignment", row)
+			assignment.flags.ignore_permissions = True
+			assignment.cancel()
+
+		self.assertIsNone(self.resolved_list(self.d1), "nothing in force now")
+		self.run_open_ended()
+		self.assertEqual(self.resolved_list(self.d1), self.list_b)
+
 
 if __name__ == "__main__":
 	unittest.main()
