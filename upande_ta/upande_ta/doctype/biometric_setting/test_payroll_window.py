@@ -126,6 +126,10 @@ class TestPayrollWindowPerCompany(unittest.TestCase):
 				"attendance_payroll_periods",
 				{"company": company, "from": str(from_day), "to": str(to_day)},
 			)
+		# ignore_mandatory: a bare site (CI) has none of Biometric Setting's
+		# connection fields filled in, and none of them are what is under test
+		# here — only the Payroll Dates rows are
+		self.settings.flags.ignore_mandatory = True
 		self.settings.save(ignore_permissions=True)
 		frappe.clear_document_cache("Biometric Setting", "Biometric Setting")
 
