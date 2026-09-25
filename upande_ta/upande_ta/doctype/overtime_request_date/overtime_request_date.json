@@ -1,15 +1,13 @@
 {
  "actions": [],
- "creation": "2026-09-19 19:00:00",
+ "creation": "2026-09-25 21:00:00",
  "doctype": "DocType",
- "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "employee",
   "employee_name",
-  "department",
-  "designation",
-  "custom_farm",
+  "overtime_date",
+  "day_type",
   "requested_hours"
  ],
  "fields": [
@@ -20,11 +18,11 @@
    "in_list_view": 1,
    "label": "Employee",
    "options": "Employee",
+   "read_only": 1,
    "reqd": 1
   },
   {
    "columns": 3,
-   "fetch_from": "employee.employee_name",
    "fieldname": "employee_name",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -33,46 +31,38 @@
   },
   {
    "columns": 2,
-   "fetch_from": "employee.department",
-   "fieldname": "department",
-   "fieldtype": "Link",
+   "fieldname": "overtime_date",
+   "fieldtype": "Date",
    "in_list_view": 1,
-   "label": "Department",
-   "options": "Department",
-   "read_only": 1
-  },
-  {
-   "fetch_from": "employee.designation",
-   "fieldname": "designation",
-   "fieldtype": "Link",
-   "label": "Designation",
-   "options": "Designation",
-   "read_only": 1
-  },
-  {
-   "fieldname": "custom_farm",
-   "fieldtype": "Link",
-   "label": "Unit/Division",
-   "options": "Farm",
-   "read_only": 1
+   "label": "Date",
+   "read_only": 1,
+   "reqd": 1
   },
   {
    "columns": 2,
+   "fieldname": "day_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Day Type",
+   "options": "Working Day\nRest Day\nPublic Holiday",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
    "fieldname": "requested_hours",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Requested Hours",
-   "non_negative": 1,
-   "reqd": 1
+   "label": "Hours",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-09-25 23:45:53.860237",
+ "modified": "2026-09-25 23:45:54.063048",
  "modified_by": "Administrator",
  "module": "Upande TA",
- "name": "Overtime Request Employee",
+ "name": "Overtime Request Date",
  "owner": "Administrator",
  "permissions": [],
  "row_format": "Dynamic",

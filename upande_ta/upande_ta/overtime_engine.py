@@ -16,6 +16,9 @@ Two steps per employee per date:
    shift. On a working day that is worked hours minus the shift length; on a
    rest day or public holiday every worked hour is overtime.
 2. :func:`settle` — what gets paid: the lower of requested and biometric.
+
+A Week request carries a weekly total rather than hours per day;
+:func:`split_across_working_days` turns it into the per-day hours step 2 reads.
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ __all__ = [
 	"biometric_overtime",
 	"settle",
 	"shift_length_hours",
+	"split_across_working_days",
 ]
 
 WORKING_DAY = "Working Day"
@@ -106,6 +110,31 @@ def biometric_overtime(working_hours, shift_hours, day_type: str, *, maximum_hou
 	if maximum_hours:
 		hours = min(hours, float(maximum_hours))
 	return round(hours, 2)
+
+
+def split_across_working_days(total, day_types) -> list[float]:
+	"""Share a weekly total out over the working days of that week.
+
+	One share per entry of ``day_types``, in order: rest days and public
+	holidays get 0, every working day an equal share rounded to the hundredth,
+	and the last working day takes the rounding difference so the shares add
+	up to ``total`` exactly. All zeros when the week has no working day.
+	"""
+	for day_type in day_types:
+		if day_type not in DAY_TYPES:
+			raise ValueError(f"unknown day type {day_type!r}")
+
+	total = max(float(total or 0), 0.0)
+	working = [index for index, day_type in enumerate(day_types) if day_type == WORKING_DAY]
+	shares = [0.0] * len(day_types)
+	if not working or not total:
+		return shares
+
+	share = round(total / len(working), 2)
+	for index in working:
+		shares[index] = share
+	shares[working[-1]] = round(total - share * (len(working) - 1), 2)
+	return shares
 
 
 def settle(

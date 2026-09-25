@@ -5,6 +5,8 @@ const OT_FETCH_METHOD =
 	"upande_ta.upande_ta.api.holiday_assignment_employees.get_holiday_assignment_employees";
 const OT_BULK_STATUS_METHOD =
 	"upande_ta.upande_ta.doctype.overtime_request.overtime_request.bulk_overtime_status";
+const OT_MAKE_BULK_METHOD =
+	"upande_ta.upande_ta.doctype.overtime_request.overtime_request.make_bulk_overtime";
 
 const ot_esc = (value) => frappe.utils.escape_html(value == null ? "" : String(value));
 
@@ -76,6 +78,10 @@ const ot_week_number = (value) => {
 
 const ot_is_range = (frm) => frm.doc.request_for && frm.doc.request_for !== "Single Day";
 
+// a Week request asks for the week's total, shared out over the working days
+const ot_hours_label = (frm) =>
+	frm.doc.request_for === "Week" ? __("Requested Hours for the Week") : __("Requested Hours per Day");
+
 frappe.ui.form.on("Overtime Request", {
 	setup(frm) {
 		frm.set_query("employee", "employees", () => ({
@@ -103,42 +109,45 @@ frappe.ui.form.on("Overtime Request", {
 		if (frm.doc.docstatus === 1) frm.events.show_bulk_overtime_button(frm);
 	},
 
-	/** An approved request exists to be paid, so the way to its Bulk Overtime
-	 * belongs on the request itself rather than inside a Create menu. The
-	 * server answers both halves at once: a request is only payable once it
-	 * has cleared its last approval, and once a batch holds it the button goes
-	 * to that batch instead — a day is paid once, so a second batch could only
-	 * come up empty. */
+	/** Create > Bulk Overtime once the request has cleared its last approval
+	 * and has days worked that no batch holds yet — which includes the last
+	 * days of a week an earlier batch paid before the week was out. A batch
+	 * already paying it is one click away under View. */
 	show_bulk_overtime_button(frm) {
 		frappe
 			.call({ method: OT_BULK_STATUS_METHOD, args: { overtime_request: frm.doc.name } })
 			.then((r) => {
 				const status = (r && r.message) || {};
 				if (status.batch) {
-					frm.add_custom_button(__("Go to Bulk Overtime"), () =>
-						frappe.set_route("Form", "Bulk Overtime", status.batch)
+					frm.add_custom_button(
+						__("Bulk Overtime"),
+						() => frappe.set_route("Form", "Bulk Overtime", status.batch),
+						__("View")
 					);
-				} else if (status.approved) {
-					frm.add_custom_button(__("Create Bulk Overtime"), () =>
-						frm.events.start_bulk_overtime(frm)
-					).addClass("btn-primary");
+				}
+				if (status.approved && status.days_left) {
+					frm.add_custom_button(
+						__("Bulk Overtime"),
+						() => frm.events.make_bulk_overtime(frm),
+						__("Create")
+					);
 				}
 			});
 	},
 
-	/** Open a new Bulk Overtime that pays this request. The batch takes its
-	 * period from the request itself, so there is nothing to fill in — and
-	 * nothing to pay yet if the request has not been worked, which the fetch
-	 * says in its own words. */
-	start_bulk_overtime(frm) {
-		frappe.new_doc("Bulk Overtime").then(() => {
-			const target = cur_frm;
-			if (!target || target.doctype !== "Bulk Overtime") return;
-			target
-				.set_value("company", frm.doc.company)
-				.then(() => target.set_value("custom_farm", frm.doc.custom_farm || ""))
-				.then(() => target.events.fetch_overtime(target, [frm.doc.name]));
-		});
+	/** Build and save the batch on the server, then open it: its rows are
+	 * already stored, so leaving the form cannot lose them. */
+	make_bulk_overtime(frm) {
+		frappe
+			.call({
+				method: OT_MAKE_BULK_METHOD,
+				args: { overtime_request: frm.doc.name },
+				freeze: true,
+				freeze_message: __("Creating Bulk Overtime..."),
+			})
+			.then((r) => {
+				if (r && r.message) frappe.set_route("Form", "Bulk Overtime", r.message);
+			});
 	},
 
 	/** Month wears the browser's own picker; Week is a plain list of ISO week
@@ -151,6 +160,13 @@ frappe.ui.form.on("Overtime Request", {
 			"label",
 			ot_is_range(frm) ? __("From Date") : __("Overtime Date")
 		);
+		frm.set_df_property("default_requested_hours", "label", ot_hours_label(frm));
+		frm.fields_dict.employees.grid.update_docfield_property(
+			"requested_hours",
+			"label",
+			ot_hours_label(frm)
+		);
+		frm.refresh_field("employees");
 		frm.events.describe_week(frm);
 	},
 
@@ -413,7 +429,7 @@ frappe.ui.form.on("Overtime Request", {
 				{
 					fieldtype: "Float",
 					fieldname: "requested_hours",
-					label: __("Requested Hours per Day"),
+					label: ot_hours_label(frm),
 					default: frm.doc.default_requested_hours || "",
 					description: __("For everyone you tick."),
 				},

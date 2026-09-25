@@ -205,7 +205,22 @@ class IntegrationTestOvertimeRequest(_TestCase):
 				return company, free[:2]
 		return None, []
 
-	def _request(self, request_for, **kwargs):
+	#: IntegrationTestCase rolls back once at class cleanup, not between tests,
+	#: and the weekly limit would otherwise see every earlier test's requests.
+	SAVEPOINT = "overtime_request_test"
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.savepoint(self.SAVEPOINT)
+		self.addCleanup(self._rollback_to_savepoint)
+
+	def _rollback_to_savepoint(self):
+		try:
+			frappe.db.rollback(save_point=self.SAVEPOINT)
+		except Exception:
+			pass
+
+	def _request(self, request_for, ignore_weekly_limit=False, **kwargs):
 		doc = frappe.get_doc(
 			{
 				"doctype": "Overtime Request",
@@ -218,6 +233,7 @@ class IntegrationTestOvertimeRequest(_TestCase):
 				**kwargs,
 			}
 		)
+		doc.flags.ignore_weekly_limit = ignore_weekly_limit
 		doc.insert(ignore_permissions=True)
 		return doc
 
@@ -293,20 +309,95 @@ class IntegrationTestOvertimeRequest(_TestCase):
 		with self.assertRaises(frappe.ValidationError):
 			self._request("Date Range", overtime_date="2030-01-01", to_date="2036-01-01")
 
-	def test_hours_are_per_day_across_every_employee(self):
-		doc = self._request("Week", week="Week 20", week_year=2030)
+	def test_hours_are_per_day_on_a_range(self):
+		doc = self._request("Date Range", overtime_date="2030-12-01", to_date="2030-12-07")
 		# 2 employees x 2 hours x 7 days
 		self.assertEqual(doc.number_of_employees, 2)
 		self.assertEqual(doc.total_requested_hours, 28)
 
+	def test_a_week_asks_for_the_whole_week(self):
+		doc = self._request("Week", week="Week 20", week_year=2030)
+		# 2 employees x 2 hours for the week
+		self.assertEqual(doc.total_requested_hours, 4)
+
+	def test_a_week_is_shared_out_over_the_working_days(self):
+		from frappe.utils import getdate
+
+		doc = self._request("Week", week="Week 20", week_year=2030)
+		for employee in self.employees:
+			with self.subTest(employee=employee):
+				rows = [row for row in doc.daily_hours if row.employee == employee]
+				self.assertEqual(
+					[getdate(row.overtime_date) for row in rows],
+					[getdate(f"2030-05-{day}") for day in range(13, 20)],
+				)
+				self.assertAlmostEqual(sum(row.requested_hours for row in rows), 2, places=6)
+				for row in rows:
+					if row.day_type != "Working Day":
+						self.assertEqual(row.requested_hours, 0, f"{row.overtime_date} is not a working day")
+
+	def test_only_a_week_is_shared_out(self):
+		doc = self._request("Date Range", overtime_date="2030-12-01", to_date="2030-12-07")
+		self.assertEqual(doc.daily_hours, [])
+
 	def test_overlapping_approvals_clash(self):
+		"""The approval-time guard, for a request saved before the weekly
+		limit or past it."""
 		week = self._request("Week", week="Week 20", week_year=2030)  # 13 to 19 May 2030
 		week.submit()
 
-		overlapping = self._request("Date Range", overtime_date="2030-05-19", to_date="2030-05-22")
+		overlapping = self._request(
+			"Date Range", overtime_date="2030-05-19", to_date="2030-05-22", ignore_weekly_limit=True
+		)
 		with self.assertRaises(frappe.ValidationError) as caught:
 			overlapping.submit()
 		self.assertIn("Already approved", frappe.utils.strip_html(str(caught.exception)))
+
+	# ──────────────────────────────────────────────────────────────────────
+	# One request per employee per week
+	# ──────────────────────────────────────────────────────────────────────
+
+	def _refused_this_week(self, request_for, **kwargs):
+		with self.assertRaises(frappe.ValidationError) as caught:
+			self._request(request_for, **kwargs)
+		self.assertIn("one Overtime Request per week", frappe.utils.strip_html(str(caught.exception)))
+
+	def test_a_second_day_in_the_same_week_is_refused(self):
+		self._request("Single Day", overtime_date="2031-03-04")  # a Tuesday
+		self._refused_this_week("Single Day", overtime_date="2031-03-07")  # that Friday
+
+	def test_a_draft_already_holds_the_week(self):
+		"""Refused on save, not on approval: the draft is enough."""
+		self._request("Week", week="Week 12", week_year=2031)
+		self._refused_this_week("Single Day", overtime_date="2031-03-19")
+
+	def test_a_request_in_the_next_week_is_fine(self):
+		self._request("Single Day", overtime_date="2031-03-07")  # Friday, week 10
+		monday = self._request("Single Day", overtime_date="2031-03-10")  # Monday, week 11
+		self.assertTrue(monday.name)
+
+	def test_a_range_touching_the_week_counts(self):
+		self._request("Single Day", overtime_date="2031-04-02")  # Wednesday, week 14
+		self._refused_this_week("Date Range", overtime_date="2031-03-26", to_date="2031-03-31")
+
+	def test_another_employee_is_not_affected(self):
+		self._request("Single Day", overtime_date="2031-05-06", employees=[{"employee": self.employees[0], "requested_hours": 2}])
+		other = self._request(
+			"Single Day", overtime_date="2031-05-07", employees=[{"employee": self.employees[1], "requested_hours": 2}]
+		)
+		self.assertTrue(other.name)
+
+	def test_saving_the_same_request_again_is_fine(self):
+		doc = self._request("Week", week="Week 22", week_year=2031)
+		doc.reason = "edited"
+		doc.save(ignore_permissions=True)
+
+	def test_a_cancelled_request_frees_the_week(self):
+		first = self._request("Single Day", overtime_date="2031-06-03")
+		first.submit()
+		first.cancel()
+		again = self._request("Single Day", overtime_date="2031-06-04")
+		self.assertTrue(again.name)
 
 	def test_a_neighbouring_range_does_not_clash(self):
 		week = self._request("Week", week="Week 22", week_year=2030)  # 27 May to 2 June 2030
@@ -316,9 +407,11 @@ class IntegrationTestOvertimeRequest(_TestCase):
 		adjacent.submit()  # the day after the week ends is free
 		self.assertEqual(adjacent.docstatus, 1)
 
-	def test_an_unsubmitted_request_does_not_block_anything(self):
+	def test_an_unsubmitted_request_does_not_block_approval(self):
+		"""Past the weekly limit, a draft still does not stop another being
+		approved — only an approval does."""
 		self._request("Week", week="Week 24", week_year=2030)  # left as a draft
 
-		approved = self._request("Week", week="Week 24", week_year=2030)
+		approved = self._request("Week", week="Week 24", week_year=2030, ignore_weekly_limit=True)
 		approved.submit()
 		self.assertEqual(approved.docstatus, 1)

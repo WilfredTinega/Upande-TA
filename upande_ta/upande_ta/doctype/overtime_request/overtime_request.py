@@ -5,10 +5,15 @@
 
 A supervisor lists who is to work overtime and for how long. The overtime runs
 over a date range: a single day, an ISO week picked by its number (Week 38,
-Week 40 — Monday to Sunday), a calendar month, or any two dates. **Requested
-Hours are per day** — the range says which days are covered, not how the hours
-are shared out over them. Bulk Overtime expands the range one
-day at a time and pays each day against what the attendance shows was worked.
+Week 40 — Monday to Sunday), a calendar month, or any two dates. Bulk Overtime
+expands the range one day at a time and pays each day against what the
+attendance shows was worked.
+
+What Requested Hours means depends on the range. On a **Week** request it is
+the employee's total for the week, shared out evenly over their working days —
+rest days and public holidays from the holiday list in force on each date get
+none — and the share each date carries is stored in **Hours by Date**, which is
+what Bulk Overtime pays from. On every other kind it is hours per day.
 
 Approval runs through the **Overtime Request Approval** workflow: HR User
 raises it, HR Manager approves or rejects, and each step is a Workflow Action
@@ -51,6 +56,8 @@ class OvertimeRequest(Document):
 		self.set_date_range()
 		self.validate_dates()
 		self.validate_employees()
+		self.validate_one_request_per_week()
+		self.set_daily_hours()
 		self.set_totals()
 
 	def before_submit(self):
@@ -179,6 +186,63 @@ class OvertimeRequest(Document):
 				)
 			)
 
+	def validate_one_request_per_week(self):
+		"""An employee is on one request per ISO week, Monday to Sunday: a
+		second day of overtime in a week belongs on that week's request.
+
+		Checked on save, against every request not rejected or cancelled —
+		drafts and those awaiting approval included — so the clash shows when
+		the request is raised rather than when it is approved.
+		"""
+		if self.flags.ignore_weekly_limit or not (self.overtime_date and self.to_date and self.employees):
+			return
+
+		start = getdate(self.overtime_date)
+		end = getdate(self.to_date)
+		monday = add_days(start, -start.weekday())
+		sunday = add_days(end, 6 - end.weekday())
+
+		Request = frappe.qb.DocType("Overtime Request")
+		Row = frappe.qb.DocType("Overtime Request Employee")
+		other_end = Coalesce(Request.to_date, Request.overtime_date)
+		query = (
+			frappe.qb.from_(Row)
+			.join(Request)
+			.on(Request.name == Row.parent)
+			.select(Row.employee, Row.employee_name, Request.name, Request.overtime_date, other_end.as_("end_date"))
+			.where(
+				(Request.docstatus < 2)
+				& (Request.overtime_date <= sunday)
+				& (other_end >= monday)
+				& (Row.parenttype == "Overtime Request")
+				& (Row.employee.isin([row.employee for row in self.employees]))
+			)
+		)
+		if not self.is_new():
+			query = query.where(Request.name != self.name)
+		if frappe.db.has_column("Overtime Request", "workflow_state"):
+			query = query.where(Coalesce(Request.workflow_state, "") != "Rejected")
+
+		clashes = query.run(as_dict=True)
+		if not clashes:
+			return
+
+		lines = "<br>".join(
+			"{0}: {1} ({2} to {3})".format(
+				frappe.bold(c.employee_name or c.employee),
+				get_link_to_form("Overtime Request", c.name),
+				frappe.format(c.overtime_date, "Date"),
+				frappe.format(c.end_date, "Date"),
+			)
+			for c in clashes[:20]
+		)
+		frappe.throw(
+			_("An employee can be on one Overtime Request per week. Already requested in the same week:<br>{0}").format(
+				lines
+			),
+			title=_("Already Requested This Week"),
+		)
+
 	def validate_not_already_requested(self):
 		"""One approved request per employee per day: Bulk Overtime pays a day
 		once, so a second approval covering the same day would be ambiguous.
@@ -221,12 +285,54 @@ class OvertimeRequest(Document):
 				title=_("Already Requested"),
 			)
 
+	def set_daily_hours(self):
+		"""Share each employee's weekly hours out over their working days.
+
+		Rebuilt on every save, so changing an employee's hours or the week — or
+		a holiday list, before the request is approved — is reflected at once.
+		"""
+		self.set("daily_hours", [])
+		if self.request_for != WEEK or not (self.overtime_date and self.to_date):
+			return
+
+		from upande_ta.upande_ta import overtime_engine as engine
+		from upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime import _DayTypes
+
+		dates = [add_days(self.overtime_date, offset) for offset in range(self.number_of_days_in_range())]
+		day_types = _DayTypes(self.overtime_date, self.to_date)
+
+		no_working_day = []
+		for row in self.employees:
+			kinds = [day_types.get(row.employee, date) for date in dates]
+			if engine.WORKING_DAY not in kinds:
+				no_working_day.append(row.employee_name or row.employee)
+				continue
+			shares = engine.split_across_working_days(row.requested_hours, kinds)
+			for date, kind, hours in zip(dates, kinds, shares):
+				self.append(
+					"daily_hours",
+					{
+						"employee": row.employee,
+						"employee_name": row.employee_name,
+						"overtime_date": date,
+						"day_type": kind,
+						"requested_hours": hours,
+					},
+				)
+
+		if no_working_day:
+			frappe.throw(
+				_("{0} have no working day in {1}, so their hours cannot be shared out.").format(
+					", ".join(frappe.bold(name) for name in no_working_day[:20]), frappe.bold(self.week)
+				)
+			)
+
 	def set_totals(self):
 		self.number_of_employees = len(self.employees)
 		self.number_of_days = self.number_of_days_in_range()
-		self.total_requested_hours = (
-			sum(flt(row.requested_hours) for row in self.employees) * self.number_of_days
-		)
+		hours = sum(flt(row.requested_hours) for row in self.employees)
+		# a week's hours are already the whole week's
+		self.total_requested_hours = hours if self.request_for == WEEK else hours * self.number_of_days
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -285,18 +391,59 @@ def month_start(value: str) -> datetime.date:
 def bulk_overtime_status(overtime_request: str) -> dict:
 	"""What the form needs to decide its Bulk Overtime button.
 
-	``batch`` is the Bulk Overtime already paying this request, if any, and
+	``batch`` is the Bulk Overtime already paying this request, if any,
 	``approved`` says whether it has cleared its last approval — a request is
-	only payable once it has.
+	only payable once it has — and ``days_left`` counts the days worked so far
+	that no batch holds yet, which is what a new batch would pay.
 
 	The batch cannot be looked up from the desk's generic list API:
 	``frappe.desk.reportview`` has no notion of a parent doctype, so a child
 	table is not readable through it. It is answered here, where the
 	permission check belongs anyway.
 	"""
+	from upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime import outstanding_days
+
 	frappe.has_permission("Overtime Request", doc=overtime_request, throw=True)
 	doc = frappe.get_doc("Overtime Request", overtime_request)
-	return {"approved": is_finally_approved(doc), "batch": paying_batch(overtime_request)}
+	approved = is_finally_approved(doc)
+	days_left = len(outstanding_days(overtime_request)) if approved else 0
+	return {"approved": approved, "batch": paying_batch(overtime_request), "days_left": days_left}
+
+
+@frappe.whitelist(methods=["POST"])
+def make_bulk_overtime(overtime_request: str) -> str:
+	"""Create and save the Bulk Overtime that pays what this request has left
+	to pay, and return its name.
+
+	Built and saved here rather than filled in on an unsaved form, so the
+	batch — its rows, period and hours — exists the moment the button is
+	pressed, and nothing is lost by navigating away before saving.
+	"""
+	from upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime import build_batch_for_request
+
+	frappe.has_permission("Overtime Request", doc=overtime_request, throw=True)
+	frappe.has_permission("Bulk Overtime", "create", throw=True)
+
+	doc = frappe.get_doc("Overtime Request", overtime_request)
+	if not is_finally_approved(doc):
+		frappe.throw(_("{0} is not approved yet.").format(frappe.bold(doc.name)))
+
+	batch, result = build_batch_for_request(doc.name)
+	if not result["rows"]:
+		why = result.get("why") or {}
+		statuses = ", ".join(
+			"{0} {1}".format(row["days"], row["status"]) for row in why.get("statuses") or []
+		)
+		frappe.throw(
+			_("No days of {0} worked so far have Present attendance to pay against.{1}").format(
+				frappe.bold(doc.name),
+				(" " + _("Attendance in the period: {0}.").format(statuses)) if statuses else "",
+			),
+			title=_("Nothing to Pay"),
+		)
+
+	batch.insert()
+	return batch.name
 
 
 def is_finally_approved(doc) -> bool:
