@@ -117,6 +117,7 @@ def extend_bootinfo(bootinfo=None):
 	without an extra round trip when the report opens."""
 	try:
 		bootinfo.upande_ta_attendance_filters = get_extra_filter_config()
+		bootinfo.upande_ta_week_off_change_disabled = week_off_change_disabled()
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Monthly Attendance Sheet filters bootinfo")
 
@@ -627,6 +628,12 @@ def active_employees_only() -> bool:
 	saying it would rather not see them.
 	"""
 	return _setting_enabled(ACTIVE_ONLY_FIELD, False)
+
+
+def week_off_change_disabled() -> bool:
+	"""Whether changing a week off from a day cell is switched off. Off by
+	default, i.e. the change is available."""
+	return _setting_enabled("disable_week_off_change", False)
 
 
 def get_inactive_employee_names(names) -> set:

@@ -483,6 +483,157 @@ frappe.provide("frappe.views");
 		}
 	}
 
+	const CHANGE_WEEK_OFF_METHOD = "upande_ta.upande_ta.week_off_change.change_week_off";
+	const REMOVE_WEEK_OFF_METHOD = "upande_ta.upande_ta.week_off_change.remove_week_off";
+
+	const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+	const WEEK_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+	/** Clicking an employee's day cell changes their week off from that day:
+	 * the weekday clicked becomes their only week off until the End Date. On a
+	 * week-off cell it can instead remove that weekday as a week off. */
+	function bindWeekOffChange(report) {
+		const dt = report.datatable;
+		if (!dt || !dt.wrapper || dt.__ta_week_off) return;
+		dt.__ta_week_off = true;
+
+		$(dt.wrapper).on("click", ".dt-cell__content", function () {
+			try {
+				if (frappe.query_report.get_filter_value("summarized_view")) return;
+			} catch (e) {
+				return;
+			}
+			if (!frappe.model.can_create("Holiday List Assignment")) return;
+			if (frappe.boot && frappe.boot.upande_ta_week_off_change_disabled) return;
+
+			const $cell = $(this).closest(".dt-cell");
+			const colIndex = cint($cell.attr("data-col-index"));
+			const rowIndex = $cell.attr("data-row-index");
+			if (rowIndex === undefined) return;
+
+			const column = dt.getColumn(colIndex) || {};
+			const fieldname = (column.docfield && column.docfield.fieldname) || column.id || "";
+			if (!DAY_RE.test(fieldname)) return;
+
+			const row = dt.datamanager.getData(cint(rowIndex));
+			if (!row || row._is_summary || !row.employee) return;
+
+			const [day, month, year] = fieldname.split("-");
+			const isWeekOff = String(row[fieldname] || "").replace(/<[^>]*>/g, "").trim() === "WO";
+			showWeekOffDialog(report, row, `${year}-${month}-${day}`, isWeekOff);
+		});
+	}
+
+	function showWeekOffDialog(report, row, date, isWeekOff) {
+		const weekday = WEEKDAYS[new Date(`${date}T00:00:00`).getDay()];
+		const who = frappe.utils.escape_html(row.employee_name || row.employee);
+
+		const run = (method, values, done, args = {}) => {
+			if (!values.to_date) {
+				dialog.get_field("to_date").$input.focus();
+				return;
+			}
+			if (values.to_date < date) {
+				frappe.msgprint(__("End Date cannot be before {0}.", [frappe.datetime.str_to_user(date)]));
+				return;
+			}
+			frappe
+				.call({
+					method,
+					type: "POST",
+					args: Object.assign({ employee: row.employee, from_date: date, to_date: values.to_date }, args),
+					freeze: true,
+				})
+				.then((r) => {
+					const result = (r && r.message) || {};
+					dialog.hide();
+					const lines = [done(values)];
+					if (result.restored_to) {
+						lines.push(
+							__("Back on {0} from {1}.", [
+								frappe.utils.escape_html(result.restored_to),
+								frappe.datetime.str_to_user(frappe.datetime.add_days(values.to_date, 1)),
+							])
+						);
+					}
+					if ((result.created || []).length) lines.push(result.created.join(", "));
+					if ((result.absent_removed || []).length) {
+						lines.push(
+							__("Absent removed on: {0}", [
+								result.absent_removed.map((d) => frappe.datetime.str_to_user(d)).join(", "),
+							])
+						);
+					}
+					if ((result.absent_on_week_off || []).length) {
+						lines.push(
+							__("Still marked Absent on: {0}", [
+								result.absent_on_week_off.map((d) => frappe.datetime.str_to_user(d)).join(", "),
+							])
+						);
+					}
+					frappe.msgprint({ title: __("Week Off Updated"), indicator: "green", message: lines.join("<br>") });
+					report.refresh();
+				});
+		};
+
+		const span = (values) =>
+			[frappe.datetime.str_to_user(date), frappe.datetime.str_to_user(values.to_date)];
+
+		const dialog = new frappe.ui.Dialog({
+			title: __("Week Off"),
+			fields: [
+				{
+					fieldtype: "Data",
+					fieldname: "employee",
+					label: __("Employee"),
+					read_only: 1,
+					default: `${row.employee_name || ""} (${row.employee})`,
+				},
+				{ fieldtype: "Column Break" },
+				{ fieldtype: "Date", fieldname: "from_date", label: __("From Date"), read_only: 1, default: date },
+				{ fieldtype: "Date", fieldname: "to_date", label: __("End Date"), reqd: 1 },
+				{ fieldtype: "Section Break" },
+				{
+					fieldtype: "MultiCheck",
+					fieldname: "week_off_days",
+					label: __("Week Off Days"),
+					columns: 4,
+					options: WEEK_ORDER.map((day) => ({ label: __(day), value: day, checked: day === weekday })),
+				},
+			],
+			primary_action_label: __("Change Week Off"),
+			primary_action(values) {
+				const days = values.week_off_days || [];
+				if (!days.length) {
+					frappe.msgprint(__("Tick at least one Week Off Day."));
+					return;
+				}
+				const ordered = WEEK_ORDER.filter((day) => days.includes(day));
+				run(
+					CHANGE_WEEK_OFF_METHOD,
+					values,
+					(v) =>
+						__("{0}: {1} week off from {2} to {3}.", [
+							who,
+							ordered.map((day) => __(day)).join(" & "),
+							...span(v),
+						]),
+					{ weekdays: JSON.stringify(ordered) }
+				);
+			},
+		});
+
+		if (isWeekOff) {
+			dialog.set_secondary_action_label(__("Remove Week Off"));
+			dialog.set_secondary_action(() => {
+				run(REMOVE_WEEK_OFF_METHOD, dialog.get_values(true), (v) =>
+					__("{0}: no {1} week off from {2} to {3}.", [who, __(weekday), ...span(v)])
+				);
+			});
+		}
+		dialog.show();
+	}
+
 	function patchPrototype() {
 		const QR = frappe.views && frappe.views.QueryReport;
 		if (!QR || !QR.prototype) return false;
@@ -531,6 +682,7 @@ frappe.provide("frappe.views");
 		QR.prototype.render_datatable = function () {
 			const out = origRender.apply(this, arguments);
 			if (this.report_name === REPORT) {
+				bindWeekOffChange(this);
 				installSummaryObserver(this);
 				styleTotalColumns(this);
 				setTimeout(() => {
