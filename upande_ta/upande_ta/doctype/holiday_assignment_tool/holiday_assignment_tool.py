@@ -299,33 +299,7 @@ class HolidayAssignmentTool(Document):
 		only leave it lying about the employee's steady state once the period
 		ends.
 		"""
-		replaced = self._cancel_assignments_in_window(row.employee)
-
-		boundaries = plan_segments(self.holiday_list, self.from_date, self.to_date, [], restore_to)
-
-		names = []
-		for boundary_date, holiday_list in boundaries:
-			if boundary_date != getdate(self.from_date) and self._assignment_starts_on(
-				row.employee, boundary_date
-			):
-				# Something already takes over the day after the window; it is
-				# what the employee returns to, so no restore is needed.
-				continue
-
-			assignment = frappe.get_doc(
-				{
-					"doctype": "Holiday List Assignment",
-					"applicable_for": "Employee",
-					"assigned_to": row.employee,
-					"holiday_list": holiday_list,
-					"from_date": boundary_date,
-				}
-			)
-			assignment.insert(ignore_permissions=True)
-			assignment.submit()
-			names.append(assignment.name)
-
-		return names, replaced
+		return assign_holiday_window(row.employee, self.holiday_list, self.from_date, self.to_date, restore_to)
 
 	def _list_after_window(self, row):
 		"""The list the employee goes back to at ``to_date + 1``: whatever is in
@@ -341,36 +315,6 @@ class HolidayAssignmentTool(Document):
 		return (
 			get_assigned_holiday_list(row.employee, as_on=add_days(getdate(self.to_date), 1))
 			or row.prior_holiday_list
-		)
-
-	def _cancel_assignments_in_window(self, employee) -> list:
-		"""Cancel the employee's submitted assignments starting inside
-		``from_date .. to_date`` (just ``from_date`` when open-ended), so the new
-		run owns every day of its window. Cancelled, not deleted: they stay on
-		the Holiday List Assignment list as the record of what was there."""
-		window_end = self.to_date or self.from_date
-		names = frappe.get_all(
-			"Holiday List Assignment",
-			filters={
-				"applicable_for": "Employee",
-				"assigned_to": employee,
-				"docstatus": 1,
-				"from_date": ["between", [self.from_date, window_end]],
-			},
-			pluck="name",
-		)
-		for name in names:
-			assignment = frappe.get_doc("Holiday List Assignment", name)
-			assignment.flags.ignore_permissions = True
-			assignment.cancel()
-		return names
-
-	def _assignment_starts_on(self, employee, date) -> bool:
-		return bool(
-			frappe.db.exists(
-				"Holiday List Assignment",
-				{"assigned_to": employee, "from_date": date, "docstatus": 1},
-			)
 		)
 
 	def _clear_employees(self):
@@ -469,6 +413,75 @@ class HolidayAssignmentTool(Document):
 # ──────────────────────────────────────────────────────────────────────────
 # Background entry point
 # ──────────────────────────────────────────────────────────────────────────
+
+
+def assign_holiday_window(employee, holiday_list, from_date, to_date, restore_to) -> tuple[list, list]:
+	"""Put one employee on ``holiday_list`` from ``from_date`` to ``to_date``
+	and hand them back to ``restore_to`` the day after. Returns ``(created,
+	cancelled)`` Holiday List Assignment names, created in date order.
+
+	The newest window wins: any assignment starting inside it is cancelled —
+	not deleted, so it stays on the list as the record of what was there — and
+	when something already starts the day after, that is what the employee
+	returns to, so no restore is written. Shared by this tool and the Monthly
+	Attendance Sheet's week-off change.
+
+	No Employee Transfer is created: HRMS resolves an employee's holidays from
+	Holiday List Assignment, not from ``Employee.holiday_list``, and these
+	overrides are temporary, so moving the permanent pointer would only leave
+	it lying about the employee's steady state once the period ends.
+	"""
+	replaced = _cancel_assignments_in_window(employee, from_date, to_date)
+
+	names = []
+	for boundary_date, boundary_list in plan_segments(holiday_list, from_date, to_date, [], restore_to):
+		if boundary_date != getdate(from_date) and _assignment_starts_on(employee, boundary_date):
+			continue
+
+		assignment = frappe.get_doc(
+			{
+				"doctype": "Holiday List Assignment",
+				"applicable_for": "Employee",
+				"assigned_to": employee,
+				"holiday_list": boundary_list,
+				"from_date": boundary_date,
+			}
+		)
+		assignment.insert(ignore_permissions=True)
+		assignment.submit()
+		names.append(assignment.name)
+
+	return names, replaced
+
+
+def _cancel_assignments_in_window(employee, from_date, to_date) -> list:
+	"""Cancel the employee's submitted assignments starting inside
+	``from_date .. to_date`` (just ``from_date`` when open-ended), so the new
+	window owns every day of itself."""
+	names = frappe.get_all(
+		"Holiday List Assignment",
+		filters={
+			"applicable_for": "Employee",
+			"assigned_to": employee,
+			"docstatus": 1,
+			"from_date": ["between", [from_date, to_date or from_date]],
+		},
+		pluck="name",
+	)
+	for name in names:
+		assignment = frappe.get_doc("Holiday List Assignment", name)
+		assignment.flags.ignore_permissions = True
+		assignment.cancel()
+	return names
+
+
+def _assignment_starts_on(employee, date) -> bool:
+	return bool(
+		frappe.db.exists(
+			"Holiday List Assignment",
+			{"assigned_to": employee, "from_date": date, "docstatus": 1},
+		)
+	)
 
 
 def create_assignments_in_background(docname: str):
