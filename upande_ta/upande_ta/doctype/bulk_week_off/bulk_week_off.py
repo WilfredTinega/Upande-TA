@@ -347,6 +347,38 @@ class BulkWeekOff(Document):
             )
 
     @frappe.whitelist()
+    def preview_overlaps(self):
+        """What submitting this would replace or leave blank, for the
+        confirmation before it submits. Writes nothing."""
+        from upande_ta.upande_ta.holiday_overlap import preview
+
+        if not (self.from_date and self.employees):
+            return {"employees": [], "total": 0}
+        current = dict(
+            frappe.get_all(
+                "Employee",
+                filters={"name": ["in", [row.employee for row in self.employees]]},
+                fields=["name", "holiday_list"],
+                as_list=True,
+            )
+        )
+        return preview(
+            [
+                {
+                    "employee": row.employee,
+                    "employee_name": row.employee_name,
+                    "holiday_list": row.assigned_off_day,
+                    "from_date": self.from_date,
+                    "to_date": None,
+                    "cancel_in_window": False,
+                }
+                for row in self.employees
+                # submit skips these, so they change nothing
+                if row.assigned_off_day and row.assigned_off_day != (current.get(row.employee) or "")
+            ]
+        )
+
+    @frappe.whitelist()
     def get_employees(self):
         filters = [
             ["Employee", "status", "=", "Active"],
