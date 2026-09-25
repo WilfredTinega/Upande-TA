@@ -26,6 +26,7 @@ from upande_ta.upande_ta.overtime_engine import (
 	biometric_overtime,
 	settle,
 	shift_length_hours,
+	split_across_working_days,
 )
 
 # Frappe crawls Link targets for test records unless told not to; this module
@@ -197,3 +198,32 @@ class TestOvertimeWorkflowChain(unittest.TestCase):
 		stage = self.wf.Stage(state="X", role="HR Manager")
 		self.assertEqual(stage.editor, "HR Manager")
 		self.assertEqual(self.wf.Stage(state="X", role="HR Manager", allow_edit="HR User").editor, "HR User")
+
+
+class TestSplitAcrossWorkingDays(unittest.TestCase):
+	"""A Week request's total, shared out over the working days of the week."""
+
+	WEEK = [WORKING_DAY] * 6 + [REST_DAY]
+
+	def test_six_working_days_share_evenly(self):
+		self.assertEqual(split_across_working_days(12, self.WEEK), [2, 2, 2, 2, 2, 2, 0])
+
+	def test_rest_days_and_holidays_get_nothing(self):
+		week = [WORKING_DAY, PUBLIC_HOLIDAY, WORKING_DAY, REST_DAY]
+		self.assertEqual(split_across_working_days(5, week), [2.5, 0, 2.5, 0])
+
+	def test_rounding_lands_on_the_last_working_day(self):
+		shares = split_across_working_days(10, self.WEEK)
+		self.assertEqual(shares[:5], [1.67] * 5)
+		self.assertEqual(shares[5], 1.65)
+		self.assertAlmostEqual(sum(shares), 10, places=6)
+
+	def test_a_week_with_no_working_day_shares_nothing(self):
+		self.assertEqual(split_across_working_days(8, [REST_DAY, PUBLIC_HOLIDAY]), [0, 0])
+
+	def test_nothing_requested_is_nothing_shared(self):
+		self.assertEqual(split_across_working_days(0, self.WEEK), [0] * 7)
+
+	def test_an_unknown_day_type_is_refused(self):
+		with self.assertRaises(ValueError):
+			split_across_working_days(4, ["Half Day"])

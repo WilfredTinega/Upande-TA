@@ -76,6 +76,24 @@ const bo_nothing_to_pay = (result) => {
 	return lines.join("<br><br>");
 };
 
+const CHECK_INDICATOR = {
+	Agrees: "green",
+	Differs: "orange",
+	"Entered by Hand": "blue",
+	"One Punch": "red",
+	"No Punches": "red",
+};
+
+/** "06:55", or "02:10 +1" when the punch falls on the next day. */
+const bo_clock = (value, date) => {
+	if (!value) return "";
+	const [day, time] = String(value).split(" ");
+	const clock = (time || "").slice(0, 5);
+	return day === date ? clock : `${clock} +1`;
+};
+
+const bo_hours = (value) => (value ? format_number(value, null, 2) : "0");
+
 const STATUS_INDICATOR = {
 	Matched: "green",
 	"Capped at Request": "blue",
@@ -104,6 +122,98 @@ frappe.ui.form.on("Bulk Overtime", {
 		}
 	},
 
+	verify_check_ins(frm) {
+		frm.events.verify_checkins(frm);
+	},
+
+	verify_checkins(frm) {
+		const stop = bo_progress(frm, __("Verify Check-ins"), __("Reading check-ins..."));
+		frm.call({ doc: frm.doc, method: "verify_checkins" })
+			.then((r) => {
+				stop();
+				frm.events.show_verification(frm, r.message || []);
+			})
+			.finally(stop);
+	},
+
+	show_verification(frm, rows) {
+		const counts = {};
+		rows.forEach((row) => (counts[row.check] = (counts[row.check] || 0) + 1));
+		const summary = Object.keys(CHECK_INDICATOR)
+			.filter((check) => counts[check])
+			.map(
+				(check) =>
+					`<span class="indicator-pill ${CHECK_INDICATOR[check]}" style="margin-right:6px;">${__(
+						check,
+					)}: ${counts[check]}</span>`,
+			)
+			.join("");
+
+		const body = rows
+			.map((row) => {
+				const date = row.overtime_date;
+				const shift =
+					row.shift_start && row.shift_end
+						? `${String(row.shift_start).slice(0, 5)}–${String(row.shift_end).slice(0, 5)}`
+						: "";
+				return `
+					<tr data-check="${bo_esc(row.check)}">
+						<td>${row.idx}</td>
+						<td><b>${bo_esc(row.employee_name || row.employee)}</b><div class="text-muted small">${bo_esc(
+							row.employee,
+						)}</div></td>
+						<td>${frappe.datetime.str_to_user(date)}<div class="text-muted small">${bo_esc(
+							__(row.day_type || ""),
+						)}</div></td>
+						<td>${bo_esc(shift)}<div class="text-muted small">${bo_hours(row.shift_hours)} h</div></td>
+						<td>${bo_esc(bo_clock(row.first_in, date))}</td>
+						<td>${bo_esc(bo_clock(row.last_out, date))}</td>
+						<td class="text-right">${row.punches}</td>
+						<td class="text-right">${bo_hours(row.punch_hours)}</td>
+						<td class="text-right"><b>${bo_hours(row.beyond_shift)}</b></td>
+						<td class="text-right">${bo_hours(row.requested_hours)}</td>
+						<td class="text-right"><b>${bo_hours(row.approved_hours)}</b></td>
+						<td><span class="indicator-pill ${CHECK_INDICATOR[row.check] || "gray"}">${__(
+							row.check,
+						)}</span></td>
+					</tr>`;
+			})
+			.join("");
+
+		const dialog = new frappe.ui.Dialog({
+			title: __("Verify Check-ins"),
+			size: "extra-large",
+			fields: [
+				{ fieldtype: "HTML", fieldname: "summary" },
+				{ fieldtype: "HTML", fieldname: "table" },
+			],
+		});
+		dialog.get_field("summary").$wrapper.html(`<div style="margin-bottom:8px;">${summary}</div>`);
+		dialog.get_field("table").$wrapper.html(`
+			<div style="max-height:65vh; overflow:auto;">
+				<table class="table table-bordered table-sm" style="font-size:12px; margin:0;">
+					<thead style="position:sticky; top:0; background:var(--card-bg); z-index:1;">
+						<tr>
+							<th>#</th>
+							<th>${__("Employee")}</th>
+							<th>${__("Date")}</th>
+							<th>${__("Shift")}</th>
+							<th>${__("First In")}</th>
+							<th>${__("Last Out")}</th>
+							<th class="text-right">${__("Punches")}</th>
+							<th class="text-right">${__("Hours Worked")}</th>
+							<th class="text-right">${__("Beyond Shift")}</th>
+							<th class="text-right">${__("Requested")}</th>
+							<th class="text-right">${__("Approved")}</th>
+							<th>${__("Check")}</th>
+						</tr>
+					</thead>
+					<tbody>${body}</tbody>
+				</table>
+			</div>`);
+		dialog.show();
+	},
+
 	company(frm) {
 		frm.set_value("custom_farm", "");
 		frm.events.clear_entries(frm);
@@ -130,18 +240,13 @@ frappe.ui.form.on("Bulk Overtime", {
 	/** The one way rows get here: pick the approved requests to pay. Sweeping
 	 * the whole period blindly is what "Select All" in the dialog does, and
 	 * this way the cost is paid once, with the list in front of you. */
-	/** Worked Hours is what the biometric read, so it stays read-only until
-	 * asked for — a scanner that missed a clock-out is the case this is for.
-	 * The lock itself is the child field's own read_only_depends_on, which is
-	 * evaluated against this document; the grid only needs redrawing. */
+	/** Worked is the attendance and always read-only. Biometric — the
+	 * overtime the punches support — opens for typing when this is ticked,
+	 * for a day the scanner failed. The lock is the child field's own
+	 * read_only_depends_on, evaluated against this document; the grid only
+	 * needs redrawing. */
 	edit_worked_hours(frm) {
 		frm.refresh_field("bulk_overtime_entries");
-		if (frm.doc.edit_worked_hours) {
-			frappe.show_alert({
-				message: __("Worked Hours can now be typed straight into the table. Say why in Reason for Manual Changes."),
-				indicator: "orange",
-			});
-		}
 	},
 
 	get_from_overtime_request(frm) {
@@ -195,6 +300,8 @@ frappe.ui.form.on("Bulk Overtime", {
 			// the request runs past today when it is still being worked, and
 			// only the part already worked can be paid
 			const short = request.payable_days < request.days;
+			// an earlier batch paid its first days; this one takes the rest
+			const resumed = request.payable_from && request.payable_from !== request.overtime_date;
 
 			return `
 				<label class="checkbox" style="display:block; padding:8px 0; border-bottom:1px solid var(--border-color);">
@@ -209,10 +316,22 @@ frappe.ui.form.on("Bulk Overtime", {
 							  )}</span>`
 							: ""
 					}
+					${
+						resumed
+							? `<span class="indicator-pill blue" style="margin-left:6px;">${__(
+									"remaining from {0}",
+									[frappe.datetime.str_to_user(request.payable_from)],
+							  )}</span>`
+							: ""
+					}
 					<div class="text-muted small" style="margin-left:22px;">
 						${bo_esc(span)} · ${covered}<br>
 						${__("{0} employee(s)", [request.employees])} ·
-						${__("{0} h/day in total", [request.hours_per_day])}
+						${
+							request.request_for === "Week"
+								? __("{0} h for the week in total", [request.hours_per_day])
+								: __("{0} h/day in total", [request.hours_per_day])
+						}
 						${request.reason ? ` · ${bo_esc(request.reason)}` : ""}
 					</div>
 				</label>`;
@@ -318,10 +437,10 @@ frappe.ui.form.on("Bulk Overtime Entry", {
 	/** Typing a figure is the whole statement: the row's marker follows the
 	 * typing rather than having to be ticked first. It is what keeps the
 	 * figure when the batch is fetched again. */
-	working_hours(frm, cdt, cdn) {
+	biometric_hours(frm, cdt, cdn) {
 		const row = locals[cdt][cdn];
-		if (frm.doc.edit_worked_hours && !row.manual_working_hours) {
-			frappe.model.set_value(cdt, cdn, "manual_working_hours", 1);
+		if (frm.doc.edit_worked_hours && !row.manual_biometric_hours) {
+			frappe.model.set_value(cdt, cdn, "manual_biometric_hours", 1);
 		}
 	},
 });

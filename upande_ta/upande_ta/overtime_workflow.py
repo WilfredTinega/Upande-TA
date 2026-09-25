@@ -87,7 +87,7 @@ APPROVALS = (
 		state="Pending Approval",
 		role="HR Manager Kaitet",
 		action="Approve",
-		colour="Warning",
+		colour="Primary",
 		role_profiles=(),
 	),
 )

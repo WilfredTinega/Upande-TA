@@ -30,6 +30,8 @@
   "section_break_pick_employees",
   "get_employees",
   "employees",
+  "section_break_daily_hours",
+  "daily_hours",
   "section_break_totals",
   "number_of_employees",
   "number_of_days",
@@ -230,6 +232,20 @@
   {
    "fieldname": "column_break_ufhk",
    "fieldtype": "Column Break"
+  },
+  {
+   "collapsible": 1,
+   "depends_on": "eval:doc.request_for=='Week' && (doc.daily_hours || []).length",
+   "fieldname": "section_break_daily_hours",
+   "fieldtype": "Section Break",
+   "label": "Hours by Date"
+  },
+  {
+   "fieldname": "daily_hours",
+   "fieldtype": "Table",
+   "label": "Hours by Date",
+   "options": "Overtime Request Date",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
@@ -244,7 +260,7 @@
    "table_fieldname": "bulk_overtime_entries"
   }
  ],
- "modified": "2026-09-22 04:06:00.000000",
+ "modified": "2026-09-25 23:45:53.498109",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Overtime Request",

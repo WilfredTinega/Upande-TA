@@ -366,6 +366,9 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 					"employees": [{"employee": self.employee, "requested_hours": hours}],
 				}
 			)
+			# one employee on several requests a week is what these tests
+			# need; the weekly limit has its own tests with the request
+			request.flags.ignore_weekly_limit = True
 			request.insert(ignore_permissions=True)
 			if submit:
 				request.submit()
@@ -389,6 +392,7 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 				"employees": [{"employee": self.employee, "requested_hours": hours}],
 			}
 		)
+		request.flags.ignore_weekly_limit = True
 		request.insert(ignore_permissions=True)
 		if submit:
 			request.submit()
@@ -692,11 +696,9 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		offered = [r.name for r in self.make_bulk_overtime().get_approved_requests()]
 		self.assertNotIn(names[0], offered)
 
-	def test_a_partly_paid_request_is_not_offered_either(self):
-		"""One entry anywhere is enough: a request that has been through a
-		batch is done with the picker, even if that batch covered only part of
-		it."""
-		request = self.make_range_request(self.from_date, self.to_date, 2)
+	def _pay_first_day(self, request):
+		"""A batch that pays only the first day of a request, the way one made
+		mid-week does."""
 		part = frappe.get_doc(
 			{
 				"doctype": "Bulk Overtime",
@@ -705,11 +707,49 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 				"to_date": self.from_date,
 			}
 		)
-		part.get_overtime(overtime_requests=[request.name])
+		part.get_overtime()
 		part.insert(ignore_permissions=True)
+		return part
 
-		offered = [r.name for r in self.make_bulk_overtime().get_approved_requests()]
-		self.assertNotIn(request.name, offered)
+	def test_a_partly_paid_request_is_offered_for_the_rest(self):
+		"""A batch that paid only part of a request leaves the rest to pay, so
+		the request is offered again — from its first day left."""
+		from frappe.utils import getdate
+
+		request = self.make_range_request(self.from_date, self.to_date, 2)
+		self._pay_first_day(request)
+
+		offered = {r.name: r for r in self.make_bulk_overtime().get_approved_requests()}
+		self.assertIn(request.name, offered)
+		self.assertEqual(getdate(offered[request.name].payable_from), getdate(self.rest_day))
+		self.assertEqual(offered[request.name].payable_days, 4, "the four other attended days")
+
+	def test_the_rest_of_a_request_starts_after_what_was_paid(self):
+		"""The second batch starts at the first unpaid day, so its Overtime
+		Slip cannot overlap the first batch's."""
+		from frappe.utils import getdate
+
+		request = self.make_range_request(self.from_date, self.to_date, 2)
+		first = self._pay_first_day(request)
+		self.assertEqual(sorted(self.rows_by_date(first)), [getdate(self.working_day)])
+
+		rest = frappe.get_doc({"doctype": "Bulk Overtime", "company": self.company})
+		rest.get_overtime(overtime_requests=[request.name])
+
+		self.assertEqual(getdate(rest.from_date), getdate(self.rest_day))
+		self.assertEqual(
+			sorted(self.rows_by_date(rest)),
+			sorted([self.rest_day, self.public_holiday, self.short_day, self.no_punch_day]),
+		)
+
+	def test_a_fully_paid_request_cannot_start_another_batch(self):
+		name = self.make_request({self.working_day: 2})[0]
+		self.make_bulk_overtime().insert(ignore_permissions=True)
+
+		rest = frappe.get_doc({"doctype": "Bulk Overtime", "company": self.company})
+		with self.assertRaises(frappe.ValidationError) as caught:
+			rest.get_overtime(overtime_requests=[name])
+		self.assertIn("already in a Bulk Overtime", frappe.utils.strip_html(str(caught.exception)))
 
 	def test_a_cancelled_batch_releases_its_requests(self):
 		"""Only an open or submitted batch holds a request: cancelling one puts
@@ -967,47 +1007,80 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		)
 
 	# ──────────────────────────────────────────────────────────────────────
-	# Worked hours entered by hand
+	# Biometric hours entered by hand
 	# ──────────────────────────────────────────────────────────────────────
 
-	def test_hand_entered_worked_hours_drive_the_overtime(self):
+	def _type_biometric(self, doc, hours):
+		row = self.own_rows(doc)[0]
+		row.manual_biometric_hours = 1
+		row.biometric_hours = hours
+		return row
+
+	def test_hand_entered_biometric_is_the_overtime(self):
 		"""A scanner that missed the clock-out leaves Present with no hours.
-		Typing what was worked stands in for the punch, and the overtime is
-		worked out from it exactly as it would have been."""
+		The overtime worked is typed as the Biometric figure, and paid up to
+		the request."""
 		self.make_request({self.no_punch_day: 2})
 		doc = self.make_bulk_overtime()
+		self.assertEqual(self.own_rows(doc)[0].status, "No Clock-Out")
 
-		row = self.own_rows(doc)[0]
-		self.assertEqual(row.status, "No Clock-Out")
-
-		row.manual_working_hours = 1
-		row.working_hours = 11  # a 9h shift, so 2h of overtime
-		doc.override_reason = "Scanner missed the clock-out"
+		self._type_biometric(doc, 2)
 		doc.refresh_entries()
 
 		row = self.own_rows(doc)[0]
-		self.assertEqual(row.biometric_hours, 2)
-		self.assertEqual(row.approved_hours, 2)
-		self.assertEqual(row.status, "Matched")
+		self.assertEqual((row.biometric_hours, row.approved_hours, row.status), (2, 2, "Matched"))
 
-	def test_hand_entered_hours_need_a_reason_to_be_paid(self):
-		"""One reason, on the batch, at submit. Not per row: the figure is
-		typed straight into the grid, where a row-level reason field is not
-		even visible, and a half-finished row should not block saving — but
-		nothing is paid on HR's word without saying why."""
-		self.make_request({self.no_punch_day: 2})
+	def test_worked_stays_the_attendance(self):
+		"""Worked is never typed: it is what the attendance says, whatever is
+		entered as Biometric — and an old hand-typed Worked goes back to it."""
+		self.make_request({self.working_day: 2})
 		doc = self.make_bulk_overtime()
+		row = self.own_rows(doc)[0]
+		row.manual_working_hours = 1  # the old way, on a batch saved before
+		row.working_hours = 2
+		self._type_biometric(doc, 1)
+		doc.refresh_entries()
 
 		row = self.own_rows(doc)[0]
-		row.manual_working_hours = 1
-		row.working_hours = 11
-		doc.insert(ignore_permissions=True)  # saving is fine
+		self.assertEqual(row.working_hours, 11.5)
+		self.assertFalse(row.manual_working_hours)
+		self.assertEqual(row.approved_hours, 1)
+
+	def test_hand_entered_biometric_pays_a_day_without_attendance(self):
+		"""The scanner can fail so badly there is no attendance at all."""
+		from frappe.utils import add_days
+
+		bare_day = add_days(self.from_date, 5)
+		self.make_request({bare_day: 2})
+		doc = self.make_bulk_overtime()
+		self._type_biometric(doc, 1.5)
+		doc.refresh_entries()
+
+		row = self.own_rows(doc)[0]
+		self.assertEqual((row.approved_hours, row.status), (1.5, "Worked Less"))
+
+	def test_hand_entered_biometric_is_capped_at_the_request(self):
+		self.make_request({self.no_punch_day: 2})
+		doc = self.make_bulk_overtime()
+		self._type_biometric(doc, 5)
+		doc.refresh_entries()
+
+		row = self.own_rows(doc)[0]
+		self.assertEqual((row.approved_hours, row.status), (2, "Capped at Request"))
+
+	def test_hand_entered_biometric_needs_a_reason_to_be_paid(self):
+		"""One reason, on the batch, at submit — saving a half-finished grid
+		is fine, paying on HR's word without saying why is not."""
+		self.make_request({self.no_punch_day: 2})
+		doc = self.make_bulk_overtime()
+		self._type_biometric(doc, 2)
+		doc.insert(ignore_permissions=True)
 
 		with self.assertRaises(frappe.ValidationError) as caught:
 			doc.submit()
 		self.assertIn("reason", frappe.utils.strip_html(str(caught.exception)).lower())
 
-		doc.reload()  # the refused submit left this copy behind the database
+		doc.reload()
 		doc.override_reason = "Scanner missed the clock-out"
 		doc.save(ignore_permissions=True)
 		doc.submit()
@@ -1031,43 +1104,24 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		doc.submit()
 		self.assertEqual(doc.docstatus, 1)
 
-	def test_hand_entered_hours_survive_a_refetch(self):
+	def test_hand_entered_biometric_survives_a_refetch(self):
 		self.make_request({self.no_punch_day: 2})
 		doc = self.make_bulk_overtime()
-
-		row = self.own_rows(doc)[0]
-		row.manual_working_hours = 1
-		row.working_hours = 11
+		self._type_biometric(doc, 1.25)
 		doc.override_reason = "Scanner missed the clock-out"
 		doc.get_overtime()
 
 		row = self.own_rows(doc)[0]
-		self.assertEqual((row.manual_working_hours, row.working_hours), (1, 11))
-		self.assertEqual(row.approved_hours, 2)
-
-	def test_hand_entered_hours_are_still_capped_at_the_request(self):
-		"""Typing the worked hours says what was worked, not what to pay: the
-		request is still the ceiling."""
-		self.make_request({self.no_punch_day: 2})
-		doc = self.make_bulk_overtime()
-
-		row = self.own_rows(doc)[0]
-		row.manual_working_hours = 1
-		row.working_hours = 20  # 11h past the shift, far beyond the 2h asked
-		doc.override_reason = "Stocktake ran late"
-		doc.refresh_entries()
-
-		row = self.own_rows(doc)[0]
-		self.assertEqual(row.approved_hours, 2)
-		self.assertEqual(row.status, "Capped at Request")
+		self.assertEqual((row.manual_biometric_hours, row.biometric_hours, row.approved_hours), (1, 1.25, 1.25))
 
 	def test_untouched_rows_still_come_from_the_biometric(self):
 		self.make_request({self.working_day: 2})
 		doc = self.make_bulk_overtime()
 
 		row = self.own_rows(doc)[0]
-		self.assertFalse(row.manual_working_hours)
+		self.assertFalse(row.manual_biometric_hours)
 		self.assertEqual(row.working_hours, 11.5, "read from the attendance, not typed")
+		self.assertEqual(row.biometric_hours, 2.5)
 
 	# ──────────────────────────────────────────────────────────────────────
 	# What the Overtime Request form asks before offering its button
@@ -1077,6 +1131,72 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		from upande_ta.upande_ta.doctype.overtime_request.overtime_request import bulk_overtime_status
 
 		return bulk_overtime_status(name)
+
+	def test_a_batch_paying_nothing_says_why(self):
+		"""The refusal names each row and why it pays nothing."""
+		self.make_request({self.working_day: 2})
+		doc = self.make_bulk_overtime()
+		for row in self.own_rows(doc):
+			row.manual_biometric_hours = 1
+			row.biometric_hours = 0
+		doc.override_reason = "scanner failed"
+		doc.insert(ignore_permissions=True)
+		others = [row for row in doc.bulk_overtime_entries if row.employee != self.employee]
+		if any(row.approved_hours for row in others):
+			self.skipTest("this site has other payable overtime in the period")
+
+		with self.assertRaises(frappe.ValidationError) as caught:
+			doc.submit()
+		message = frappe.utils.strip_html(str(caught.exception))
+		self.assertIn("no approved hours to pay", message)
+		self.assertIn("Biometric set to 0 by hand", message)
+
+	def _punch(self, date, clock):
+		from frappe.utils import get_datetime
+
+		frappe.get_doc(
+			{
+				"doctype": "Employee Checkin",
+				"employee": self.employee,
+				"log_type": "IN",
+				"time": get_datetime(f"{date} {clock}"),
+			}
+		).insert(ignore_permissions=True)
+
+	def _verified(self, doc, date):
+		from frappe.utils import getdate
+
+		return next(
+			row
+			for row in doc.verify_checkins()
+			if row["employee"] == self.employee and getdate(row["overtime_date"]) == getdate(date)
+		)
+
+	def test_verify_reads_the_punches_behind_a_row(self):
+		"""First and last punch whatever their label, the hours between them,
+		and what lies beyond the 9h shift — agreeing with the 11.5h attendance."""
+		self._punch(self.working_day, "08:00:00")
+		self._punch(self.working_day, "12:30:00")  # a mid-day scan is neither end
+		self._punch(self.working_day, "19:30:00")
+		self.make_request({self.working_day: 2})
+		row = self._verified(self.make_bulk_overtime(), self.working_day)
+
+		self.assertEqual(row["punches"], 3)
+		self.assertEqual(str(row["first_in"])[11:16], "08:00")
+		self.assertEqual(str(row["last_out"])[11:16], "19:30")
+		self.assertEqual(row["punch_hours"], 11.5)
+		self.assertEqual(row["beyond_shift"], 2.5)
+		self.assertEqual(row["check"], "Agrees")
+
+	def test_verify_flags_a_day_the_scanner_does_not_support(self):
+		self._punch(self.working_day, "08:00:00")
+		self._punch(self.working_day, "17:30:00")  # 0.5h beyond, attendance says 2.5
+		self.make_request({self.working_day: 2})
+		self.assertEqual(self._verified(self.make_bulk_overtime(), self.working_day)["check"], "Differs")
+
+	def test_verify_flags_missing_punches(self):
+		self.make_request({self.short_day: 2})
+		self.assertEqual(self._verified(self.make_bulk_overtime(), self.short_day)["check"], "No Punches")
 
 	def test_a_draft_request_offers_no_batch(self):
 		"""Nothing is payable until the last approval: a draft gets no button."""
@@ -1111,6 +1231,42 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		batch.insert(ignore_permissions=True)
 
 		self.assertEqual(self._status(name)["batch"], batch.name)
+
+	def test_status_counts_the_days_left(self):
+		request = self.make_range_request(self.from_date, self.to_date, 2)
+		self.assertEqual(self._status(request.name)["days_left"], 5)
+
+		self._pay_first_day(request)
+		self.assertEqual(self._status(request.name)["days_left"], 4)
+
+	def test_create_saves_the_batch_with_its_rows(self):
+		"""Create > Bulk Overtime stores the batch there and then, rows and
+		all, rather than leaving an unsaved form to fill."""
+		from frappe.utils import getdate
+
+		from upande_ta.upande_ta.doctype.overtime_request.overtime_request import make_bulk_overtime
+
+		request = self.make_range_request(self.from_date, self.to_date, 2)
+		name = make_bulk_overtime(request.name)
+
+		saved = frappe.get_doc("Bulk Overtime", name)
+		self.assertEqual(saved.docstatus, 0)
+		self.assertEqual(getdate(saved.from_date), getdate(self.from_date))
+		self.assertEqual(len(self.own_rows(saved)), 5)
+		self.assertEqual({row.overtime_request for row in saved.bulk_overtime_entries}, {request.name})
+		self.assertEqual(self._status(request.name)["days_left"], 0)
+
+	def test_create_again_takes_only_the_rest(self):
+		from frappe.utils import getdate
+
+		from upande_ta.upande_ta.doctype.overtime_request.overtime_request import make_bulk_overtime
+
+		request = self.make_range_request(self.from_date, self.to_date, 2)
+		self._pay_first_day(request)
+
+		saved = frappe.get_doc("Bulk Overtime", make_bulk_overtime(request.name))
+		self.assertNotIn(getdate(self.working_day), self.rows_by_date(saved))
+		self.assertEqual(len(self.own_rows(saved)), 4)
 
 	def test_a_cancelled_batch_stops_pointing_at_it(self):
 		name = self.make_request({self.working_day: 2})[0]
@@ -1168,6 +1324,30 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		self.assertIsNotNone(first)
 
 		self.assertIsNone(self._auto(name), "a day is paid once")
+
+	def test_the_automatic_run_waits_for_a_request_to_finish(self):
+		"""A request still being worked is left until its last day has passed,
+		so a week becomes one batch rather than one a night."""
+		from frappe.utils import add_days, getdate, today
+
+		from upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime import auto_create_batch
+
+		running = self.make_range_request(self.from_date, add_days(getdate(today()), 2), 2)
+		self.assertIsNone(auto_create_batch(running.name))
+
+	def test_the_daily_run_picks_up_what_a_batch_left_behind(self):
+		from upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime import create_pending_batches
+
+		request = self.make_range_request(self.from_date, self.to_date, 2)
+		first = self._pay_first_day(request)
+
+		built = create_pending_batches()
+		batches = frappe.db.sql_list(
+			"""select distinct parent from `tabBulk Overtime Entry`
+			   where overtime_request = %s and parent != %s""",
+			(request.name, first.name),
+		)
+		self.assertTrue(set(batches) & set(built), "the rest of the request should have a batch")
 
 	def test_a_draft_request_builds_nothing(self):
 		name = self.make_request({self.working_day: 2}, submit=False)[0]

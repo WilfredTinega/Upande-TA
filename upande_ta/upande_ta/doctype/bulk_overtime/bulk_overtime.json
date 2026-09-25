@@ -1,6 +1,7 @@
 {
  "actions": [],
- "creation": "2026-04-14 00:00:00",
+ "autoname": "naming_series:",
+ "creation": "2026-09-25 23:47:26.590514",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -17,8 +18,10 @@
   "section_break_zxgn",
   "get_from_overtime_request",
   "column_break_xmdk",
-  "edit_worked_hours",
+  "verify_check_ins",
   "column_break_ufns",
+  "edit_worked_hours",
+  "column_break_cpbe",
   "override_reason",
   "section_break_entries",
   "bulk_overtime_entries",
@@ -31,7 +34,6 @@
   "column_break_totals_3",
   "total_approved_hours",
   "section_break_notes",
-  "remarks",
   "amended_from"
  ],
  "fields": [
@@ -64,7 +66,6 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "Taken from the Overtime Requests this batch pays.",
    "fieldname": "from_date",
    "fieldtype": "Date",
    "in_list_view": 1,
@@ -73,7 +74,6 @@
    "reqd": 1
   },
   {
-   "description": "Taken from the Overtime Requests this batch pays.",
    "fieldname": "to_date",
    "fieldtype": "Date",
    "in_list_view": 1,
@@ -114,10 +114,10 @@
    "depends_on": "eval:doc.docstatus===0 && (doc.bulk_overtime_entries || []).length",
    "fieldname": "edit_worked_hours",
    "fieldtype": "Check",
-   "label": "Edit Worked Hours"
+   "label": "Edit Biometric Hours"
   },
   {
-   "depends_on": "eval:doc.edit_worked_hours || (doc.bulk_overtime_entries || []).some(r => r.manual_override || r.manual_working_hours)",
+   "depends_on": "eval:doc.edit_worked_hours || (doc.bulk_overtime_entries || []).some(r => r.manual_override || r.manual_biometric_hours)",
    "fieldname": "override_reason",
    "fieldtype": "Small Text",
    "label": "Reason for Manual Changes"
@@ -168,12 +168,6 @@
    "fieldtype": "Section Break"
   },
   {
-   "fieldname": "number_of_employees",
-   "fieldtype": "Int",
-   "label": "Employees",
-   "read_only": 1
-  },
-  {
    "fieldname": "amended_from",
    "fieldtype": "Link",
    "label": "Amended From",
@@ -202,6 +196,17 @@
   {
    "fieldname": "column_break_ufns",
    "fieldtype": "Column Break"
+  },
+  {
+   "button_color": "Primary",
+   "depends_on": "eval:(doc.bulk_overtime_entries || []).length",
+   "fieldname": "verify_check_ins",
+   "fieldtype": "Button",
+   "label": "Verify Check-ins"
+  },
+  {
+   "fieldname": "column_break_cpbe",
+   "fieldtype": "Column Break"
   }
  ],
  "index_web_pages_for_search": 1,
@@ -213,10 +218,11 @@
    "link_fieldname": "custom_bulk_overtime"
   }
  ],
- "modified": "2026-09-22 05:17:00.000000",
+ "modified": "2026-09-25 23:48:36.945474",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime",
+ "naming_rule": "By \"Naming Series\" field",
  "owner": "Administrator",
  "permissions": [
   {
@@ -238,7 +244,6 @@
    "delete": 1,
    "email": 1,
    "export": 1,
-   "import": 1,
    "print": 1,
    "read": 1,
    "report": 1,

@@ -52,6 +52,11 @@ SAVEPOINT = "bulk_overtime_slip"
 #: Names listed individually in a message before it collapses to a count.
 MAX_NAMES_IN_MESSAGE = 20
 
+#: How far back a partly paid request is still looked at for days left to pay:
+#: a week paid up to the day it was approved leaves its last days behind, and
+#: attendance for them can arrive a little late. Past this, it is done.
+PICK_UP_WINDOW_DAYS = 31
+
 
 class BulkOvertime(Document):
 	# ──────────────────────────────────────────────────────────────────────
@@ -66,7 +71,7 @@ class BulkOvertime(Document):
 
 	def before_submit(self):
 		if not any(flt(row.approved_hours) > 0 for row in self.bulk_overtime_entries):
-			frappe.throw(_("There are no approved hours to pay."))
+			self.throw_nothing_to_pay()
 		self.validate_manual_changes()
 		for row in self.bulk_overtime_entries:
 			if flt(row.approved_hours) > 0 and not row.overtime_type:
@@ -74,13 +79,41 @@ class BulkOvertime(Document):
 					_("Row #{0}: the Overtime Request it came from has no Overtime Type.").format(row.idx)
 				)
 
+	def throw_nothing_to_pay(self):
+		"""Refuse a batch that pays nothing, naming each row and why it is 0 —
+		most often worked hours typed by hand as the overtime rather than the
+		whole day, which then falls short of the shift."""
+		lines = []
+		for row in self.bulk_overtime_entries[:MAX_NAMES_IN_MESSAGE]:
+			who = "{0}, {1}".format(row.employee_name or row.employee, frappe.format(row.overtime_date, "Date"))
+			worked, shift = flt(row.working_hours), flt(row.shift_hours)
+			if row.manual_override:
+				why = _("Approved set to 0 by hand")
+			elif row.manual_biometric_hours:
+				why = _("Biometric set to 0 by hand")
+			elif row.status in (engine.NO_ATTENDANCE, engine.NO_CLOCK_OUT, engine.NO_SHIFT):
+				why = _(row.status)
+			elif row.day_type == engine.WORKING_DAY and worked <= shift:
+				why = _("{0}h worked on a {1}h shift is no overtime").format(
+					frappe.format(worked, "Float"), frappe.format(shift, "Float")
+				)
+			else:
+				why = _(row.status or "0")
+			lines.append("{0}: {1}".format(frappe.bold(who), why))
+		if len(self.bulk_overtime_entries) > len(lines):
+			lines.append(_("... and {0} more").format(len(self.bulk_overtime_entries) - len(lines)))
+		frappe.throw(
+			_("There are no approved hours to pay:<br>{0}").format("<br>".join(lines)),
+			title=_("Nothing to Pay"),
+		)
+
 	def validate_manual_changes(self):
 		"""Rows changed by hand are paid on HR's word rather than a punch, so
 		the batch says why — once, on the document, rather than on every row."""
 		changed = [
 			row.idx
 			for row in self.bulk_overtime_entries
-			if row.manual_override or row.manual_working_hours
+			if row.manual_override or row.manual_biometric_hours
 		]
 		if changed and not (self.override_reason or "").strip():
 			frappe.throw(
@@ -139,7 +172,7 @@ class BulkOvertime(Document):
 		manual = {
 			(row.employee, str(getdate(row.overtime_date))): row
 			for row in self.bulk_overtime_entries
-			if row.manual_override or row.manual_working_hours
+			if row.manual_override or row.manual_biometric_hours
 		}
 
 		found = frappe._dict(requests=0, days_without_attendance=0)
@@ -178,9 +211,9 @@ class BulkOvertime(Document):
 				if kept.manual_override:
 					row.manual_override = 1
 					row.approved_hours = kept.approved_hours
-				if kept.manual_working_hours:
-					row.manual_working_hours = 1
-					row.working_hours = kept.working_hours
+				if kept.manual_biometric_hours:
+					row.manual_biometric_hours = 1
+					row.biometric_hours = kept.biometric_hours
 
 		self.refresh_entries()
 		self.adopt_request_unit(chosen)
@@ -218,16 +251,21 @@ class BulkOvertime(Document):
 		from the requests that are picked, not the other way round, so there is
 		nothing to type in twice.
 
-		A request that already has a Bulk Overtime Entry anywhere is not
-		offered at all — it has been processed, and a day is paid once. One
-		that has not started yet is not offered either, since overtime is paid
-		once it has been worked.
+		A request is offered while it has days worked but in no batch yet — a
+		day is paid once, so a request already in a batch is offered again
+		only for what that batch left behind, such as the last days of a week
+		paid before the week was out. One that has not started yet is not
+		offered either, since overtime is paid once it has been worked.
 		"""
 		if not self.company:
 			frappe.throw(_("Set the Company first."))
 
 		farm_join, farm_filter, _scope = self._request_scope()
-		values = {"company": self.company, "today": today()}
+		values = {
+			"company": self.company,
+			"today": today(),
+			"window_start": add_days(today(), -PICK_UP_WINDOW_DAYS),
+		}
 		if "custom_farm" in _scope:
 			values["custom_farm"] = _scope["custom_farm"]
 
@@ -237,7 +275,15 @@ class BulkOvertime(Document):
 				coalesce(req.to_date, req.overtime_date) as to_date,
 				req.overtime_type, req.reason, req.default_requested_hours,
 				count(distinct row.employee) as employees,
-				sum(row.requested_hours) as hours_per_day
+				sum(row.requested_hours) as hours_per_day,
+				exists (
+					select 1
+					from `tabBulk Overtime Entry` entry
+					join `tabBulk Overtime` bo on bo.name = entry.parent
+					where entry.parenttype = 'Bulk Overtime'
+						and bo.docstatus < 2
+						and entry.overtime_request = req.name
+				) as in_a_batch
 			from `tabOvertime Request` req
 			join `tabOvertime Request Employee` row
 				on row.parent = req.name and row.parenttype = 'Overtime Request'
@@ -246,15 +292,8 @@ class BulkOvertime(Document):
 				and req.company = %(company)s
 				and req.overtime_date <= %(today)s
 				{farm_filter}
-				and not exists (
-					select 1
-					from `tabBulk Overtime Entry` entry
-					join `tabBulk Overtime` bo on bo.name = entry.parent
-					where entry.parenttype = 'Bulk Overtime'
-						and bo.docstatus < 2
-						and entry.overtime_request = req.name
-				)
 			group by req.name
+			having not in_a_batch or max(coalesce(req.to_date, req.overtime_date)) >= %(window_start)s
 			order by req.overtime_date desc, req.name
 			""",
 			values,
@@ -262,12 +301,21 @@ class BulkOvertime(Document):
 		)
 
 		cutoff = getdate(today())
+		offered = []
 		for request in requests:
 			# what a batch would actually cover: overtime is paid once worked
 			request.days = date_diff(request.to_date, request.overtime_date) + 1
 			request.payable_to = min(getdate(request.to_date), cutoff)
+			request.payable_from = getdate(request.overtime_date)
 			request.payable_days = date_diff(request.payable_to, request.overtime_date) + 1
-		return requests
+
+			if request.in_a_batch:
+				left = sorted({getdate(row.overtime_date) for row in outstanding_days(request.name, self.name)})
+				if not left:
+					continue
+				request.payable_from, request.payable_days = left[0], len(left)
+			offered.append(request)
+		return offered
 
 	def set_period_from_requests(self, chosen):
 		"""Take the batch's own dates from the requests being paid.
@@ -284,10 +332,31 @@ class BulkOvertime(Document):
 			filters={"name": ["in", list(chosen)]},
 			fields=["name", "overtime_date", "to_date"],
 		)
-		starts = [getdate(span.overtime_date) for span in spans if span.overtime_date]
+		# a request another batch has already paid part of starts from its
+		# first day left to pay, so this batch's slips cannot overlap that
+		# batch's — HRMS allows one Overtime Slip per employee per period
+		partly_paid = _requests_in_other_batches([span.name for span in spans], self.name)
+		starts, ends = [], []
+		for span in spans:
+			if not span.overtime_date:
+				continue
+			start = getdate(span.overtime_date)
+			if span.name in partly_paid:
+				left = [getdate(row.overtime_date) for row in outstanding_days(span.name, self.name)]
+				if not left:
+					continue
+				start = min(left)
+			starts.append(start)
+			ends.append(getdate(span.to_date or span.overtime_date))
 		if not starts:
+			if partly_paid:
+				frappe.throw(
+					_("Every day of {0} worked so far is already in a Bulk Overtime.").format(
+						frappe.bold(", ".join(sorted(partly_paid)))
+					),
+					title=_("Already Paid"),
+				)
 			return
-		ends = [getdate(span.to_date or span.overtime_date) for span in spans]
 
 		start, end = min(starts), min(max(ends), getdate(today()))
 		if start > end:
@@ -328,9 +397,12 @@ class BulkOvertime(Document):
 		"""One row per employee per date, from every approved request that
 		overlaps this period.
 
-		A request covers a range — a day, a week, a month — and its requested
-		hours are *per day*, so a range is expanded one date at a time and
-		clipped to this document's own period. A range longer than a day is a
+		A request covers a range — a day, a week, a month — expanded one date
+		at a time and clipped to this document's own period. Each date asks
+		for the request's hours per day, except on a Week request with Hours by
+		Date: there each date asks for its own share of the weekly total, and
+		a date whose share is 0 (a rest day) is not asked for at all. A range
+		longer than a day is a
 		standing permission rather than a promise about each day, so its dates
 		with no attendance at all are dropped; a single-day request keeps its
 		row either way, because that day was asked for by name and a missing
@@ -369,6 +441,8 @@ class BulkOvertime(Document):
 		if not requests:
 			return []
 
+		by_date = _hours_by_date({row.request for row in requests})
+
 		# the same lookup refresh_entries uses, so a date is dropped only when
 		# it would have shown up as "No Attendance" anyway
 		attended = set(self._attendance_by_day({r.employee for r in requests}))
@@ -380,8 +454,17 @@ class BulkOvertime(Document):
 			end = min(getdate(request.request_to_date), period_end)
 			is_range = getdate(request.request_to_date) > getdate(request.overtime_date)
 
+			shares = by_date.get(request.request)
+
 			date = start
 			while date <= end:
+				hours = request.requested_hours
+				if shares is not None:
+					hours = shares.get((request.employee, date), 0)
+					if not flt(hours):
+						date = add_days(date, 1)
+						continue
+
 				if is_range and (request.employee, date) not in attended:
 					if found is not None:
 						found.days_without_attendance += 1
@@ -393,7 +476,7 @@ class BulkOvertime(Document):
 							overtime_type=request.overtime_type,
 							employee=request.employee,
 							employee_name=request.employee_name,
-							requested_hours=request.requested_hours,
+							requested_hours=hours,
 						)
 					)
 				date = add_days(date, 1)
@@ -544,35 +627,39 @@ class BulkOvertime(Document):
 			row.attendance = record.name if record else None
 			row.shift = record.shift if record else None
 
-			if row.manual_working_hours:
-				# typed in by hand, for a shift the scanner did not record
-				# properly. It stands in for the attendance: the hours are
-				# HR's assertion that they were worked, and everything below
-				# is worked out from them exactly as it would be from a punch.
+			# Worked is always the attendance's own figure. Hours entered by
+			# hand once lived here; they are the overtime now (below), so a
+			# row still carrying that old mark goes back to the attendance.
+			row.manual_working_hours = 0
+			worked = flt(record.working_hours) if record else 0
+			row.working_hours = worked
+			row.shift_hours = shift_hours.get(row.shift) or default_hours
+
+			cap = caps.get(row.overtime_type) or 0
+			if row.manual_biometric_hours:
+				# the scanner failed that day, so HR types the overtime that
+				# was worked. It stands in for the punches — attendance or not
+				# — and is still capped at the day's maximum and the request.
 				# The reason is asked for at submit rather than here: these are
 				# typed straight into the grid, and a half-finished row should
 				# not stop the batch being saved.
-				worked = flt(row.working_hours)
-				row.shift_hours = shift_hours.get(row.shift) or default_hours
+				entered = max(flt(row.biometric_hours), 0)
+				row.biometric_hours = round(min(entered, cap) if cap else entered, 2)
+				approved, row.status = engine.settle(
+					row.requested_hours, row.biometric_hours, has_attendance=True, has_hours=True
+				)
 			else:
-				worked = flt(record.working_hours) if record else 0
-				row.working_hours = worked
-				row.shift_hours = (shift_hours.get(row.shift) or default_hours) if record else 0
-
-			row.biometric_hours = engine.biometric_overtime(
-				worked,
-				row.shift_hours,
-				row.day_type,
-				maximum_hours=caps.get(row.overtime_type) or 0,
-			)
-			approved, row.status = engine.settle(
-				row.requested_hours,
-				row.biometric_hours,
-				has_attendance=bool(record) or bool(row.manual_working_hours),
-				has_hours=worked > 0,
-				# a rest day pays every hour worked, so it needs no shift length
-				has_shift=bool(row.shift_hours) or row.day_type != engine.WORKING_DAY,
-			)
+				row.biometric_hours = engine.biometric_overtime(
+					worked, row.shift_hours, row.day_type, maximum_hours=cap
+				)
+				approved, row.status = engine.settle(
+					row.requested_hours,
+					row.biometric_hours,
+					has_attendance=bool(record),
+					has_hours=worked > 0,
+					# a rest day pays every hour worked, so it needs no shift length
+					has_shift=bool(row.shift_hours) or row.day_type != engine.WORKING_DAY,
+				)
 
 			if row.manual_override:
 				# the reason is asked for once on the batch, at submit
@@ -597,6 +684,115 @@ class BulkOvertime(Document):
 			fields=["name", "employee", "attendance_date", "working_hours", "shift"],
 		)
 		return {(r.employee, getdate(r.attendance_date)): r for r in records}
+
+	# ──────────────────────────────────────────────────────────────────────
+	# Verify against the raw check-ins
+	# ──────────────────────────────────────────────────────────────────────
+
+	@frappe.whitelist()
+	def verify_checkins(self):
+		"""Each row beside the punches behind it: first and last check-in of
+		the shift, the hours between them, the shift's own length and what lies
+		beyond it — so the hours paid can be checked against the scanner rather
+		than against the attendance alone.
+
+		First and last punch are taken whatever their IN/OUT label, since
+		readers mislabel scans. A shift's punches are the ones linked to its
+		attendance; failing that, those inside the shift's check-in window.
+		"""
+		rows = self.bulk_overtime_entries
+		if not rows:
+			return []
+
+		shifts = {
+			shift.name: shift
+			for shift in frappe.get_all(
+				"Shift Type",
+				filters={"name": ["in", list({row.shift for row in rows if row.shift})]},
+				fields=[
+					"name",
+					"start_time",
+					"end_time",
+					"begin_check_in_before_shift_start_time",
+					"allow_check_out_after_shift_end_time",
+				],
+			)
+		}
+		default_hours = flt(frappe.db.get_single_value("HR Settings", "standard_working_hours"))
+
+		employees = list({row.employee for row in rows})
+		checkins = frappe.get_all(
+			"Employee Checkin",
+			filters={
+				"employee": ["in", employees],
+				"time": ["between", [add_days(self.from_date, -1), add_days(self.to_date, 2)]],
+			},
+			fields=["employee", "time", "attendance"],
+			order_by="time asc",
+		)
+		by_attendance, by_employee = {}, {}
+		for checkin in checkins:
+			if checkin.attendance:
+				by_attendance.setdefault(checkin.attendance, []).append(checkin.time)
+			by_employee.setdefault(checkin.employee, []).append(checkin.time)
+
+		result = []
+		for row in rows:
+			date = getdate(row.overtime_date)
+			shift = shifts.get(row.shift)
+			start, end = _shift_window(date, shift)
+
+			punches = by_attendance.get(row.attendance) if row.attendance else None
+			if not punches:
+				punches = [t for t in by_employee.get(row.employee, []) if start <= t <= end]
+
+			first = punches[0] if punches else None
+			last = punches[-1] if len(punches) > 1 else None
+			punch_hours = round((last - first).total_seconds() / 3600, 2) if last else 0.0
+
+			shift_hours = flt(row.shift_hours) or (
+				engine.shift_length_hours(shift.start_time, shift.end_time) if shift else None
+			) or default_hours
+			if row.day_type == engine.WORKING_DAY:
+				beyond = round(max(punch_hours - flt(shift_hours), 0), 2)
+			else:
+				beyond = punch_hours
+
+			if not punches:
+				check = "No Punches"
+			elif not last:
+				check = "One Punch"
+			elif row.manual_biometric_hours or row.manual_override:
+				check = "Entered by Hand"
+			elif abs(beyond - flt(row.biometric_hours)) > 0.1:
+				check = "Differs"
+			else:
+				check = "Agrees"
+
+			result.append(
+				{
+					"idx": row.idx,
+					"employee": row.employee,
+					"employee_name": row.employee_name,
+					"overtime_date": row.overtime_date,
+					"day_type": row.day_type,
+					"shift": row.shift,
+					"shift_start": shift.start_time if shift else None,
+					"shift_end": shift.end_time if shift else None,
+					"first_in": first,
+					"last_out": last,
+					"punches": len(punches),
+					"punch_hours": punch_hours,
+					"shift_hours": round(flt(shift_hours), 2),
+					"beyond_shift": beyond,
+					"worked_hours": flt(row.working_hours),
+					"requested_hours": flt(row.requested_hours),
+					"approved_hours": flt(row.approved_hours),
+					"status": row.status,
+					"check": check,
+				}
+			)
+		return result
 
 	# ──────────────────────────────────────────────────────────────────────
 	# Submit / cancel
@@ -706,6 +902,50 @@ def _daily_caps(overtime_types) -> dict:
 		fields=["name", "maximum_overtime_hours_allowed"],
 	)
 	return {row.name: flt(row.maximum_overtime_hours_allowed) for row in rows}
+
+
+def _hours_by_date(requests) -> dict:
+	"""Per-date hours of the requests that carry them (Week requests), as
+	``{request: {(employee, date): hours}}``. A request with none is absent,
+	and pays its hours per day."""
+	if not requests or not frappe.db.exists("DocType", "Overtime Request Date"):
+		return {}
+	rows = frappe.get_all(
+		"Overtime Request Date",
+		filters={"parenttype": "Overtime Request", "parent": ["in", list(requests)]},
+		fields=["parent", "employee", "overtime_date", "requested_hours"],
+	)
+	shares = {}
+	for row in rows:
+		shares.setdefault(row.parent, {})[(row.employee, getdate(row.overtime_date))] = flt(row.requested_hours)
+	return shares
+
+
+def _shift_window(date, shift):
+	"""Where a shift's punches can fall: from the check-in allowance before
+	its start to the check-out allowance after its end, running into the next
+	day for a night shift. The calendar day when there is no shift."""
+	import datetime
+
+	day = datetime.datetime.combine(getdate(date), datetime.time())
+	if not shift or shift.start_time is None or shift.end_time is None:
+		return day, day + datetime.timedelta(days=1) - datetime.timedelta(seconds=1)
+
+	def as_delta(value):
+		if isinstance(value, datetime.timedelta):
+			return value
+		hours = engine._hours(value) or 0
+		return datetime.timedelta(hours=hours)
+
+	start = day + as_delta(shift.start_time)
+	end = day + as_delta(shift.end_time)
+	if end <= start:
+		end += datetime.timedelta(days=1)
+	before = datetime.timedelta(minutes=cint(shift.begin_check_in_before_shift_start_time) or 60)
+	after = datetime.timedelta(minutes=cint(shift.allow_check_out_after_shift_end_time) or 60)
+	# overtime runs past the shift's end, so the window stays open until the
+	# next shift could begin rather than closing at the check-out allowance
+	return start - before, max(end + after, start - before + datetime.timedelta(hours=20))
 
 
 def _request_names(value) -> list:
@@ -837,28 +1077,70 @@ def _drop_legacy_amount_fields():
 # ──────────────────────────────────────────────────────────────────────────
 
 
-def batch_for_request(overtime_request: str) -> str | None:
-	"""Build and save the Bulk Overtime that pays one approved request.
-
-	Returns the batch, or ``None`` when there is nothing to pay yet — which is
-	the ordinary case at approval time, because a request is approved *before*
-	the overtime is worked. Those are picked up later by :func:`create_pending_batches`,
-	once the attendance for their days has arrived.
-
-	Idempotent: a request already sitting in a batch is left alone, since a day
-	is paid once.
-	"""
-	from upande_ta.upande_ta.doctype.overtime_request.overtime_request import paying_batch
-
-	if paying_batch(overtime_request):
-		return None
-
-	request = frappe.db.get_value(
-		"Overtime Request", overtime_request, ["company", "custom_farm", "docstatus"], as_dict=True
+def _requests_in_other_batches(requests, batch=None) -> set:
+	"""Which of these requests an open or submitted Bulk Overtime other than
+	``batch`` already pays some of."""
+	if not requests:
+		return set()
+	return set(
+		frappe.db.sql_list(
+			"""
+			select distinct entry.overtime_request
+			from `tabBulk Overtime Entry` entry
+			join `tabBulk Overtime` bo on bo.name = entry.parent
+			where entry.parenttype = 'Bulk Overtime'
+				and bo.docstatus < 2
+				and bo.name != %(batch)s
+				and entry.overtime_request in %(requests)s
+			""",
+			{"batch": batch or "", "requests": tuple(requests)},
+		)
 	)
-	if not request or request.docstatus != 1:
-		return None
 
+
+def outstanding_days(overtime_request: str, batch: str | None = None) -> list:
+	"""The (employee, date) rows of an approved request worked so far that no
+	open or submitted Bulk Overtime other than ``batch`` holds yet.
+
+	Read through the same fetch a batch runs, over the request's whole span up
+	to today, so "left to pay" is exactly what a batch would take: a range's
+	days without attendance and a week's rest days are not in it.
+	"""
+	request = frappe.db.get_value(
+		"Overtime Request",
+		overtime_request,
+		["company", "custom_farm", "docstatus", "overtime_date", "to_date"],
+		as_dict=True,
+	)
+	if not request or request.docstatus != 1 or not request.overtime_date:
+		return []
+
+	end = min(getdate(request.to_date or request.overtime_date), getdate(today()))
+	if getdate(request.overtime_date) > end:
+		return []
+
+	probe = frappe.get_doc(
+		{
+			"doctype": "Bulk Overtime",
+			"company": request.company,
+			"custom_farm": request.custom_farm or "",
+			"from_date": request.overtime_date,
+			"to_date": end,
+		}
+	)
+	probe.name = batch or ""
+	rows = probe._approved_request_rows(chosen=[overtime_request])
+	claimed = probe._claimed_elsewhere(rows)
+	return [row for row in rows if (row.employee, str(row.overtime_date)) not in claimed]
+
+
+def build_batch_for_request(overtime_request: str):
+	"""An unsaved Bulk Overtime over what one approved request has left to
+	pay, and what its fetch reported. ``get_overtime`` raises when the
+	request has not been worked yet or every day of it is already paid."""
+	request = frappe.db.get_value(
+		"Overtime Request", overtime_request, ["company", "custom_farm"], as_dict=True
+	)
 	batch = frappe.get_doc(
 		{
 			"doctype": "Bulk Overtime",
@@ -866,7 +1148,34 @@ def batch_for_request(overtime_request: str) -> str | None:
 			"custom_farm": request.custom_farm or "",
 		}
 	)
-	result = batch.get_overtime(overtime_requests=[overtime_request])
+	return batch, batch.get_overtime(overtime_requests=[overtime_request])
+
+
+def batch_for_request(overtime_request: str, wait_until_worked: bool = False) -> str | None:
+	"""Build and save the Bulk Overtime that pays what one approved request
+	has left to pay.
+
+	Returns the batch, or ``None`` when there is nothing to pay yet — which is
+	the ordinary case at approval time, because a request is approved *before*
+	the overtime is worked. Those are picked up later by :func:`create_pending_batches`,
+	once the attendance for their days has arrived.
+
+	``wait_until_worked`` is how the automatic runs call it: a request still
+	running is left until its last day has passed, so a week becomes one batch
+	rather than one a night. Anything a batch left behind — the last days of a
+	week paid mid-week — is picked up by the next one. A day is paid once.
+	"""
+	request = frappe.db.get_value(
+		"Overtime Request", overtime_request, ["docstatus", "overtime_date", "to_date"], as_dict=True
+	)
+	if not request or request.docstatus != 1:
+		return None
+	if wait_until_worked and getdate(request.to_date or request.overtime_date) >= getdate(today()):
+		return None
+	if not outstanding_days(overtime_request):
+		return None
+
+	batch, result = build_batch_for_request(overtime_request)
 	if not result["rows"]:
 		return None
 
@@ -875,11 +1184,11 @@ def batch_for_request(overtime_request: str) -> str | None:
 
 
 def auto_create_batch(overtime_request: str):
-	"""Called after a request is approved. Never raises: an approval must not
-	be undone because the attendance behind it has not arrived, or because a
-	day of it is already being paid somewhere else."""
+	"""Called after a request is approved, and by the daily run. Never raises:
+	an approval must not be undone because the attendance behind it has not
+	arrived, or because a day of it is already being paid somewhere else."""
 	try:
-		name = batch_for_request(overtime_request)
+		name = batch_for_request(overtime_request, wait_until_worked=True)
 	except Exception:
 		frappe.log_error(
 			title="Bulk Overtime: could not build a batch for {0}".format(overtime_request),
@@ -894,31 +1203,39 @@ def auto_create_batch(overtime_request: str):
 
 
 def create_pending_batches(limit: int = 200):
-	"""The daily run: approved requests whose days have been worked but which
-	no batch has picked up yet.
+	"""The daily run: approved requests whose last day has passed and which
+	still have days worked that no batch has picked up.
 
 	Overtime is approved in advance, so at approval time there is usually
 	nothing to pay. This is what turns those into batches once the attendance
-	is in, so nobody has to watch for it.
+	is in, so nobody has to watch for it — including the days a batch made
+	before the request was over left behind.
 	"""
 	requests = frappe.db.sql(
 		"""
 		select req.name
 		from `tabOvertime Request` req
 		where req.docstatus = 1
-			and req.overtime_date <= %(today)s
-			and not exists (
-				select 1
-				from `tabBulk Overtime Entry` entry
-				join `tabBulk Overtime` bo on bo.name = entry.parent
-				where entry.parenttype = 'Bulk Overtime'
-					and bo.docstatus < 2
-					and entry.overtime_request = req.name
+			and coalesce(req.to_date, req.overtime_date) < %(today)s
+			and (
+				coalesce(req.to_date, req.overtime_date) >= %(window_start)s
+				or not exists (
+					select 1
+					from `tabBulk Overtime Entry` entry
+					join `tabBulk Overtime` bo on bo.name = entry.parent
+					where entry.parenttype = 'Bulk Overtime'
+						and bo.docstatus < 2
+						and entry.overtime_request = req.name
+				)
 			)
 		order by req.overtime_date
 		limit %(limit)s
 		""",
-		{"today": today(), "limit": cint(limit)},
+		{
+			"today": today(),
+			"window_start": add_days(today(), -PICK_UP_WINDOW_DAYS),
+			"limit": cint(limit),
+		},
 		as_dict=True,
 	)
 
