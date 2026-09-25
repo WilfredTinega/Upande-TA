@@ -9,6 +9,7 @@
    {% raw %} — a stray brace in the inline SVG or a JS-ish attribute would
    otherwise be read as a template tag. #}
 {% block page_content %}
+<script>window.ATT_DEFAULT_COMPANY = {{ (default_company or "") | tojson }};</script>
 {% raw %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -35,6 +36,7 @@
           <span class="sb-dev-count" id="sb-dev-count">–</span>
         </button>
       </div>
+      <button class="tab-btn sb-lost-btn sb-bt-btn" data-tab="templates" id="sb-templates">BIOMETRIC TEMPLATES</button>
       <div class="wm-account" id="wm-account">
       <div class="wm-avatar" id="wm-avatar"><span class="wm-ini" id="wm-ini">&middot;</span><span class="wm-who"><span class="wm-name" id="wm-name"></span><span class="wm-uid" id="wm-uid"></span></span></div>
       <a href="/login" id="wm-account-login" class="wm-login" style="display:none">Log in</a>
@@ -175,9 +177,8 @@
     <div class="card-head">
       <h3>Checkin Records</h3>
       <div class="tbl-export-bar">
-        <input type="text" id="r-search" placeholder="Search…" style="width:160px;height:28px;font-size:13px">
+        <span class="ss-host"><input autocomplete="off" type="text" id="r-search" placeholder="Search…" style="width:160px;height:28px;font-size:13px"><div class="ss-menu" id="r-search-menu"></div></span>
         <span class="tag" id="r-rowcount">—</span>
-        <button class="btn export-csv" id="btn-csv">CSV</button>
         <button class="btn export-xls" id="btn-xls">EXCEL</button>
       </div>
     </div>
@@ -205,7 +206,7 @@
       <h3>Attendance Register</h3>
       <div class="tbl-export-bar">
         <span class="tag" id="register-date-tag">—</span>
-        <button class="btn export-csv" id="btn-reg-csv" title="Download combined CSV (Present + Absent)">CSV</button>
+        <button class="btn export-xls" id="btn-reg-csv">EXCEL</button>
         <button class="btn export-xls" id="btn-reg-xls" title="Download Excel with Present, On Leave, Off and Absent sheets">EXCEL (4 SHEETS)</button>
       </div>
     </div>
@@ -222,7 +223,7 @@
         <div class="split-head present">
           <h4 style="color:var(--good)">PRESENT</h4>
           <div style="display:flex;align-items:center;gap:8px">
-            <input type="text" id="present-search" placeholder="Search…" style="height:24px;font-size:13px;width:160px" oninput="filterPresent()">
+            <span class="ss-host"><input autocomplete="off" type="text" id="present-search" placeholder="Search…" style="height:24px;font-size:13px;width:160px" oninput="filterPresent()"><div class="ss-menu" id="present-search-menu"></div></span>
             <span class="cnt" style="color:var(--good)" id="present-cnt">—</span>
           </div>
         </div>
@@ -237,7 +238,7 @@
         <div class="split-head absent">
           <h4 style="color:var(--bad)">ABSENT / NOT CHECKED IN</h4>
           <div style="display:flex;align-items:center;gap:8px">
-            <input type="text" id="absent-search" placeholder="Search…" style="height:24px;font-size:13px;width:160px" oninput="filterAbsent()">
+            <span class="ss-host"><input autocomplete="off" type="text" id="absent-search" placeholder="Search…" style="height:24px;font-size:13px;width:160px" oninput="filterAbsent()"><div class="ss-menu" id="absent-search-menu"></div></span>
             <span class="cnt" style="color:var(--bad)" id="absent-cnt">—</span>
           </div>
         </div>
@@ -284,8 +285,7 @@
       <div class="tbl-export-bar">
         <span class="tag" id="leave-date-tag">—</span>
         <span class="cnt" style="color:var(--violet);font-family:var(--f-ui);font-size:13px;font-weight:500" id="leave-cnt">—</span>
-        <input type="text" id="leave-search" placeholder="Search…" style="width:160px;height:28px;font-size:13px" oninput="filterLeave()">
-        <button class="btn export-csv" id="btn-leave-csv">CSV</button>
+        <span class="ss-host"><input autocomplete="off" type="text" id="leave-search" placeholder="Search…" style="width:160px;height:28px;font-size:13px" oninput="filterLeave()"><div class="ss-menu" id="leave-search-menu"></div></span>
         <button class="btn export-xls" id="btn-leave-xls">EXCEL</button>
       </div>
     </div>
@@ -367,6 +367,84 @@
     </div>
   </div>
 
+  <!-- ══════════ TAB: BIOMETRIC TEMPLATES ══════════ -->
+  <div class="tab-panel" id="panel-templates">
+    <div class="card" id="bt-card">
+      <div class="card-head tile-inline-head">
+        <h3 id="bt-title">BIOMETRIC TEMPLATES</h3>
+        <div class="ti-tabs" id="bt-tabs">
+          <button type="button" class="ti-tab active" data-bt="templates">TEMPLATES <span class="ti-tab-n" id="bt-n-templates">&ndash;</span></button>
+          <button type="button" class="ti-tab" data-bt="readers">BIOMETRIC DEVICES <span class="ti-tab-n" id="bt-n-readers">&ndash;</span></button>
+          <button type="button" class="ti-tab" data-bt="missing">NOT ENROLLED <span class="ti-tab-n" id="bt-n-missing">&ndash;</span></button>
+          <button type="button" class="ti-tab" data-bt="anomalies">ANOMALIES <span class="ti-tab-n" id="bt-n-anomalies">&ndash;</span></button>
+        </div>
+        <div class="bt-tools">
+          <div class="lost-dates bt-dates">
+            <label>From</label>
+            <span class="fdate" id="bt-from-ctl"></span><input type="hidden" id="bt-from">
+            <span class="lost-dates-arrow">&rarr;</span>
+            <label>To</label>
+            <span class="fdate" id="bt-to-ctl"></span><input type="hidden" id="bt-to">
+          </div>
+          <div class="ti-tabs" id="bt-quick">
+            <button type="button" class="ti-tab active" data-days="0">TODAY</button>
+            <button type="button" class="ti-tab" data-days="6">7 DAYS</button>
+            <button type="button" class="ti-tab" data-days="29">30 DAYS</button>
+          </div>
+          <span class="bt-f" id="bt-f-status">
+            <select id="bt-status" style="width:150px">
+              <option value="">All</option>
+              <option value="issues">Issues only</option>
+              <option value="Unique">Unique</option>
+              <option value="Duplicate">Duplicate</option>
+              <option value="Multi-signature">Multi-signature</option>
+              <option value="Not enrolled">Not enrolled</option>
+            </select>
+          </span>
+          <span class="bt-f" id="bt-f-reader" hidden>
+            <select id="bt-reader" style="width:190px"><option value="">All devices</option></select>
+          </span>
+          <span class="ss-host"><input id="bt-search" autocomplete="off" placeholder="Search&hellip;"><div class="ss-menu" id="bt-search-menu"></div></span>
+          <button class="btn q export-xls" id="bt-xls">&#11015; EXCEL</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div id="bt-msg"></div>
+        <div class="lost-sum bt-sum" id="bt-sum"></div>
+        <div class="bt-devs" id="bt-devs"></div>
+        <div class="bt-seg-row" id="bt-mode-row" hidden>
+          <div class="ti-tabs" id="bt-mode">
+            <button type="button" class="ti-tab active" data-mode="on">ENROLLED</button>
+            <button type="button" class="ti-tab" data-mode="off">NOT ON THIS DEVICE</button>
+          </div>
+        </div>
+        <div class="bt-seg-row" id="bt-kind-row" hidden>
+          <div class="ti-tabs" id="bt-kind">
+            <button type="button" class="ti-tab active" data-kind="">ALL</button>
+            <button type="button" class="ti-tab" data-kind="Off day">OFF DAY</button>
+            <button type="button" class="ti-tab" data-kind="On leave">ON LEAVE</button>
+            <button type="button" class="ti-tab" data-kind="Enrolled but absent">ENROLLED BUT ABSENT</button>
+          </div>
+          <div class="bt-freq" id="bt-freq" hidden></div>
+        </div>
+        <div class="tile-inline-wrap" id="bt-wrap">
+          <div class="bt-sec" id="bt-none-sec" hidden>NO TEMPLATE ON ANY DEVICE <span class="tag" id="bt-none-n"></span></div>
+          <table class="tile-inline-tbl" id="bt-tbl">
+            <thead id="bt-thead"></thead>
+            <tbody id="bt-tbody"></tbody>
+          </table>
+          <div id="bt-part" hidden>
+            <div class="bt-sec">MISSING FROM SOME DEVICES <span class="tag" id="bt-part-n"></span></div>
+            <table class="tile-inline-tbl" id="bt-tbl2">
+              <thead id="bt-thead2"></thead>
+              <tbody id="bt-tbody2"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ══════════ TAB: ACTIONS ══════════ -->
   <div class="tab-panel" id="panel-actions">
 
@@ -375,6 +453,7 @@
     <div class="act-switch" role="group" aria-label="Actions">
       <button type="button" class="act-btn active" data-act="mark">MARK ATTENDANCE</button>
       <button type="button" class="act-btn" data-act="shift">BULK SHIFT CHANGE</button>
+      <button type="button" class="act-btn" data-act="requests">ATTENDANCE REQUESTS <span id="req-badge" class="req-badge"></span></button>
     </div>
   </div>
 
@@ -386,7 +465,7 @@
       
     </div>
     <div class="card-body">
-      <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      <div class="act-filters">
         <div>
           <label style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px">Attendance Date</label>
           <span class="fdate" id="att-date-ctl"></span><input type="hidden" id="att-date">
@@ -407,10 +486,10 @@
             <span>ALLOW ON WEEK OFF</span>
           </label>
         </div>
-        <div style="display:flex;gap:6px">
+        <div class="act-buttons">
           <button class="btn" id="att-select-all" style="height:30px">SELECT ALL</button>
           <button class="btn" id="att-clear-sel" style="height:30px">CLEAR</button>
-          <button class="btn primary" id="att-submit" style="height:30px;background:var(--good);border-color:var(--good)">SUBMIT ATTENDANCE</button>
+          <button class="btn primary" id="att-submit" style="height:30px;background:var(--good);border-color:var(--good)">REQUEST ATTENDANCE</button>
         </div>
       </div>
       <div id="att-feedback" style="margin-bottom:10px"></div>
@@ -444,6 +523,51 @@
     </div>
   </div>
 
+  <!-- ── ATTENDANCE REQUESTS ── -->
+  <div class="card" style="margin-bottom:14px;display:none" id="requests-card">
+    <div class="card-head">
+      <h3>ATTENDANCE REQUESTS</h3>
+    </div>
+    <div class="card-body">
+      <div class="act-filters">
+        <div>
+          <label style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px">Show</label>
+          <select id="req-scope" style="height:30px;font-size:13px;width:190px">
+            <option value="mine">Waiting for my approval</option>
+            <option value="all">All pending</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px">Unit/Division</label>
+          <select id="req-farm" style="height:30px;font-size:13px;width:170px"><option value="">All Units</option></select>
+        </div>
+        <div class="act-buttons">
+          <button class="btn" id="req-select-all" style="height:30px">SELECT ALL</button>
+          <button class="btn" id="req-clear" style="height:30px">CLEAR</button>
+          <button class="btn primary" id="req-approve" style="height:30px;background:var(--good);border-color:var(--good)">APPROVE</button>
+          <button class="btn" id="req-reject" style="height:30px;color:var(--bad);border-color:var(--bad)">REJECT</button>
+          <button class="btn q" id="req-refresh" style="height:30px">REFRESH</button>
+        </div>
+      </div>
+      <div id="req-feedback" style="margin-bottom:10px"></div>
+      <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
+        <div style="background:var(--bg);padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em">Requests</span>
+            <span style="font-family:var(--f-ui);font-size:12px;color:var(--text-2);font-weight:500" id="req-count">—</span>
+          </div>
+          <span class="ss-host"><input type="text" id="req-search" autocomplete="off" placeholder="Search name or code…" style="height:26px;font-size:13px;width:240px"><div class="ss-menu" id="req-search-menu"></div></span>
+        </div>
+        <div id="req-list">
+          <table class="tbl" id="req-tbl">
+            <thead><tr><th style="width:28px"></th><th>Employee</th><th>Unit</th><th>Dates</th><th>Days</th><th>Reason</th><th>Approver</th><th>Requested By</th><th>State</th><th>Request</th><th></th></tr></thead>
+            <tbody id="req-tbody"><tr><td colspan="11" class="empty">—</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── SHIFT CHANGE ── -->
   <div class="card" style="margin-bottom:14px" id="shift-change-card">
     <div class="card-head">
@@ -451,7 +575,7 @@
       
     </div>
     <div class="card-body">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      <div class="act-filters">
         <div>
           <label style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px">Farm / Unit</label>
           <select id="shift-farm" style="height:30px;font-size:13px;width:140px"><option value="">All Farms</option></select>
@@ -466,10 +590,19 @@
           <label style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px">Effective Date</label>
           <span class="fdate" id="shift-date-ctl"></span><input type="hidden" id="shift-date">
         </div>
-        <div style="margin-top:18px;display:flex;gap:6px">
+        <div>
+          <label style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px">Employment Type</label>
           <select id="shift-f-et" style="height:30px;font-size:13px;width:130px"><option value="">All Types</option></select>
+        </div>
+        <div>
+          <label style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px">Designation</label>
           <select id="shift-f-des" style="height:30px;font-size:13px;width:150px"><option value="">All Designations</option></select>
+        </div>
+        <div>
+          <label style="font-family:var(--f-ui);font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px">Current Shift</label>
           <select id="shift-f-shift" style="height:30px;font-size:13px;width:150px"><option value="">All Shifts</option><option value="__none__">No Shift Assigned</option></select>
+        </div>
+        <div class="act-buttons">
           <button class="btn" id="shift-select-all" style="height:30px">SELECT ALL</button>
           <button class="btn" id="shift-clear" style="height:30px">CLEAR</button>
           <button class="btn primary" id="shift-submit" style="height:30px">APPLY SHIFT CHANGE</button>

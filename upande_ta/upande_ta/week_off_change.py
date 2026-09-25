@@ -245,7 +245,7 @@ def _clear_absent_on_week_off(employee: str, holiday_list: str) -> dict:
 			attendance = frappe.get_doc("Attendance", row.name)
 			if attendance.docstatus == 1:
 				attendance.cancel()
-			frappe.delete_doc("Attendance", row.name)
+			frappe.delete_doc("Attendance", row.name, delete_permanently=True)
 			removed.append(str(row.attendance_date))
 		except Exception:
 			frappe.db.rollback(save_point="week_off_absent")

@@ -4,6 +4,7 @@ import json
 from datetime import timedelta
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 from frappe.utils import getdate, now_datetime, nowdate
 
@@ -235,6 +236,29 @@ def capability_profile_for_serial(device_sn):
 class BiometricSetting(Document):
 	def validate(self):
 		self._block_removing_devices_with_links()
+		self._validate_attendance_request_approvers()
+
+	def _validate_attendance_request_approvers(self):
+		"""One approver per Company and Unit/Division — a blank Unit/Division
+		covering the rest of the company — and one who can sign in: the request
+		is shared with their user and only they may approve it."""
+		seen = set()
+		for row in self.get("attendance_request_approvers") or []:
+			key = (row.company, (row.farm or "").strip())
+			if key in seen:
+				frappe.throw(
+					_("Row #{0}: {1} already has an Attendance Request approver.").format(
+						row.idx, frappe.bold(" / ".join(k for k in key if k) or row.company)
+					)
+				)
+			seen.add(key)
+			row.approver_user = frappe.db.get_value("Employee", row.approver, "user_id")
+			if not row.approver_user:
+				frappe.throw(
+					_("Row #{0}: {1} has no User on their Employee record, so they cannot approve.").format(
+						row.idx, frappe.bold(row.approver_name or row.approver)
+					)
+				)
 
 	def _block_removing_devices_with_links(self):
 		current_sns = {d.device_sn for d in (self.devices or []) if d.device_sn}

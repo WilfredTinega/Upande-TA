@@ -120,6 +120,10 @@ doc_events = {
 	"Meal Checkin": {
 		"after_insert": "upande_ta.upande_ta.meal_checkin_receipt.attach_receipt",
 	},
+	"Attendance Request": {
+		"before_insert": "upande_ta.upande_ta.api.attendance_request_flow.set_approver",
+		"on_submit": "upande_ta.upande_ta.api.attendance_request_flow.copy_marking_reason",
+	},
 }
 
 permission_query_conditions = {
