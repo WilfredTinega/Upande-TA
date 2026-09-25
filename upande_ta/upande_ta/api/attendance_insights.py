@@ -23,6 +23,8 @@ signed-in session is required and the caller's own permissions still apply.
 
 import frappe
 
+from upande_ta.upande_ta.overrides.attendance import delete_cancelled_absent
+
 # Kaitet has no "Task Worker" employment type — the Employment Type master holds
 # Permanent / Temporary / Contract, and task workers are carried as Temporary
 # ("Task Worker" is their designation). The sidebar's task-worker rollup keyed on
@@ -2137,6 +2139,7 @@ def attendance_mark():
 					o_doc.flags.ignore_permissions = True
 					o_doc.cancel()
 					row["cancelled"] = 1
+					row["deleted"] = 1 if delete_cancelled_absent(row["name"]) else 0
 					o_ok = o_ok + 1
 				except Exception as oe:
 					row["error"] = str(oe)
@@ -2187,7 +2190,10 @@ def attendance_mark():
 				c_doc = frappe.get_doc("Attendance", nm)
 				c_doc.flags.ignore_permissions = True
 				c_doc.cancel()
-				c_results.append({"name": nm, "ok": True, "employee": cur.get("employee"),
+				# only an Absent goes for good; a duplicate Present stays as a
+				# cancelled record of what was there
+				c_deleted = cur.get("status") == "Absent" and delete_cancelled_absent(nm)
+				c_results.append({"name": nm, "ok": True, "deleted": 1 if c_deleted else 0, "employee": cur.get("employee"),
 					"date": str(cur.get("attendance_date")), "status": cur.get("status"),
 					"shift": cur.get("shift") or ""})
 				c_ok = c_ok + 1
@@ -2526,6 +2532,8 @@ def attendance_mark():
 					  if prior.get("docstatus") == 1:
 						  old_doc.cancel()
 						  replaced = "cancelled Absent " + str(prior.get("name"))
+						  if delete_cancelled_absent(prior.get("name")):
+							  replaced = "cancelled and deleted Absent " + str(prior.get("name"))
 					  else:
 						  # draft Absent: delete it so the new Present can be inserted
 						  old_doc.delete()
@@ -2661,7 +2669,37 @@ MARKING_REASON_FIELD = {
 			"options": "\nAway Assignment\nPending Off\nPending Holiday",
 			"module": "Upande TA",
 		}
-	]
+	],
+	# Mark Attendance raises Attendance Requests for approval; these carry the
+	# reason onto the Attendance HRMS marks, and name the one approver the
+	# site workflow lets approve (see api/attendance_request_flow.py).
+	"Attendance Request": [
+		{
+			"fieldname": "custom_marking_reason",
+			"label": "Marking Reason",
+			"fieldtype": "Select",
+			"insert_after": "explanation",
+			"options": "\nAway Assignment\nPending Off\nPending Holiday",
+			"module": "Upande TA",
+		},
+		{
+			"fieldname": "custom_approver",
+			"label": "Approver",
+			"fieldtype": "Link",
+			"options": "User",
+			"insert_after": "custom_marking_reason",
+			"read_only": 1,
+			"module": "Upande TA",
+		},
+		{
+			"fieldname": "custom_approver_name",
+			"label": "Approver Name",
+			"fieldtype": "Data",
+			"insert_after": "custom_approver",
+			"read_only": 1,
+			"module": "Upande TA",
+		},
+	],
 }
 
 
@@ -2669,7 +2707,8 @@ def ensure_attendance_insights_fields():
 	"""Create the custom field the dashboard's register and marking rely on."""
 	if not frappe.db.table_exists("Attendance"):
 		return
+	fields = {dt: defs for dt, defs in MARKING_REASON_FIELD.items() if frappe.db.table_exists(dt)}
 
 	from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
-	create_custom_fields(MARKING_REASON_FIELD, update=True)
+	create_custom_fields(fields, update=True)

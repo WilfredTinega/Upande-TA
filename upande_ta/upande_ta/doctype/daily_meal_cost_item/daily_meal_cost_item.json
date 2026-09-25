@@ -1,0 +1,52 @@
+{
+ "actions": [],
+ "creation": "2026-09-26 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "meal_type",
+  "menu",
+  "cost_per_meal"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "meal_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Meal",
+   "options": "Breakfast\nLunch\nSupper",
+   "reqd": 1
+  },
+  {
+   "columns": 5,
+   "fieldname": "menu",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Menu"
+  },
+  {
+   "columns": 3,
+   "fieldname": "cost_per_meal",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Cost per Meal",
+   "non_negative": 1,
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-26 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Daily Meal Cost Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

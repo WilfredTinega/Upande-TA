@@ -150,8 +150,28 @@ def _supersede_enabled():
 	return enabled
 
 
+def delete_cancelled_absent(name) -> bool:
+	"""Delete an Absent once it has been cancelled, so the cancelled copy does
+	not linger beside the record that replaced it. Never raises: a record that
+	cannot be deleted — something still links to it — stays cancelled, which
+	is where it was a moment ago, and the reason goes to the Error Log."""
+	try:
+		if frappe.db.get_value("Attendance", name, ["docstatus", "status"]) != (2, "Absent"):
+			return False
+		frappe.delete_doc("Attendance", name, ignore_permissions=True, delete_permanently=True)
+		return True
+	except Exception:
+		frappe.clear_last_message()
+		frappe.log_error(
+			title=f"Upande TA: cancelled Absent {name} could not be deleted",
+			message=frappe.get_traceback(),
+		)
+		return False
+
+
 def _release_absent(name):
-	"""Cancel (or delete, if still draft) one Absent. Never raises.
+	"""Cancel and delete (or just delete, if still draft) one Absent. Never
+	raises.
 
 	A failure here must not turn into a failure of the record we are trying to
 	write: if the Absent cannot be released, the parent's duplicate check throws
@@ -164,6 +184,7 @@ def _release_absent(name):
 
 		if doc.docstatus == 1:
 			doc.cancel()
+			delete_cancelled_absent(name)
 		elif doc.docstatus == 0:
 			doc.delete(ignore_permissions=True)
 		else:

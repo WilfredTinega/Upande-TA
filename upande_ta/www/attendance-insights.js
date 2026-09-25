@@ -182,15 +182,27 @@
   function attachSearchSelect(inputId, getOptions, onPick, onType){
     var inp=$(inputId), menu=$(inputId+'-menu');
     if(!inp || !menu) return;
+    // cards clip their overflow, so the list lives on <body>, pinned under the box
+    document.body.appendChild(menu);
+    menu.style.position='fixed'; menu.style.zIndex='10040';
     var idx=-1, shown=[];
+    function place(){
+      if(!menu.classList.contains('open')) return;
+      var r=inp.getBoundingClientRect(), h=Math.min(menu.scrollHeight, 300);
+      menu.style.minWidth=Math.max(r.width, 260)+'px';
+      menu.style.left=Math.max(8, Math.min(r.left, window.innerWidth-menu.offsetWidth-8))+'px';
+      menu.style.top=((window.innerHeight-r.bottom < h+12 && r.top > h+12) ? r.top-h-4 : r.bottom+4)+'px';
+    }
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
     function close(){ menu.classList.remove('open'); menu.innerHTML=''; idx=-1; shown=[]; }
     function render(q){
       var opts=[];
       try{ opts=getOptions(q)||[]; }catch(e){ opts=[]; }
-      shown=opts.slice(0,60);
+      shown=opts.slice(0,300);
       if(!shown.length){
-        menu.innerHTML='<div class="ss-empty">'+(q?'No match':'Type to search')+'</div>';
-        menu.classList.add('open'); return;
+        menu.innerHTML='<div class="ss-empty">'+(q?'No match':'No employees')+'</div>';
+        menu.classList.add('open'); place(); return;
       }
       menu.innerHTML=shown.map(function(o,i){
         return '<div class="ss-opt'+(i===idx?' active':'')+'" data-i="'+i+'">'+
@@ -198,6 +210,7 @@
                (o.meta?'<span class="ss-meta">'+esc(o.meta)+'</span>':'')+'</div>';
       }).join('');
       menu.classList.add('open');
+      place();
       var els=menu.querySelectorAll('.ss-opt');
       for(var i=0;i<els.length;i++){
         els[i].addEventListener('mousedown', function(ev){
@@ -219,7 +232,10 @@
         if(idx<0) idx=shown.length-1;
         if(idx>=shown.length) idx=0;
         render(inp.value.trim());
-        var a=menu.querySelector('.ss-opt.active'); if(a&&a.scrollIntoView) a.scrollIntoView({block:'nearest'});
+        // scroll the list only, not the page
+        var a=menu.querySelector('.ss-opt.active');
+        if(a){ if(a.offsetTop<menu.scrollTop) menu.scrollTop=a.offsetTop;
+          else if(a.offsetTop+a.offsetHeight>menu.scrollTop+menu.clientHeight) menu.scrollTop=a.offsetTop+a.offsetHeight-menu.clientHeight; }
       } else if(ev.key==='Enter'){
         if(idx>=0 && shown[idx]){ ev.preventDefault(); if(onPick) onPick(shown[idx]); close(); }
       } else if(ev.key==='Escape'){ close(); }
@@ -362,8 +378,9 @@
       if(on){
         if(window._trendCo==null || window._trendCo===''){
           var cos=window._companies||[];
-          var kai=cos.filter(function(c){return /kaitet/i.test(c)})[0];
-          window._trendCo=kai||cos[0]||'';
+          // the user's default company (page context), else the first listed
+          var dflt=window.ATT_DEFAULT_COMPANY||'';
+          window._trendCo=(cos.indexOf(dflt)>=0?dflt:'')||cos[0]||'';
         }
         buildTrendCos();
         var act=document.querySelector('#trend-ranges .ti-tab.active');
@@ -424,12 +441,14 @@
     (function(){
       var bar=document.querySelector('.act-switch'); if(!bar) return;
       function showAct(which){
-        var m=$('mark-attendance-card'), s=$('shift-change-card');
+        var m=$('mark-attendance-card'), s=$('shift-change-card'), q=$('requests-card');
         // class-driven: the CSS flex rules use !important, which would beat an inline
         // display:none and leave BOTH cards visible (squeezed and clipped).
         if(m){ m.classList.toggle('act-on', which==='mark');  m.style.display=(which==='mark')?'':'none'; }
         if(s){ s.classList.toggle('act-on', which==='shift'); s.style.display=(which==='shift')?'':'none'; }
+        if(q){ q.classList.toggle('act-on', which==='requests'); q.style.display=(which==='requests')?'':'none'; }
         if(which==='shift' && !window._shiftEmps){ try{ loadShiftEmployees(); }catch(e){} }
+        if(which==='requests' && window.loadPendingRequests){ window.loadPendingRequests(); }
         var bs=bar.querySelectorAll('.act-btn');
         for(var i=0;i<bs.length;i++) bs[i].classList.toggle('active', bs[i].getAttribute('data-act')===which);
       }
@@ -506,6 +525,7 @@
   function load(){
     try{ if(window._reloadTrend) window._reloadTrend(); }catch(e){}
     try{ if(window._reloadLost) window._reloadLost(); }catch(e){}
+    try{ if(window._reloadBT) window._reloadBT(); }catch(e){}
     var farm=$('r-farm').value, company=$('r-company').value, emptype=$('r-emptype').value;
     var _rd=_selDate; var from=_rd, to=_rd;
     var qs=new URLSearchParams({from_date:from,to_date:to,farm:farm,company:company,employment_type:emptype}).toString();
@@ -744,7 +764,7 @@
   }
   // sidebar clicks change r-farm/r-company then call load(); make sure an open trend
   // picks up the NEW values (load() fires the hook before the DOM values settle).
-  function _sbTrendSync(){ setTimeout(function(){ try{ if(window._reloadTrend) window._reloadTrend(); }catch(e){} try{ if(window._reloadLost) window._reloadLost(); }catch(e){} }, 0); }
+  function _sbTrendSync(){ setTimeout(function(){ try{ if(window._reloadTrend) window._reloadTrend(); }catch(e){} try{ if(window._reloadLost) window._reloadLost(); }catch(e){} try{ if(window._reloadBT) window._reloadBT(); }catch(e){} }, 0); }
   function _setActive(el){var a=document.querySelectorAll('.att-sb-farm.active,.att-sb-co-head.active');for(var i=0;i<a.length;i++)a[i].classList.remove('active');if(el)el.classList.add('active');}
   // The sidebar carries ONE selection, not two: the company/farm tree and the
   // panel buttons (LOST HOURS / ACTIONS / BIOMETRIC DEVICES) are the same choice
@@ -1828,7 +1848,6 @@ function renderAvgHours(serverSeries){
       drKpi('Days in Range',rangeDays)+
     '</div>';
     html+='<div class="dr-actions"><div style="display:flex;gap:6px">'+
-      '<button class="btn export-csv" id="dr-csv">CSV</button>'+
       '<button class="btn export-xls" id="dr-xls">EXCEL</button>'+
     '</div><span style="font-family:var(--f-ui);font-size:12px;color:var(--text-3)">'+pivoted.length+' day records</span></div>';
     html+='<div class="dr-charts">'+
@@ -1857,7 +1876,6 @@ function renderAvgHours(serverSeries){
       '</tr>';
     }).join('')+'</tbody></table></div>';
     $('dr-body').innerHTML=html;
-    $('dr-csv').addEventListener('click',function(){exportDrawerCSV(d,pivoted)});
     $('dr-xls').addEventListener('click',function(){exportDrawerXLS(d,pivoted)});
     // Charts
     if(monthly.length){
@@ -1930,16 +1948,9 @@ function renderAvgHours(serverSeries){
     });
   }
 
-  function toCSV(data){
-    if(!data.length)return '';
-    var cols=Object.keys(data[0]);
-    return [cols.join(',')].concat(data.map(function(row){return cols.map(function(c){var v=row[c]==null?'':String(row[c]);return v.indexOf(',')!==-1||v.indexOf('"')!==-1?'"'+v.replace(/"/g,'""')+'"':v}).join(',')})).join('\r\n');
-  }
 
-  function dlText(content,filename){var b=new Blob([content],{type:'text/csv'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=filename;a.click()}
   function dlXLSX(data,sheet,filename){if(!window.XLSX){alert('SheetJS not loaded');return}var ws=XLSX.utils.json_to_sheet(data);var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,sheet);XLSX.writeFile(wb,filename)}
 
-  $('btn-csv').addEventListener('click',function(){var data=buildExport(filteredPivoted);if(!data.length){alert('No data');return}dlText(toCSV(data),'attendance_'+$('r-from').value+'_'+$('r-to').value+'.csv')});
   $('btn-xls').addEventListener('click',function(){var data=buildExport(filteredPivoted);if(!data.length){alert('No data');return}dlXLSX(data,'Attendance','attendance_'+$('r-from').value+'_'+$('r-to').value+'.xlsx')});
 
   $('btn-reg-csv').addEventListener('click',function(){
@@ -1956,7 +1967,7 @@ function renderAvgHours(serverSeries){
     var aData=registerData.absent.map(function(r,i){
       return {'#':i+1,'Status':'Absent','Employee ID':r.name||'','Name':r.employee_name||'','Farm':r.custom_farm||'','Designation':r.designation||'','Detail':'','In':'','Out':''};
     });
-    dlText(toCSV(pData.concat(lData).concat(oData).concat(aData)),'attendance_register_'+to+'.csv');
+    dlXLSX(pData.concat(lData).concat(oData).concat(aData),'Register','attendance_register_'+to+'.xlsx');
   });
   $('btn-reg-xls').addEventListener('click',function(){
     var to=$('r-to').value;
@@ -1987,14 +1998,8 @@ function renderAvgHours(serverSeries){
       return {'#':i+1,'Employee ID':r.employee||'','Name':r.employee_name||'','Farm':r.custom_farm||'','Department':r.department||'','Leave Type':r.leave_type||'','From':r.from_date||'','To':r.to_date||'','Days':r.total_leave_days!=null?r.total_leave_days:'','Half Day':r.half_day?'Yes':''};
     });
   }
-  $('btn-leave-csv').addEventListener('click',function(){var data=buildLeaveExport();if(!data.length){alert('No leave data');return}dlText(toCSV(data),'on_leave_'+$('r-to').value+'.csv')});
   $('btn-leave-xls').addEventListener('click',function(){var data=buildLeaveExport();if(!data.length){alert('No leave data');return}dlXLSX(data,'On Leave','on_leave_'+$('r-to').value+'.xlsx')});
 
-  function exportDrawerCSV(d,pivoted){
-    var emp=d.employee||{};
-    var data=pivoted.map(function(r){var s=[];if(r.minutes_late)s.push(Math.round(r.minutes_late)+'m late');if(r.minutes_early)s.push(Math.round(r.minutes_early)+'m early');if(!s.length){if(r.in_time&&r.out_time)s.push('on time');else if(r.in_time)s.push('no OUT');else s.push('absent')}return {'Date':r.date,'Employee ID':emp.name||d.emp_id,'Name':emp.employee_name,'Farm':emp.custom_farm,'Shift':r.shift||'','Time IN':r.in_time?fdHM(r.in_time):'','Time OUT':r.out_time?fdHM(r.out_time):'','Hours':r.hours_worked!=null?fmtHp(r.hours_worked):'','Status':s.join(', ')}});
-    dlText(toCSV(data),'history_'+(emp.name||d.emp_id)+'_'+d.from_date+'_'+d.to_date+'.csv');
-  }
   function exportDrawerXLS(d,pivoted){
     var emp=d.employee||{};
     var data=pivoted.map(function(r){var s=[];if(r.minutes_late)s.push(Math.round(r.minutes_late)+'m late');if(r.minutes_early)s.push(Math.round(r.minutes_early)+'m early');if(!s.length){if(r.in_time&&r.out_time)s.push('on time');else if(r.in_time)s.push('no OUT');else s.push('absent')}return {'Date':r.date,'Employee ID':emp.name||d.emp_id,'Name':emp.employee_name,'Farm':emp.custom_farm,'Shift':r.shift||'','Time IN':r.in_time?fdHM(r.in_time):'','Time OUT':r.out_time?fdHM(r.out_time):'','Hours':r.hours_worked!=null?fmtHp(r.hours_worked):'','Status':s.join(', ')}});
@@ -2105,7 +2110,8 @@ function renderAvgHours(serverSeries){
       return false;
     }
     attachSearchSelect('att-search',
-      function(q){ return opts(registerData.absent, q, function(r){
+      // the list on screen: a date-range scan's employees when one is showing
+      function(q){ return opts((window._attRangeOn && window._attRangeEmps) ? window._attRangeEmps : registerData.absent, q, function(r){
         return (r.custom_farm||'')+(r.designation?' · '+r.designation:''); }); },
       function(o){ tick('#att-checklist','att-chk',o.id); if(window.filterAttChecklist) filterAttChecklist(); },
       function(){ if(window.filterAttChecklist) filterAttChecklist(); });
@@ -2123,6 +2129,37 @@ function renderAvgHours(serverSeries){
         return opts(rows, q, function(r){ return (r.custom_farm||r.farm||'')+(r.shift?' · '+r.shift:''); });
       },
       function(o){ var s=$('tile-inline-search'); if(s){ s.value=o.id; if(s.oninput) s.oninput(); } });
+
+    // the rest of the page's search boxes: the employees in their own table,
+    // listed as soon as the box has focus; picking one filters to them
+    function people(rows, idKey){
+      var seen={}, out=[];
+      (rows||[]).forEach(function(r){
+        var id=r[idKey||'name']||r.employee||r.name; if(!id || seen[id]) return;
+        seen[id]=1; out.push({name:id, employee_name:r.employee_name, custom_farm:r.custom_farm||r.farm, designation:r.designation});
+      });
+      return out;
+    }
+    function pickInto(inputId, after){
+      return function(o){ var s=$(inputId); if(s){ s.value=o.id; } after(); };
+    }
+    var unitMeta=function(r){ return (r.custom_farm||'')+(r.designation?' · '+r.designation:''); };
+
+    attachSearchSelect('r-search',
+      function(q){ return opts(people(pivotRows(allRows), 'employee'), q, unitMeta); },
+      pickInto('r-search', function(){ renderTable(); }));
+    attachSearchSelect('present-search',
+      function(q){ return opts(people(registerData.present), q, unitMeta); },
+      pickInto('present-search', function(){ window.filterPresent(); }));
+    attachSearchSelect('absent-search',
+      function(q){ return opts(people(registerData.absent), q, unitMeta); },
+      pickInto('absent-search', function(){ window.filterAbsent(); }));
+    attachSearchSelect('leave-search',
+      function(q){ return opts(people((typeof leaveData!=='undefined' && leaveData.rows) || registerData.on_leave, 'employee'), q, unitMeta); },
+      pickInto('leave-search', function(){ window.filterLeave(); }));
+    attachSearchSelect('req-search',
+      function(q){ return opts(people(_reqRows, 'employee'), q, unitMeta); },
+      pickInto('req-search', function(){ renderRequests(); }));
   })();
 
 
@@ -2438,17 +2475,23 @@ function renderAvgHours(serverSeries){
     var CHUNK   = pickedDates.length>1 ? Math.max(10, Math.floor(75/pickedDates.length)) : 75;
     var batches = [];
     for(var bi=0; bi<allIds.length; bi+=CHUNK){ batches.push(allIds.slice(bi, bi+CHUNK)); }
-    var agg = {ok:0, err:0, replaced:0, offSkipped:0, offMarked:0, okIds:[], failures:[]};
+    var agg = {ok:0, err:0, okIds:[], failures:[], requests:[]};
 
     function attFinish(){
       var msg = '<div style="padding:10px 14px;border-radius:6px;background:'+(agg.err?'#fef2f2':'#ecfdf5')+
                 ';border:1px solid '+(agg.err?'#fecaca':'#a7f3d0')+';font-size:13px">';
-      msg += '<strong>'+(agg.err?'PARTIAL SUCCESS':'DONE')+'</strong>'+(reason?' — '+esc(reason):'')+'<br>';
-      msg += agg.ok+' attendance records submitted for '+
+      msg += '<strong>'+(agg.err?'PARTIAL SUCCESS':'SENT FOR APPROVAL')+'</strong>'+(reason?' — '+esc(reason):'')+'<br>';
+      msg += agg.ok+' attendance request'+(agg.ok===1?'':'s')+' for '+
              esc(pickedDates.length ? (pickedDates.length+' date(s): '+pickedDates.join(', ')) : attDate)+'.';
-      if(agg.replaced){ msg += ' '+agg.replaced+' existing Absent record'+(agg.replaced>1?'s':'')+' cancelled and replaced.'; }
-      if(agg.offSkipped){ msg += ' '+agg.offSkipped+' skipped — weekly off / holiday (never marked on a rest day).'; }
-      if(agg.offMarked){ msg += ' <strong>'+agg.offMarked+' written on a REST DAY</strong> (week-off override was on).'; }
+      var byApprover={}, direct=0;
+      agg.requests.forEach(function(r){
+        if(r.submitted){ direct++; return; }
+        byApprover[r.approver]=(byApprover[r.approver]||0)+1;
+      });
+      Object.keys(byApprover).forEach(function(a){
+        msg += '<br>&nbsp;• '+esc(a)+': '+byApprover[a]+' pending approval';
+      });
+      if(direct){ msg += '<br>&nbsp;• '+direct+' marked Present (no approver set)'; }
       if(agg.err){
         msg += '<br>'+agg.err+' failed:<br>';
         msg += agg.failures.slice(0,25).map(function(r){
@@ -2460,54 +2503,40 @@ function renderAvgHours(serverSeries){
       $('att-feedback').innerHTML=msg;
       $('att-submit').disabled=false;
       if(!agg.err && !agg.failures.length) autoHideFeedback('att-feedback', 1000);
-      if(agg.ok>0){
-        agg.okIds.forEach(function(id){ markedEmployeeIds.add(id); });
-        registerData.absent = (registerData.absent||[]).filter(function(e){
-          return !markedEmployeeIds.has(e.name);
-        });
-        // if a date-range scan is on screen, keep that view and drop the rows we just
-        // marked; otherwise fall back to the dashboard-date list
-        if(window._attRangeEmps && window._attRangeEmps.length){
-          window._attRangeEmps=window._attRangeEmps.filter(function(e){
-            return !markedEmployeeIds.has(e.name);
-          });
-          renderAttChecklist(window._attRangeEmps);
-        } else {
-          // range mode: re-scan with the new filters instead of dropping back to the
-    // dashboard-date list (keeps the picked dates)
-    if(window._attRangeOn && window.attFindOpenDates){ window.attFindOpenDates(true); }
-    else { renderAttChecklist(); }
-        }
-        load();
-      }
+      // pending ones stay on the absent list until approved; ones with no
+      // approver were marked straight away, so the register is reloaded
+      if(agg.ok>0) loadPendingRequests();
+      if(agg.requests.some(function(r){return r.submitted})) load();
     }
 
     function attSend(idx){
       if(idx >= batches.length){ attFinish(); return; }
-      $('att-feedback').innerHTML='<div class="info-box">Submitting '+allIds.length+
-        ' attendance records'+reasonNote+'… batch '+(idx+1)+' of '+batches.length+
-        ' ('+agg.ok+' done)</div>';
-      fetch('/api/method/upande_ta.upande_ta.api.attendance_insights.attendance_mark', {
+      $('att-feedback').innerHTML='<div class="info-box">Requesting attendance for '+allIds.length+
+        ' employee(s)'+reasonNote+'… batch '+(idx+1)+' of '+batches.length+
+        ' ('+agg.ok+' sent)</div>';
+      fetch('/api/method/upande_ta.upande_ta.api.attendance_request_flow.raise_requests', {
         method: 'POST',
         headers: {'Content-Type':'application/x-www-form-urlencoded','X-Frappe-CSRF-Token': csrf},
         body: 'emp_ids='+encodeURIComponent(batches[idx].join(','))+
               '&att_date='+encodeURIComponent(attDate)+
-              (pickedDates.length ? '&att_dates='+encodeURIComponent(pickedDates.join(','))+'&only_gaps=1' : '')+
+              (pickedDates.length ? '&att_dates='+encodeURIComponent(pickedDates.join(',')) : '')+
               '&reason='+encodeURIComponent(reason)+
-              (allowOff ? '&allow_off=1' : '')+
-              '&status=Present'
+              (allowOff ? '&allow_off=1' : '')
       })
       .then(function(r){return r.json()})
       .then(function(res){
         var d = res.message || {};
-        agg.ok       += (d.ok_count || 0);
-        agg.err      += Math.max(0, (d.err_count || 0) - (d.off_skipped || 0));
-        agg.replaced += (d.replaced_count || 0);
-        agg.offSkipped += (d.off_skipped || 0);
-        agg.offMarked  += (d.off_marked || 0);
+        if(d.error){
+          agg.err += batches[idx].length;
+          agg.failures.push({employee:'batch '+(idx+1), error:d.error});
+          attSend(idx+1);
+          return;
+        }
+        agg.ok  += (d.ok_count || 0);
+        agg.err += (d.err_count || 0);
         (d.results || []).forEach(function(r){
-          if(r.ok) agg.okIds.push(r.employee);
-          else if(!r.skipped_off) agg.failures.push(r);
+          if(r.ok){ agg.okIds.push(r.employee); agg.requests.push(r); }
+          else agg.failures.push({employee:(r.employee_name||r.employee), error:r.error});
         });
         attSend(idx+1);
       })
@@ -2521,6 +2550,158 @@ function renderAvgHours(serverSeries){
     attSend(0);
   });
 
+
+  // ── ATTENDANCE REQUESTS TAB ──
+  // Every pending request, one row each; the ones the signed-in user is the
+  // approver of carry a checkbox and can be approved or rejected from here.
+  var _reqRows=[];
+  function fmtD(d){ var p=String(d||'').split('-'); return p.length===3 ? p[2]+'-'+p[1]+'-'+p[0] : d; }
+
+  function loadPendingRequests(){
+    var mine=$('req-scope').value==='mine';
+    var qs=new URLSearchParams({company:mine?'':($('r-company').value||''), farm:mine?'':($('r-farm').value||''), mine:mine?1:0}).toString();
+    fetch('/api/method/upande_ta.upande_ta.api.attendance_request_flow.pending_requests?'+qs)
+      .then(function(r){return r.json()})
+      .then(function(res){
+        _reqRows=res.message||[];
+        fillRequestUnits();
+        renderRequests();
+        refreshRequestBadge(mine ? _reqRows : null);
+      })
+      .catch(function(){ $('req-count').textContent='—'; });
+  }
+  window.loadPendingRequests=loadPendingRequests;
+
+  function refreshRequestBadge(mineRows){
+    function set(n){ $('req-badge').textContent = n ? String(n) : ''; }
+    if(mineRows){ set(mineRows.length); return; }
+    fetch('/api/method/upande_ta.upande_ta.api.attendance_request_flow.pending_requests?mine=1')
+      .then(function(r){return r.json()}).then(function(res){ set((res.message||[]).length); }).catch(function(){});
+  }
+
+  // the units the loaded requests come from, keeping the one picked
+  function fillRequestUnits(){
+    var sel=$('req-farm'), cur=sel.value, units={};
+    _reqRows.forEach(function(r){ if(r.farm) units[r.farm]=(units[r.farm]||0)+1; });
+    var names=Object.keys(units).sort();
+    sel.innerHTML='<option value="">All Units</option>'+names.map(function(u){
+      return '<option value="'+esc(u)+'">'+esc(u)+' ('+units[u]+')</option>';
+    }).join('');
+    sel.value = units[cur] ? cur : '';
+  }
+
+  function renderRequests(){
+    var q=($('req-search').value||'').toLowerCase().trim();
+    var unit=$('req-farm').value;
+    var rows=_reqRows.filter(function(r){
+      if(unit && r.farm!==unit) return false;
+      return !q || String(r.employee_name||'').toLowerCase().indexOf(q)>=0 || String(r.employee||'').toLowerCase().indexOf(q)>=0;
+    });
+    var mineN=rows.filter(function(r){return r.can_approve}).length;
+    $('req-count').textContent = rows.length + (mineN && mineN!==rows.length ? ' · '+mineN+' yours' : '');
+    if(!rows.length){
+      $('req-tbody').innerHTML='<tr><td colspan="11" class="empty">None</td></tr>';
+      return;
+    }
+    $('req-tbody').innerHTML=rows.map(function(r){
+      var dates=r.from_date===r.to_date ? fmtD(r.from_date) : fmtD(r.from_date)+' → '+fmtD(r.to_date);
+      return '<tr'+(r.can_approve?' class="req-mine"':'')+'>'+
+        '<td>'+(r.can_approve?'<input type="checkbox" class="req-chk" data-name="'+esc(r.name)+'">':'')+'</td>'+
+        '<td>'+esc(r.employee_name||r.employee)+' <span style="color:var(--text-3)">'+esc(r.employee)+'</span></td>'+
+        '<td>'+esc(r.farm||'')+'</td>'+
+        '<td>'+esc(dates)+'</td>'+
+        '<td>'+esc(r.days)+'</td>'+
+        '<td>'+esc(r.explanation||'')+'</td>'+
+        '<td><strong>'+esc(r.approver_name||r.approver||'—')+'</strong></td>'+
+        '<td>'+esc(r.requested_by||'')+'</td>'+
+        '<td><span class="req-state">'+esc(r.state)+'</span></td>'+
+        '<td><a href="/app/attendance-request/'+encodeURIComponent(r.name)+'" target="_blank">'+esc(r.name)+'</a></td>'+
+        '<td class="req-row-acts">'+(r.can_approve ?
+          '<button type="button" class="btn req-row-btn req-row-ok" data-act="Approve" data-name="'+esc(r.name)+'">APPROVE</button>'+
+          '<button type="button" class="btn req-row-btn req-row-no" data-act="Reject" data-name="'+esc(r.name)+'">REJECT</button>' : '')+
+        '</td>'+
+      '</tr>';
+    }).join('');
+  }
+
+  // the ticked rows, or the one row whose own button was pressed
+  function actOnRequests(action, only){
+    var names=only ? [only] : [];
+    if(!only) document.querySelectorAll('.req-chk:checked').forEach(function(c){ names.push(c.getAttribute('data-name')); });
+    if(!names.length){
+      $('req-feedback').innerHTML='<div class="alert">No requests selected.</div>';
+      return;
+    }
+    var csrf=''; try{ csrf=frappe.csrf_token||''; }catch(e){}
+    if(!csrf){ var m=document.cookie.match(/csrftoken=([^;]+)/); csrf=m?m[1]:''; }
+    $('req-approve').disabled=$('req-reject').disabled=true;
+    document.querySelectorAll('.req-row-btn').forEach(function(b){ b.disabled=true; });
+    $('req-feedback').innerHTML='<div class="info-box">'+(action==='Approve'?'Approving ':'Rejecting ')+names.length+' request(s)…</div>';
+    var body='action='+encodeURIComponent(action)+'&names='+encodeURIComponent(JSON.stringify(names));
+    // "Failed to fetch" is a dropped connection — the server restarting, a
+    // network blip — not a refusal. Sending again is safe: a request already
+    // approved or rejected offers no transition and is reported as such.
+    function post(attempt){
+      return fetch('/api/method/upande_ta.upande_ta.api.attendance_request_flow.act_on_requests', {
+        method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded','X-Frappe-CSRF-Token':csrf},
+        body:body
+      }).then(function(r){
+        if(r.status>=502 && attempt<4) throw new TypeError('server unavailable');
+        return r.json();
+      }).catch(function(e){
+        if(!(e instanceof TypeError) || attempt>=4) throw e;
+        $('req-feedback').innerHTML='<div class="info-box">Connection lost — retrying ('+attempt+'/4)…</div>';
+        return new Promise(function(res){ setTimeout(res, 1500*attempt); }).then(function(){ return post(attempt+1); });
+      });
+    }
+    post(1)
+    .then(function(res){
+      var d=res.message||{};
+      var failed=(d.results||[]).filter(function(r){return !r.ok});
+      var msg='<div style="padding:10px 14px;border-radius:6px;background:'+(failed.length?'#fef2f2':'#ecfdf5')+
+        ';border:1px solid '+(failed.length?'#fecaca':'#a7f3d0')+';font-size:13px"><strong>'+
+        (action==='Approve'?'APPROVED':'REJECTED')+'</strong> '+(d.ok_count||0)+' request(s)'+
+        (action==='Approve' && d.ok_count ? ' — marked Present.' : '.');
+      if(failed.length){
+        msg+='<br>'+failed.length+' failed:<br>'+failed.slice(0,25).map(function(r){
+          return '&nbsp;• '+esc(r.employee_name||r.name)+': '+esc(r.error||'error');
+        }).join('<br>');
+      }
+      $('req-feedback').innerHTML=msg+'</div>';
+      if(!failed.length) autoHideFeedback('req-feedback', 2500);
+      loadPendingRequests();
+      if(action==='Approve' && d.ok_count) load();
+    })
+    .catch(function(e){
+      $('req-feedback').innerHTML='<div class="alert">'+
+        (e instanceof TypeError ? 'Could not reach the server. Nothing was changed for requests still listed — try again.' : esc(e.message))+
+        '</div>';
+      loadPendingRequests();
+    })
+    .finally(function(){
+      $('req-approve').disabled=$('req-reject').disabled=false;
+      document.querySelectorAll('.req-row-btn').forEach(function(b){ b.disabled=false; });
+    });
+  }
+
+  $('req-scope').addEventListener('change', loadPendingRequests);
+  $('req-refresh').addEventListener('click', loadPendingRequests);
+  $('req-search').addEventListener('input', renderRequests);
+  $('req-farm').addEventListener('change', renderRequests);
+  // only the rows on screen: search and unit narrow what Select All ticks
+  $('req-select-all').addEventListener('click', function(){ document.querySelectorAll('#req-tbody .req-chk').forEach(function(c){c.checked=true}); });
+  $('req-clear').addEventListener('click', function(){ document.querySelectorAll('.req-chk').forEach(function(c){c.checked=false}); });
+  $('req-approve').addEventListener('click', function(){ actOnRequests('Approve'); });
+  $('req-tbody').addEventListener('click', function(e){
+    var b=e.target.closest('.req-row-btn'); if(!b || b.disabled) return;
+    actOnRequests(b.getAttribute('data-act'), b.getAttribute('data-name'));
+  });
+  $('req-reject').addEventListener('click', function(){ actOnRequests('Reject'); });
+  ['r-company','r-farm'].forEach(function(id){ var el=$(id); if(el) el.addEventListener('change', function(){
+    if($('req-scope').value==='all') loadPendingRequests();
+  }); });
+  refreshRequestBadge();
 
   // ── SHIFT CHANGE SECTION ──
   function populateShiftFarmDropdown(farms){
@@ -3047,6 +3228,598 @@ function renderAvgHours(serverSeries){
     });
   })();
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // BIOMETRIC TEMPLATES — enrolment register, per-reader matrix, gaps and
+  // attendance anomalies (api/biometric_templates.py). A GET fetch: a POST
+  // from a cached page fails the CSRF check. Only the visible sub-tab is
+  // drawn, a page of rows at a time.
+  // ══════════════════════════════════════════════════════════════════════════
+  (function(){
+    var EP='/api/method/upande_ta.upande_ta.api.biometric_templates.biometric_templates';
+    var PAGE=600;
+    var BT={data:null, index:{}, tab:'templates', kind:'', mode:'on', seq:0,
+            timer:null, typing:null, key:'', shown:{}, absent:[], rows:[], rows2:[]};
+    var EMD='<span class="bt-none">&mdash;</span>';
+    function dash(v){ return (v===null||v===undefined||v==='')?EMD:esc(v); }
+    function isOpen(){ var p=$('panel-templates'); return !!(p && p.classList.contains('active')); }
+    function val(id){ var el=$(id); return el ? (el.value||'') : ''; }
+    function filtersKey(){ return [val('bt-from'),val('bt-to'),val('r-company'),val('r-farm'),val('r-emptype')].join('|'); }
+    function slug(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'all-companies'; }
+
+    function scopeLabel(){
+      var d=BT.data;
+      if(d){
+        if(d.company) return d.company;
+        if((d.companies||[]).length===1) return d.companies[0];
+        if((d.companies||[]).length) return d.companies.join(' · ');
+      }
+      return val('r-company') || window.ATT_DEFAULT_COMPANY || '';
+    }
+    function fileScope(){
+      var d=BT.data;
+      if(d && d.company) return slug(d.company);
+      if(d && (d.companies||[]).length===1) return slug(d.companies[0]);
+      if(!d && (val('r-company')||window.ATT_DEFAULT_COMPANY)) return slug(val('r-company')||window.ATT_DEFAULT_COMPANY);
+      return 'all-companies';
+    }
+    function paintTitle(){
+      var h=$('bt-title'); if(!h) return;
+      var lbl=scopeLabel(), farm=BT.data ? BT.data.farm : val('r-farm');
+      h.textContent='BIOMETRIC TEMPLATES'+(lbl?' — '+lbl:'')+(farm?' · '+farm:'');
+    }
+
+    // ── server message out of Frappe's JSON-in-JSON envelope ──
+    function serverMessage(txt){
+      try{
+        var body=JSON.parse(txt), out=[];
+        if(body._server_messages){
+          JSON.parse(body._server_messages).forEach(function(m){
+            try{ m=JSON.parse(m).message; }catch(e){}
+            if(m) out.push(String(m).replace(/<[^>]*>/g,''));
+          });
+        }
+        if(!out.length && body.exception) out.push(String(body.exception));
+        return out.join(' ');
+      }catch(e){ return ''; }
+    }
+
+    // ── skeleton, in the Insights shimmer ──
+    function skeleton(){
+      var s='';
+      for(var i=0;i<10;i++) s+='<div class="lost-sum-i is-zero"><div class="sk sk-lbl"></div><div class="sk sk-val"></div></div>';
+      $('bt-sum').innerHTML=s;
+      $('bt-devs').innerHTML='<span class="bt-chip"><span class="sk sk-lbl" style="width:160px;margin:0"></span></span>'+
+        '<span class="bt-chip"><span class="sk sk-lbl" style="width:160px;margin:0"></span></span>';
+      var rows='';
+      for(var r=0;r<12;r++){
+        rows+='<tr>';
+        for(var c=0;c<7;c++) rows+='<td><span class="sk sk-lbl" style="margin:0;width:'+(45+((r*7+c*23)%45))+'%"></span></td>';
+        rows+='</tr>';
+      }
+      $('bt-thead').innerHTML='';
+      $('bt-tbody').innerHTML=rows;
+      $('bt-part').hidden=true; $('bt-none-sec').hidden=true; $('bt-freq').hidden=true;
+      ['templates','readers','missing','anomalies'].forEach(function(k){ var n=$('bt-n-'+k); if(n) n.innerHTML='&ndash;'; });
+    }
+
+    // ── fetch ──
+    function load(){
+      var seq=++BT.seq;
+      BT.key=filtersKey();
+      var qs=new URLSearchParams({from_date:val('bt-from')||todayISO(), to_date:val('bt-to')||todayISO(),
+        company:val('r-company'), farm:val('r-farm'), employment_type:val('r-emptype'), _:String(Date.now())}).toString();
+      $('bt-msg').innerHTML='';
+      paintTitle();
+      skeleton();
+      var status=0;
+      fetch(EP+'?'+qs, {method:'GET', credentials:'same-origin', headers:{'Accept':'application/json'}})
+        .then(function(r){ status=r.status; return r.text(); })
+        .then(function(txt){
+          if(seq!==BT.seq) return;
+          var note=serverMessage(txt), body=null;
+          try{ body=JSON.parse(txt); }catch(e){}
+          if(status!==200 || !body || !body.message){
+            BT.data=null; clearAll();
+            $('bt-msg').innerHTML='<div class="alert">'+esc(note || ('HTTP '+status))+'</div>';
+            return;
+          }
+          BT.data=body.message;
+          render();
+        })
+        .catch(function(e){
+          if(seq!==BT.seq) return;
+          BT.data=null; clearAll();
+          $('bt-msg').innerHTML='<div class="alert">'+esc(e && e.message ? e.message : e)+'</div>';
+        });
+    }
+    function schedule(force){
+      if(!isOpen()) return;
+      if(!force && BT.data && filtersKey()===BT.key) return;
+      if(BT.timer) clearTimeout(BT.timer);
+      BT.timer=setTimeout(function(){ BT.timer=null; load(); }, 140);
+    }
+    // page filters (company / unit / employment type) reload an open panel
+    window._reloadBT=function(){ BT.key=''; if(isOpen()) schedule(true); };
+
+    function clearAll(){
+      $('bt-sum').innerHTML=''; $('bt-devs').innerHTML='';
+      $('bt-thead').innerHTML=''; $('bt-tbody').innerHTML='';
+      $('bt-part').hidden=true; $('bt-none-sec').hidden=true; $('bt-freq').hidden=true;
+    }
+
+    // ── helpers over the compact payload ──
+    function readerName(i){ var d=(BT.data.devices||[])[i]; return d ? (d.location||d.device) : '?'; }
+    function seatOn(t,i){ for(var s=0;s<t.seats.length;s++){ if(t.seats[s][0]===i) return t.seats[s][1]; } return null; }
+    function sameness(t){
+      if(!t.dc) return {cls:'missing', label:'Not enrolled'};
+      if(t.dc===1) return {cls:'one', label:'One device only'};
+      if(t.sc===1) return {cls:'unique', label:'Same on all '+t.dc};
+      return {cls:'multi', label:'Differs across devices'};
+    }
+    var ST_CLS={'Unique':'unique','Duplicate':'dup','Multi-signature':'multi','Not enrolled':'missing',
+                'Off day':'off','On leave':'leave','Enrolled but absent':'absent'};
+    function pill(label, cls){ return '<span class="pill bt-pill bt-'+(cls||ST_CLS[label]||'missing')+'">'+esc(label)+'</span>'; }
+    function term(){ return val('bt-search').toLowerCase().trim(); }
+    function matches(t){
+      var q=term(); if(!q) return true;
+      return (t.e+' '+t.n+' '+(t.uid||'')+' '+(t.farm||'')+' '+(t.dept||'')+' '+(t.desig||'')+' '+(t.sig||'')+' '+t.st)
+        .toLowerCase().indexOf(q)>=0;
+    }
+    function unit(t){ return dash(t.farm)+(t.dept?'<span class="bt-unit-sub">'+esc(t.dept)+'</span>':''); }
+    function chip(label, cls){ return '<span class="bt-tag'+(cls?' '+cls:'')+'">'+esc(label)+'</span>'; }
+
+    // "enrolled but absent" travels as [employee, date, attendance]; the rest
+    // of the row is on the employee's template entry
+    function expandAbsent(){
+      var out=[], list=(BT.data.anomalies||{}).absent||[];
+      for(var i=0;i<list.length;i++){
+        var a=list[i], t=BT.index[a[0]]||{};
+        out.push({e:a[0], n:t.n||'', date:a[1], farm:t.farm||'', dept:t.dept||'', 'in':'', out:'', p:0, dev:'',
+                  att:a[2]||'', active:1, type:'Enrolled but absent', why:'No scan on a working day'});
+      }
+      return out;
+    }
+
+    // ── summary tiles: each one opens what it counts ──
+    var TILES=[
+      {k:'employees',        l:'Active employees',   c:'window', go:['templates','']},
+      {k:'enrolled',         l:'Enrolled',           c:'affected', go:['templates','']},
+      {k:'unique',           l:'Unique',             c:'unique', go:['templates','Unique']},
+      {k:'duplicate',        l:'Duplicates',         c:'total', hot:1, go:['templates','Duplicate']},
+      {k:'multi_signature',  l:'Multi-signature',    c:'noscan', hot:1, go:['templates','Multi-signature']},
+      {k:'not_enrolled',     l:'Not enrolled',       c:'behaviour', hot:1, go:['missing']},
+      {k:'partly_enrolled',  l:'Partly enrolled',    c:'behaviour', hot:1, go:['missing']},
+      {k:'off_day_punches',  l:'Off-day punches',    c:'frequent', hot:1, go:['anomalies','Off day']},
+      {k:'on_leave_punches', l:'On-leave punches',   c:'affected', hot:1, go:['anomalies','On leave']},
+      {k:'enrolled_absent',  l:'Enrolled but absent',c:'total', hot:1, go:['anomalies','Enrolled but absent']}
+    ];
+    function tiles(s){
+      $('bt-sum').innerHTML=TILES.map(function(t,i){
+        var v=s[t.k]||0;
+        return '<button type="button" class="lost-sum-i bt-tile lost-sum-i--'+t.c+(t.hot&&!v?' is-zero':'')+'" data-i="'+i+'">'+
+          '<small>'+esc(t.l)+'</small><b>'+fmt(v)+'</b></button>';
+      }).join('');
+    }
+
+    // ── reader chips + the inactive-enrolment button ──
+    function orphanPeople(){
+      var who={}, order=[];
+      (BT.data.orphans||[]).forEach(function(o){
+        var rec=who[o.employee];
+        if(!rec){ rec=who[o.employee]={code:o.employee, name:o.employee_name||'', status:o.status||'', on:[]}; order.push(o.employee); }
+        var rn=readerName(o.reader); if(rec.on.indexOf(rn)<0) rec.on.push(rn);
+      });
+      return order.map(function(k){ return who[k]; });
+    }
+    function devices(){
+      var d=BT.data, html='';
+      var orph=d.orphans||[];
+      if(orph.length){
+        var people=orphanPeople();
+        html+='<button type="button" class="bt-chip bt-orph-btn" id="bt-orph-btn"><b>'+fmt(orph.length)+'</b> live enrolments belong to <b>'+
+          fmt(people.length)+'</b> employees who are no longer active</button>';
+      }
+      (d.devices||[]).forEach(function(r){
+        var on=r.status==='Online';
+        html+='<span class="bt-chip'+(on?' on':'')+'" title="'+esc(r.sn+(r.last_seen?' · '+String(r.last_seen).slice(0,16):''))+'">'+
+          '<span class="sb-dev-dot"></span><b>'+esc(r.location||r.device)+'</b> '+fmt(r.active_enrolled)+
+          (r.not_enrolled?' <i>&minus;'+fmt(r.not_enrolled)+'</i>':'')+
+          (r.inactive_enrolled?' <em>'+fmt(r.inactive_enrolled)+' inactive</em>':'')+'</span>';
+      });
+      $('bt-devs').innerHTML=html;
+
+      var sel=$('bt-reader'), cur=sel.value;
+      sel.innerHTML='<option value="">All devices</option>'+(d.devices||[]).map(function(r,i){
+        return '<option value="'+i+'">'+esc(r.location||r.device)+'</option>'; }).join('');
+      sel.value=(cur!=='' && cur<(d.devices||[]).length) ? cur : '';
+    }
+
+    // the popover lives on <body>: the card clips its overflow
+    var pop=null;
+    function closePop(){ if(pop){ pop.remove(); pop=null; } }
+    function openPop(btn){
+      closePop();
+      var people=orphanPeople();
+      pop=document.createElement('div');
+      pop.className='bt-pop';
+      pop.innerHTML='<div class="bt-pop-head">NO LONGER ACTIVE <span class="tag">'+people.length+'</span></div><div class="bt-pop-list">'+
+        people.map(function(p){
+          return '<div class="bt-pop-row"><span class="t-code">'+esc(p.code)+'</span><span class="bt-pop-name">'+esc(p.name)+'</span>'+
+            pill(p.status||'Unknown','missing')+'<span class="bt-pop-on">'+p.on.map(function(n){ return chip(n); }).join('')+'</span></div>';
+        }).join('')+'</div>';
+      document.body.appendChild(pop);
+      var r=btn.getBoundingClientRect();
+      pop.style.left=Math.max(8, Math.min(r.left, window.innerWidth-pop.offsetWidth-8))+'px';
+      var below=window.innerHeight-r.bottom;
+      pop.style.top=(below<Math.min(pop.offsetHeight,360)+12 && r.top>below ? Math.max(8, r.top-pop.offsetHeight-6) : r.bottom+6)+'px';
+    }
+    document.addEventListener('click', function(e){
+      var b=e.target.closest ? e.target.closest('#bt-orph-btn') : null;
+      if(b){ if(pop) closePop(); else openPop(b); return; }
+      if(pop && !pop.contains(e.target)) closePop();
+    });
+    document.addEventListener('keydown', function(e){ if(e.key==='Escape') closePop(); });
+    window.addEventListener('resize', closePop);
+    window.addEventListener('scroll', function(e){ if(pop && !pop.contains(e.target)) closePop(); }, true);
+
+    // ── row sets per sub-tab (also what the Excel export writes) ──
+    function templateRows(){
+      var st=val('bt-status'), rank={'Duplicate':0,'Multi-signature':1,'Not enrolled':2,'Unique':3};
+      return BT.data.templates.filter(function(t){
+        if(st==='issues' && t.st==='Unique') return false;
+        if(st && st!=='issues' && t.st!==st) return false;
+        return matches(t);
+      }).sort(function(a,b){ return (rank[a.st]-rank[b.st]) || (a.e<b.e?-1:1); });
+    }
+    function readerIdx(){ var v=val('bt-reader'); return v==='' ? -1 : parseInt(v,10); }
+    function readerRows(){
+      var idx=readerIdx();
+      return BT.data.templates.filter(function(t){
+        if(idx>=0){
+          var here=seatOn(t,idx);
+          if(BT.mode==='on' && here===null) return false;
+          if(BT.mode==='off' && here!==null) return false;
+        }
+        return matches(t);
+      }).sort(function(a,b){
+        var ra=sameness(a).cls==='multi'?0:1, rb=sameness(b).cls==='multi'?0:1;
+        return (ra-rb) || (a.e<b.e?-1:1);
+      });
+    }
+    function missingSets(){
+      var none=[], part=[];
+      (BT.data.not_enrolled||[]).forEach(function(id){ var t=BT.index[id]; if(t && matches(t)) none.push(t); });
+      (BT.data.partly_enrolled||[]).forEach(function(id){ var t=BT.index[id]; if(t && matches(t)) part.push(t); });
+      return {none:none, part:part};
+    }
+    function anomalyRows(){
+      var a=BT.data.anomalies||{}, q=term();
+      var all=[].concat(a.off_day||[], a.on_leave||[], BT.absent);
+      return all.filter(function(r){
+        if(BT.kind && r.type!==BT.kind) return false;
+        if(q && (r.e+' '+r.n+' '+(r.farm||'')+' '+(r.dept||'')+' '+r.why+' '+r.type+' '+r.date).toLowerCase().indexOf(q)<0) return false;
+        return true;
+      }).sort(function(x,y){
+        if(x.date!==y.date) return x.date<y.date?1:-1;
+        if(x.type!==y.type) return x.type==='On leave'?-1:(y.type==='On leave'?1:(x.type<y.type?1:-1));
+        return x.e<y.e?-1:1;
+      });
+    }
+
+    // ── table drawing, a page at a time ──
+    function paint(tbodyId, rows, cols, rowFn, key){
+      var tb=$(tbodyId);
+      var upto=Math.min(rows.length, BT.shown[key]||PAGE);
+      BT.shown[key]=upto;
+      var html='';
+      for(var i=0;i<upto;i++) html+=rowFn(rows[i]);
+      if(!rows.length) html='<tr class="bt-empty-row"><td colspan="'+cols+'">No match</td></tr>';
+      else if(upto<rows.length) html+='<tr class="bt-more-row"><td colspan="'+cols+'"><button type="button" class="btn q bt-more" data-key="'+key+'">SHOW '+
+        fmt(Math.min(PAGE, rows.length-upto))+' MORE &middot; '+fmt(rows.length-upto)+' LEFT</button></td></tr>';
+      tb.innerHTML=html;
+    }
+    function head(id, cols){ $(id).innerHTML='<tr>'+cols.map(function(c){ return '<th>'+esc(c)+'</th>'; }).join('')+'</tr>'; }
+
+    function drawTemplates(){
+      var rows=BT.rows=templateRows();
+      head('bt-thead',['Employee','Name','Unit','User ID','Biometric','Devices','Signature','Status']);
+      paint('bt-tbody', rows, 8, function(t){
+        var devs=t.seats.map(function(s){ return chip(readerName(s[0])); }).join('');
+        if(t.gaps.length) devs+=chip('missing '+t.gaps.length,'gap');
+        if(t.rm) devs+=chip(t.rm+' removed','mut');
+        var note='';
+        if(t.sw.length) note='same template as '+t.sw.map(function(x){ return x[0]+(x[1]?' '+x[1]:''); }).join(', ');
+        else if(t.su.length) note='user id shared with '+t.su.map(function(x){ return x[0]; }).join(', ');
+        else if(t.st==='Multi-signature') note=(t.vk.length?t.vk:['template']).join(', ').toLowerCase()+' differs by device';
+        return '<tr class="'+(t.st==='Duplicate'?'bt-row-dup':'')+'">'+
+          '<td class="t-code">'+esc(t.e)+'</td><td class="t-name">'+esc(t.n)+'</td><td>'+unit(t)+'</td>'+
+          '<td class="t-code">'+dash(t.uid)+'</td><td>'+(t.kinds.length?esc(t.kinds.join(', ')):EMD)+'</td>'+
+          '<td class="bt-chips">'+(devs||EMD)+'</td><td class="t-code">'+dash(t.sig)+'</td>'+
+          '<td>'+pill(t.st)+(note?'<span class="bt-mut bt-note">'+esc(note)+'</span>':'')+'</td></tr>';
+      }, 'templates');
+    }
+
+    function drawReaders(){
+      var d=BT.data, idx=readerIdx(), readers=d.devices||[], rows=BT.rows=readerRows();
+      $('bt-mode-row').hidden = idx<0;
+      if(idx<0){
+        head('bt-thead',['Employee','Name','Unit','User ID'].concat(readers.map(function(r){ return r.location||r.device; })).concat(['Template']));
+        paint('bt-tbody', rows, 5+readers.length, function(t){
+          var f=sameness(t), cells='';
+          for(var j=0;j<readers.length;j++){ var s=seatOn(t,j); cells+='<td class="t-code">'+(s===null?EMD:(s?esc(s):'<span class="bt-mut">empty</span>'))+'</td>'; }
+          return '<tr class="'+(f.cls==='multi'?'bt-row-diff':'')+'"><td class="t-code">'+esc(t.e)+'</td><td class="t-name">'+esc(t.n)+'</td>'+
+            '<td>'+unit(t)+'</td><td class="t-code">'+dash(t.uid)+'</td>'+cells+'<td>'+pill(f.label,f.cls)+'</td></tr>';
+        }, 'readers');
+      } else if(BT.mode==='on'){
+        head('bt-thead',['Employee','Name','Unit','User ID','Signature here','Also on','Template']);
+        paint('bt-tbody', rows, 7, function(t){
+          var here=seatOn(t,idx), also='', f=sameness(t);
+          t.seats.forEach(function(s){ if(s[0]===idx) return; var diff=s[1]!==here; also+=chip(readerName(s[0])+(diff?' ≠':''), diff?'gap':''); });
+          return '<tr class="'+(f.cls==='multi'?'bt-row-diff':'')+'"><td class="t-code">'+esc(t.e)+'</td><td class="t-name">'+esc(t.n)+'</td>'+
+            '<td>'+unit(t)+'</td><td class="t-code">'+dash(t.uid)+'</td><td class="t-code">'+esc(here||'')+
+            (t.kinds.length?'<span class="bt-mut"> · '+esc(t.kinds[0])+'</span>':'')+'</td><td class="bt-chips">'+(also||EMD)+'</td><td>'+pill(f.label,f.cls)+'</td></tr>';
+        }, 'readers');
+      } else {
+        head('bt-thead',['Employee','Name','Unit','Designation','Enrolled on','Status']);
+        paint('bt-tbody', rows, 6, function(t){
+          var on=t.seats.map(function(s){ return chip(readerName(s[0])); }).join('');
+          return '<tr><td class="t-code">'+esc(t.e)+'</td><td class="t-name">'+esc(t.n)+'</td><td>'+unit(t)+'</td>'+
+            '<td>'+dash(t.desig)+'</td><td class="bt-chips">'+(on||EMD)+'</td><td>'+(t.dc?pill('Missing here','multi'):pill('Not enrolled'))+'</td></tr>';
+        }, 'readers');
+      }
+    }
+
+    function drawMissing(){
+      var sets=missingSets();
+      BT.rows=sets.none; BT.rows2=sets.part;
+      $('bt-none-sec').hidden=false; $('bt-none-n').textContent=fmt(sets.none.length);
+      head('bt-thead',['Employee','Name','Unit','Designation','Employment','Joined']);
+      paint('bt-tbody', sets.none, 6, function(t){
+        return '<tr><td class="t-code">'+esc(t.e)+'</td><td class="t-name">'+esc(t.n)+'</td><td>'+unit(t)+'</td>'+
+          '<td>'+dash(t.desig)+'</td><td>'+dash(t.emp_type)+'</td><td class="t-code">'+dash(t.joined)+'</td></tr>';
+      }, 'none');
+      $('bt-part').hidden=false; $('bt-part-n').textContent=fmt(sets.part.length);
+      head('bt-thead2',['Employee','Name','Unit','User ID','On devices','Missing from']);
+      paint('bt-tbody2', sets.part, 6, function(t){
+        return '<tr><td class="t-code">'+esc(t.e)+'</td><td class="t-name">'+esc(t.n)+'</td><td>'+unit(t)+'</td>'+
+          '<td class="t-code">'+dash(t.uid)+'</td><td class="bt-chips">'+t.seats.map(function(s){ return chip(readerName(s[0])); }).join('')+'</td>'+
+          '<td class="bt-chips">'+t.gaps.map(function(g){ return chip(readerName(g),'gap'); }).join('')+'</td></tr>';
+      }, 'part');
+    }
+
+    // who and what keeps coming back, over the rows currently filtered
+    function frequent(rows){
+      var box=$('bt-freq');
+      if(!rows.length){ box.hidden=true; box.innerHTML=''; return; }
+      var people={}, reasons={}, k;
+      rows.forEach(function(r){
+        var p=people[r.e]||(people[r.e]={name:r.n||r.e, code:r.e, c:0}); p.c++;
+        var why=r.type+' · '+r.why; reasons[why]=(reasons[why]||0)+1;
+      });
+      var pl=[], rl=[];
+      for(k in people) pl.push(people[k]);
+      for(k in reasons) rl.push({why:k, c:reasons[k]});
+      pl.sort(function(a,b){ return b.c-a.c || (a.code<b.code?-1:1); });
+      rl.sort(function(a,b){ return b.c-a.c || (a.why<b.why?-1:1); });
+      var html='<span class="bt-freq-lbl">MOST FREQUENT</span>', shown=0;
+      for(var i=0;i<pl.length && i<8;i++){
+        if(pl[i].c<2 && shown) break;
+        html+='<button type="button" class="bt-freq-chip" data-code="'+esc(pl[i].code)+'">'+esc(pl[i].name)+' <i>&times;'+fmt(pl[i].c)+'</i></button>';
+        shown++;
+      }
+      html+='<span class="bt-freq-sep"></span><span class="bt-freq-lbl">REASONS</span>';
+      for(i=0;i<rl.length && i<6;i++) html+='<span class="bt-freq-chip">'+esc(rl[i].why)+' <i>&times;'+fmt(rl[i].c)+'</i></span>';
+      box.innerHTML=html; box.hidden=false;
+    }
+
+    function drawAnomalies(){
+      var rows=BT.rows=anomalyRows();
+      head('bt-thead',['Date','Type','Employee','Name','Unit','Reason','First in','Last out','Punches','Device','Attendance']);
+      paint('bt-tbody', rows, 11, function(a){
+        var cls=ST_CLS[a.type];
+        var why=esc(a.why)+(a.list?'<span class="bt-mut"> · '+esc(a.list)+'</span>':'')+
+          (a.lv_from?'<span class="bt-mut"> · '+esc(fdShort(a.lv_from))+' → '+esc(fdShort(a.lv_to))+'</span>':'');
+        return '<tr class="bt-row-'+cls+'"><td class="t-code">'+esc(a.date)+'</td><td>'+pill(a.type)+'</td>'+
+          '<td class="t-code">'+esc(a.e)+'</td><td class="t-name">'+esc(a.n)+(a.active?'':' '+chip('inactive','mut'))+'</td>'+
+          '<td>'+unit(a)+'</td><td>'+why+'</td>'+
+          '<td class="t-time">'+dash(a['in'])+'</td><td class="t-time">'+(a.p>1?esc(a.out):EMD)+'</td>'+
+          '<td class="t-code">'+(a.p||EMD)+'</td><td>'+dash(a.dev)+'</td><td>'+dash(a.att)+'</td></tr>';
+      }, 'anomalies');
+      frequent(rows);
+    }
+
+    // ── what is on screen ──
+    function counts(){
+      $('bt-n-templates').textContent=fmt(templateRows().length);
+      $('bt-n-readers').textContent=fmt(readerRows().length);
+      var m=missingSets(); $('bt-n-missing').textContent=fmt(m.none.length+m.part.length);
+      $('bt-n-anomalies').textContent=fmt(anomalyRows().length);
+    }
+    function showControls(){
+      var t=BT.tab;
+      $('bt-f-status').hidden = t!=='templates';
+      $('bt-f-reader').hidden = t!=='readers';
+      $('bt-devs').hidden = !(t==='templates' || t==='readers');
+      $('bt-mode-row').hidden = !(t==='readers' && readerIdx()>=0);
+      $('bt-kind-row').hidden = t!=='anomalies';
+      if(t!=='missing'){ $('bt-part').hidden=true; $('bt-none-sec').hidden=true; }
+      if(t!=='anomalies') $('bt-freq').hidden=true;
+      $('bt-tbl').classList.toggle('bt-matrix', t==='readers' && readerIdx()<0);
+    }
+    function draw(){
+      if(!BT.data) return;
+      showControls();
+      // one table serves every sub-tab, so the visible one is always redrawn
+      var t=BT.tab;
+      if(t==='templates') drawTemplates();
+      else if(t==='readers') drawReaders();
+      else if(t==='missing') drawMissing();
+      else drawAnomalies();
+    }
+    function invalidate(){
+      BT.shown={};
+      if(!BT.data) return;
+      counts(); draw();
+    }
+    function syncQuick(){
+      var f=val('bt-from'), t=val('bt-to');
+      document.querySelectorAll('#bt-quick .ti-tab').forEach(function(b){
+        var n=parseInt(b.getAttribute('data-days'),10);
+        b.classList.toggle('active', t===todayISO() && f===daysAgoISO(n));
+      });
+    }
+    function setDates(f,t){
+      ['bt-from','bt-to'].forEach(function(id,i){ var h=$(id), v=i?t:f; if(!h) return; h.value=v; if(h._setDate) h._setDate(v); });
+      lastDates=f+'|'+t;
+    }
+    function render(){
+      var d=BT.data;
+      BT.index={};
+      d.templates.forEach(function(t){ BT.index[t.e]=t; });
+      BT.absent=expandAbsent();
+      paintTitle();
+      tiles(d.summary||{});
+      devices();
+      if(d.from_date!==val('bt-from') || d.to_date!==val('bt-to')) setDates(d.from_date, d.to_date);
+      syncQuick();
+      $('bt-msg').innerHTML=d.range_clamped ? '<div class="alert bt-warn">'+esc(fdShort(d.from_date))+' → '+esc(fdShort(d.to_date))+' · max '+esc(d.max_days)+' days</div>' : '';
+      invalidate();
+    }
+
+    function showTab(name){
+      BT.tab=name;
+      document.querySelectorAll('#bt-tabs .ti-tab').forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-bt')===name); });
+      closePop();
+      draw();
+      var w=$('bt-wrap'); if(w) w.scrollTop=0;
+    }
+
+    // ── Excel (SheetJS, same helper as the rest of the page) ──
+    function exportXLS(){
+      if(!BT.data) return;
+      var d=BT.data, t=BT.tab, out=[], sheet, name;
+      var span=d.from_date===d.to_date ? d.from_date : d.from_date+'_'+d.to_date;
+      function names(list){ return list.map(function(i){ return readerName(i); }).join(', '); }
+      if(t==='templates'){
+        sheet='Templates'; name='templates';
+        templateRows().forEach(function(r){
+          out.push({'Employee':r.e,'Name':r.n,'Company':r.co,'Unit':r.farm,'Department':r.dept,'Designation':r.desig,'User ID':r.uid,
+            'Biometric':r.kinds.join(', '),'Devices':names(r.seats.map(function(s){return s[0];})),'Missing From':names(r.gaps),
+            'Signature':r.sig,'Status':r.st,'Shared With':r.sw.map(function(x){return x[0];}).join(', '),
+            'User ID Shared With':r.su.map(function(x){return x[0];}).join(', ')});
+        });
+      } else if(t==='readers'){
+        sheet='Biometric Devices'; name='devices';
+        var idx=readerIdx();
+        readerRows().forEach(function(r){
+          var row={'Employee':r.e,'Name':r.n,'Unit':r.farm,'Department':r.dept,'User ID':r.uid};
+          if(idx<0) (d.devices||[]).forEach(function(dv,j){ row[dv.location||dv.device]=seatOn(r,j)||''; });
+          else { row['Device']=readerName(idx); row['Signature Here']=seatOn(r,idx)||''; }
+          row['Template']=sameness(r).label;
+          out.push(row);
+        });
+      } else if(t==='missing'){
+        sheet='Not Enrolled'; name='not-enrolled';
+        var m=missingSets();
+        m.none.forEach(function(r){ out.push({'Group':'No template','Employee':r.e,'Name':r.n,'Unit':r.farm,'Department':r.dept,'Designation':r.desig,'Employment':r.emp_type,'Joined':r.joined,'On Devices':'','Missing From':'All'}); });
+        m.part.forEach(function(r){ out.push({'Group':'Missing from some devices','Employee':r.e,'Name':r.n,'Unit':r.farm,'Department':r.dept,'Designation':r.desig,'Employment':r.emp_type,'Joined':r.joined,
+          'On Devices':names(r.seats.map(function(s){return s[0];})),'Missing From':names(r.gaps)}); });
+      } else {
+        sheet='Anomalies'; name='anomalies';
+        anomalyRows().forEach(function(a){
+          out.push({'Date':a.date,'Type':a.type,'Employee':a.e,'Name':a.n,'Unit':a.farm,'Department':a.dept,'Reason':a.why,
+            'Holiday List':a.list||'','Leave':a.doc||'','First In':a['in'],'Last Out':a.p>1?a.out:'','Punches':a.p,'Device':a.dev,'Attendance':a.att});
+        });
+      }
+      dlXLSX(out, sheet, fileScope()+'-biometric-'+name+'-'+span+'.xlsx');
+    }
+
+    // ── wiring ──
+    var lastDates='';
+    (function(){
+      var today=todayISO();
+      makeFrappeDate('bt-from-ctl','bt-from',today);
+      makeFrappeDate('bt-to-ctl','bt-to',today);
+      $('bt-from').value=$('bt-from').value||today; $('bt-to').value=$('bt-to').value||today;
+      lastDates=val('bt-from')+'|'+val('bt-to');
+      // the desk control writes the hidden inputs on change; watch them
+      setInterval(function(){
+        var now=val('bt-from')+'|'+val('bt-to');
+        if(now===lastDates) return;
+        lastDates=now; syncQuick(); schedule(true);
+      }, 400);
+
+      $('bt-quick').addEventListener('click', function(e){
+        var b=e.target.closest('.ti-tab'); if(!b) return;
+        var n=parseInt(b.getAttribute('data-days'),10)||0;
+        setDates(daysAgoISO(n), todayISO());
+        syncQuick(); schedule(true);
+      });
+      $('bt-tabs').addEventListener('click', function(e){
+        var b=e.target.closest('.ti-tab'); if(b) showTab(b.getAttribute('data-bt'));
+      });
+      $('bt-sum').addEventListener('click', function(e){
+        var b=e.target.closest('.bt-tile'); if(!b || !BT.data) return;
+        var go=TILES[parseInt(b.getAttribute('data-i'),10)].go;
+        if(go[0]==='templates'){ $('bt-status').value=go[1]; BT.shown.templates=0; counts(); }
+        if(go[0]==='anomalies') setKind(go[1]);
+        showTab(go[0]);
+      });
+      function setKind(k){
+        BT.kind=k||'';
+        document.querySelectorAll('#bt-kind .ti-tab').forEach(function(x){ x.classList.toggle('active', (x.getAttribute('data-kind')||'')===BT.kind); });
+        BT.shown.anomalies=0;
+      }
+      $('bt-kind').addEventListener('click', function(e){
+        var b=e.target.closest('.ti-tab'); if(!b) return;
+        setKind(b.getAttribute('data-kind')); draw();
+      });
+      $('bt-mode').addEventListener('click', function(e){
+        var b=e.target.closest('.ti-tab'); if(!b) return;
+        BT.mode=b.getAttribute('data-mode');
+        document.querySelectorAll('#bt-mode .ti-tab').forEach(function(x){ x.classList.toggle('active', x===b); });
+        BT.shown.readers=0; counts(); draw();
+      });
+      $('bt-status').addEventListener('change', function(){ BT.shown.templates=0; counts(); draw(); });
+      $('bt-reader').addEventListener('change', function(){ BT.shown.readers=0; counts(); draw(); });
+      $('bt-freq').addEventListener('click', function(e){
+        var b=e.target.closest('.bt-freq-chip[data-code]'); if(!b) return;
+        $('bt-search').value=b.getAttribute('data-code'); invalidate();
+      });
+      $('bt-wrap').addEventListener('click', function(e){
+        var b=e.target.closest('.bt-more'); if(!b) return;
+        var k=b.getAttribute('data-key');
+        BT.shown[k]=(BT.shown[k]||PAGE)+PAGE;
+        draw();
+      });
+      $('bt-xls').addEventListener('click', exportXLS);
+
+      attachSearchSelect('bt-search',
+        function(q){
+          if(!BT.data) return [];
+          q=(q||'').toLowerCase();
+          var out=[];
+          for(var i=0;i<BT.data.templates.length && out.length<300;i++){
+            var t=BT.data.templates[i];
+            if(q && (t.n+' '+t.e+' '+(t.uid||'')).toLowerCase().indexOf(q)<0) continue;
+            out.push({id:t.e, label:t.n||t.e, meta:t.e+(t.farm?' · '+t.farm:'')+' · '+t.st});
+          }
+          return out;
+        },
+        function(o){ $('bt-search').value=o.id; if(BT.typing) clearTimeout(BT.typing); invalidate(); },
+        function(){ if(BT.typing) clearTimeout(BT.typing); BT.typing=setTimeout(function(){ BT.typing=null; invalidate(); }, 180); });
+
+      var sb=$('sb-templates');
+      if(sb) sb.addEventListener('click', function(){
+        setTimeout(function(){
+          if(!isOpen()){ closePop(); return; }
+          paintTitle();
+          if(!BT.data || filtersKey()!==BT.key) schedule(true); else draw();
+        }, 0);
+      });
+    })();
+  })();
+
   // Move the KPI strip OUT of the zoomed `.body` so position:fixed is viewport-relative
 // (zoom on an ancestor traps fixed positioning in modern Chrome).
 (function(){ try{ var kp=document.getElementById('r-kpi'), tb=document.querySelector('.topbar'); if(kp&&tb&&tb.parentNode && kp.parentNode!==tb.parentNode){ tb.parentNode.insertBefore(kp, tb.nextSibling); } }catch(e){} })();
@@ -3164,7 +3937,7 @@ function _fitTopbar(){ try{
   // very first request correct from the start; populateOptions() below
   // replaces it with the real list once that arrives.
   try{
-    var _savedCo=localStorage.getItem('att_company')||'';
+    var _savedCo=localStorage.getItem('att_company')||window.ATT_DEFAULT_COMPANY||'';
     var _coSel=$('r-company');
     if(_savedCo && _coSel && !_coSel.options.length){
       var _o=document.createElement('option');
@@ -3220,4 +3993,189 @@ function _fitTopbar(){ try{
     if(nameEl) nameEl.textContent=name;
     if(uidEl) uidEl.textContent=(user===name)?"":user;
   }
+})();
+
+/* ── Styled dropdowns ─────────────────────────────────────────────────────
+   A native <select>'s open option list is drawn by the browser and takes no
+   CSS, so every visible <select> on the page gets a styled trigger and menu.
+   The <select> itself stays in the DOM, hidden: it keeps the value, fires the
+   same 'change' the page already listens for, and anything that sets .value,
+   .selectedIndex, disabled or replaces its options is reflected here. */
+(function(){
+  var CHEVRON='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+  var CHECK='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  var SEARCH_FROM=10;
+  var openMenu=null;
+
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]}); }
+
+  function closeMenu(){
+    if(!openMenu) return;
+    openMenu.menu.remove();
+    openMenu.trigger.classList.remove('open');
+    openMenu.trigger.setAttribute('aria-expanded','false');
+    openMenu=null;
+  }
+
+  function enhance(sel){
+    if(sel.__taSel || sel.hasAttribute('data-native')) return;
+    if(getComputedStyle(sel).display==='none') return;   // deliberately hidden ones stay so
+    sel.__taSel=true;
+
+    var trigger=document.createElement('button');
+    trigger.type='button';
+    trigger.className='ta-sel';
+    trigger.setAttribute('aria-haspopup','listbox');
+    trigger.setAttribute('aria-expanded','false');
+    if(sel.id) trigger.id=sel.id+'-ta';
+    trigger.innerHTML='<span class="ta-sel-text"></span><span class="ta-sel-chev">'+CHEVRON+'</span>';
+    var w=sel.style.width, mw=sel.style.minWidth, xw=sel.style.maxWidth;
+    trigger.style.width = w && w!=='auto' ? w : '';
+    if(mw) trigger.style.minWidth=mw;
+    if(xw) trigger.style.maxWidth=xw;
+    if(sel.style.height) trigger.style.height=sel.style.height;
+    if(sel.id==='r-company'){
+      trigger.classList.add('ta-sel-plain');
+      var wrap=sel.closest('.r-company-wrap'); if(wrap) wrap.classList.add('ta-enhanced');
+    }
+    sel.parentNode.insertBefore(trigger, sel.nextSibling);
+    sel.classList.add('ta-sel-native');
+
+    function sync(){
+      var o=sel.options[sel.selectedIndex];
+      trigger.querySelector('.ta-sel-text').textContent = o ? o.text : '';
+      trigger.disabled=!!sel.disabled;
+      trigger.classList.toggle('ta-sel-empty', !o || o.value==='');
+    }
+    sel.__taSync=sync;
+
+    // code that sets .value / .selectedIndex fires no event, so the setters are
+    // wrapped on this element to keep the trigger's text right
+    ['value','selectedIndex'].forEach(function(prop){
+      var desc=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, prop);
+      Object.defineProperty(sel, prop, {
+        configurable:true,
+        get:function(){ return desc.get.call(this); },
+        set:function(v){ desc.set.call(this, v); sync(); }
+      });
+    });
+    sel.addEventListener('change', sync);
+    new MutationObserver(sync).observe(sel, {childList:true, subtree:true, attributes:true, attributeFilter:['disabled']});
+
+    trigger.addEventListener('click', function(e){
+      e.stopPropagation();
+      if(openMenu && openMenu.sel===sel){ closeMenu(); return; }
+      open(sel, trigger);
+    });
+    trigger.addEventListener('keydown', function(e){
+      if(e.key==='ArrowDown' || e.key==='ArrowUp' || e.key==='Enter' || e.key===' '){
+        e.preventDefault();
+        if(!openMenu) open(sel, trigger);
+      }
+    });
+    sync();
+  }
+
+  function open(sel, trigger){
+    closeMenu();
+    var menu=document.createElement('div');
+    menu.className='ta-sel-menu';
+    menu.setAttribute('role','listbox');
+    var many=sel.options.length>=SEARCH_FROM;
+    menu.innerHTML=(many?'<div class="ta-sel-search"><input type="text" placeholder="Search…" autocomplete="off"></div>':'')+
+      '<div class="ta-sel-list"></div>';
+    document.body.appendChild(menu);
+    var list=menu.querySelector('.ta-sel-list');
+    var active=-1, shown=[];
+
+    function render(q){
+      q=(q||'').toLowerCase().trim();
+      shown=[];
+      var html='';
+      for(var i=0;i<sel.options.length;i++){
+        var o=sel.options[i];
+        if(o.hidden) continue;
+        if(q && o.text.toLowerCase().indexOf(q)<0) continue;
+        shown.push(i);
+        var on=i===sel.selectedIndex;
+        html+='<div class="ta-sel-opt'+(on?' selected':'')+(o.disabled?' disabled':'')+(o.value===''?' placeholder':'')+
+          '" role="option" data-i="'+i+'" aria-selected="'+on+'"><span class="ta-sel-opt-text">'+esc(o.text)+
+          '</span><span class="ta-sel-check">'+(on?CHECK:'')+'</span></div>';
+      }
+      list.innerHTML=html || '<div class="ta-sel-none">No matches</div>';
+      active=shown.indexOf(sel.selectedIndex);
+      highlight();
+    }
+    function highlight(){
+      var opts=list.querySelectorAll('.ta-sel-opt');
+      for(var k=0;k<opts.length;k++) opts[k].classList.toggle('active', k===active);
+      // scroll the list only: scrollIntoView could move the page, and a page
+      // scroll closes the menu
+      var el=opts[active];
+      if(el){
+        if(el.offsetTop < list.scrollTop) list.scrollTop=el.offsetTop-4;
+        else if(el.offsetTop+el.offsetHeight > list.scrollTop+list.clientHeight)
+          list.scrollTop=el.offsetTop+el.offsetHeight-list.clientHeight+4;
+      }
+    }
+    function choose(i){
+      if(i==null || i<0) return;
+      var o=sel.options[i]; if(!o || o.disabled) return;
+      var changed=sel.selectedIndex!==i;
+      sel.selectedIndex=i;
+      closeMenu();
+      trigger.focus({preventScroll:true});
+      if(changed) sel.dispatchEvent(new Event('change', {bubbles:true}));
+    }
+    function place(){
+      var r=trigger.getBoundingClientRect();
+      menu.style.minWidth=Math.max(r.width, 180)+'px';
+      var below=window.innerHeight-r.bottom, h=Math.min(menu.scrollHeight, 320);
+      menu.style.left=Math.min(r.left, window.innerWidth-menu.offsetWidth-8)+'px';
+      menu.style.top=(below<h+12 && r.top>h+12 ? r.top-h-6 : r.bottom+6)+'px';
+    }
+
+    list.addEventListener('mousedown', function(e){ e.preventDefault(); });
+    list.addEventListener('click', function(e){
+      var el=e.target.closest('.ta-sel-opt'); if(el) choose(+el.getAttribute('data-i'));
+    });
+    list.addEventListener('mousemove', function(e){
+      var el=e.target.closest('.ta-sel-opt'); if(!el) return;
+      var k=shown.indexOf(+el.getAttribute('data-i')); if(k!==active){ active=k; highlight(); }
+    });
+    function onKey(e){
+      if(e.key==='ArrowDown'){ e.preventDefault(); active=Math.min(active+1, shown.length-1); highlight(); }
+      else if(e.key==='ArrowUp'){ e.preventDefault(); active=Math.max(active-1, 0); highlight(); }
+      else if(e.key==='Enter'){ e.preventDefault(); choose(shown[active]); }
+      else if(e.key==='Escape' || e.key==='Tab'){ closeMenu(); trigger.focus({preventScroll:true}); }
+    }
+    menu.addEventListener('keydown', onKey);
+    trigger.__taKey=onKey;
+
+    render('');
+    var search=menu.querySelector('.ta-sel-search input');
+    if(search){ search.addEventListener('input', function(){ render(search.value); place(); }); }
+    trigger.classList.add('open');
+    trigger.setAttribute('aria-expanded','true');
+    openMenu={sel:sel, trigger:trigger, menu:menu};
+    place();
+    // preventScroll: focusing may scroll the page, and a page scroll closes the menu
+    if(search){ search.focus({preventScroll:true}); }
+    else { menu.tabIndex=-1; menu.focus({preventScroll:true}); }
+  }
+
+  document.addEventListener('click', function(e){
+    if(openMenu && !openMenu.menu.contains(e.target)) closeMenu();
+  });
+  // the menu is fixed to the viewport, so anything scrolling underneath it closes it
+  window.addEventListener('scroll', function(e){
+    if(openMenu && !openMenu.menu.contains(e.target)) closeMenu();
+  }, true);
+  window.addEventListener('resize', closeMenu);
+
+  function enhanceAll(){ document.querySelectorAll('select').forEach(enhance); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', enhanceAll);
+  else enhanceAll();
+  // cards that start hidden (the other action tabs) are enhanced when they appear
+  document.addEventListener('click', function(){ setTimeout(enhanceAll, 0); });
 })();
