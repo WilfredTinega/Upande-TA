@@ -338,5 +338,97 @@ class IntegrationTestWeekOffChange(_TestCase):
 		self.assertEqual(self._week_offs(result["holiday_list"]), ["2030-06-06", "2030-06-13"])
 
 
+	# ──────────────────────────────────────────────────────────────────────
+	# What a Holiday Assignment Tool run or a Bulk Week Off would overlap
+	# ──────────────────────────────────────────────────────────────────────
+
+	def _list(self, name, weekday=None):
+		from frappe.utils import add_days, getdate
+
+		holidays = []
+		if weekday is not None:
+			date = getdate(f"{YEAR}-01-01")
+			while date.weekday() != weekday:
+				date = add_days(date, 1)
+			while date.year == YEAR:
+				holidays.append({"holiday_date": date, "description": date.strftime("%A"), "weekly_off": 1})
+				date = add_days(date, 7)
+		frappe.get_doc(
+			{
+				"doctype": "Holiday List",
+				"holiday_list_name": name,
+				"from_date": f"{YEAR}-01-01",
+				"to_date": f"{YEAR}-12-31",
+				"holidays": holidays,
+			}
+		).insert(ignore_permissions=True)
+		return name
+
+	def _preview(self, **change):
+		from upande_ta.upande_ta.holiday_overlap import preview
+
+		result = preview([{"employee": self.employee, **change}])
+		return result["employees"][0] if result["employees"] else None
+
+	def test_a_tool_window_reports_the_days_it_replaces(self):
+		friday = self._list(f"{PREFIX} Friday", weekday=4)
+		found = self._preview(
+			holiday_list=friday, from_date="2030-03-01", to_date="2030-03-31", restore_to=BASE, cancel_in_window=True
+		)
+		self.assertEqual(
+			found["replaced"],
+			[{"holiday_list": BASE, "new": friday, "from_date": "2030-03-01", "to_date": "2030-03-31", "backdated": False}],
+		)
+		self.assertEqual((found["blank_days"], found["weeks_without_week_off"], found["later"]), ([], [], []))
+
+	def test_bulk_week_off_reports_a_later_assignment_taking_over(self):
+		friday = self._list(f"{PREFIX} Friday", weekday=4)
+		monday = self._list(f"{PREFIX} Monday", weekday=0)
+		self._assign(monday, "2030-06-01")
+
+		found = self._preview(holiday_list=friday, from_date="2030-05-01", to_date=None, cancel_in_window=False)
+
+		self.assertEqual(found["later"], [{"from_date": "2030-06-01", "holiday_list": monday}])
+		self.assertEqual(found["replaced"][0]["to_date"], "2030-05-31", "only until the later one starts")
+
+	def test_a_list_without_week_offs_is_reported(self):
+		empty = self._list(f"{PREFIX} No Week Off")
+		found = self._preview(
+			holiday_list=empty, from_date="2030-03-04", to_date="2030-03-17", restore_to=BASE, cancel_in_window=True
+		)
+		self.assertEqual(found["weeks_without_week_off"], ["2030-03-04", "2030-03-11"])
+
+	def test_a_change_touching_nothing_else_is_not_reported(self):
+		"""Only a change that reaches past what is already there is worth a
+		warning — putting someone on the list they are on changes no day."""
+		self.assertIsNone(
+			self._preview(holiday_list=BASE, from_date="2030-03-01", to_date=None, cancel_in_window=False)
+		)
+
+	def test_past_days_are_flagged_back_dated(self):
+		from frappe.utils import getdate
+
+		from upande_ta.upande_ta.holiday_overlap import _replaced
+
+		before = {getdate("2030-03-01"): "A", getdate("2030-03-02"): "A"}
+		after = {getdate("2030-03-01"): "B", getdate("2030-03-02"): "B"}
+		runs = _replaced(before, after, today_date=getdate("2030-03-02"))
+		self.assertEqual(len(runs), 1)
+		self.assertTrue(runs[0]["backdated"])
+
+	def _assign(self, holiday_list, from_date):
+		assignment = frappe.get_doc(
+			{
+				"doctype": "Holiday List Assignment",
+				"applicable_for": "Employee",
+				"assigned_to": self.employee,
+				"holiday_list": holiday_list,
+				"from_date": from_date,
+			}
+		)
+		assignment.insert(ignore_permissions=True)
+		assignment.submit()
+
+
 if __name__ == "__main__":
 	unittest.main()

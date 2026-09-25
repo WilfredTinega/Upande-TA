@@ -228,25 +228,35 @@ frappe.ui.form.on("Holiday Assignment Tool", {
 			return;
 		}
 
-		frappe.confirm(
-			__("Assign <b>{0}</b> to {1} employee(s)?", [
-				esc(frm.doc.holiday_list),
-				employees.length,
-			]),
-			() => {
-				// the desk stays usable while this runs; the primary action is
-				// disabled instead, so the run cannot be started twice
-				const $primary = frm.page.btn_primary;
-				$primary.prop("disabled", true);
-				frappe.show_alert({ message: __("Assigning Holidays..."), indicator: "blue" });
+		const question = __("Assign <b>{0}</b> to {1} employee(s)?", [
+			esc(frm.doc.holiday_list),
+			employees.length,
+		]);
+		const run = () => {
+			// the desk stays usable while this runs; the primary action is
+			// disabled instead, so the run cannot be started twice
+			const $primary = frm.page.btn_primary;
+			$primary.prop("disabled", true);
+			frappe.show_alert({ message: __("Assigning Holidays..."), indicator: "blue" });
 
-				// posts the in-memory document, rows and all; the controller saves
-				// it (running validate) before it writes anything
-				Promise.resolve(frm.call({ method: "assign_holidays", doc: frm.doc }))
-					.then(() => frm.reload_doc())
-					.finally(() => $primary.prop("disabled", false));
-			}
-		);
+			// posts the in-memory document, rows and all; the controller saves
+			// it (running validate) before it writes anything
+			Promise.resolve(frm.call({ method: "assign_holidays", doc: frm.doc }))
+				.then(() => frm.reload_doc())
+				.finally(() => $primary.prop("disabled", false));
+		};
+
+		// what the run would replace or leave blank comes first, and the
+		// question is asked beneath it
+		Promise.resolve(frm.call({ method: "preview_overlaps", doc: frm.doc }))
+			.then((r) => {
+				const result = (r && r.message) || {};
+				if ((result.employees || []).length) {
+					upande_ta.holiday_overlap.confirm(result, question).then(run, () => {});
+				} else {
+					frappe.confirm(question, run);
+				}
+			});
 	},
 
 	/**

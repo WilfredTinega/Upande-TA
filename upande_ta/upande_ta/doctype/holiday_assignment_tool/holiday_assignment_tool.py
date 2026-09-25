@@ -161,6 +161,32 @@ class HolidayAssignmentTool(Document):
 			indicator="blue",
 		)
 
+	@frappe.whitelist()
+	def preview_overlaps(self):
+		"""What this run would replace or leave blank, for the confirmation
+		before it runs. Writes nothing."""
+		from upande_ta.upande_ta.holiday_overlap import preview
+
+		if not (self.holiday_list and self.from_date and self.employees):
+			return {"employees": [], "total": 0}
+		changes = []
+		for row in self.employees:
+			restore_to = self._list_after_window(row)
+			if self.to_date and not restore_to:
+				continue  # skipped by the run itself, and reported there
+			changes.append(
+				{
+					"employee": row.employee,
+					"employee_name": row.employee_name,
+					"holiday_list": self.holiday_list,
+					"from_date": self.from_date,
+					"to_date": self.to_date,
+					"restore_to": restore_to,
+					"cancel_in_window": True,
+				}
+			)
+		return preview(changes)
+
 	def validate_end_date_over_existing(self):
 		"""Refuse an open-ended run over an assignment that is already in force.
 
