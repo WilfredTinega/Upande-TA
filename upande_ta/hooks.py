@@ -56,6 +56,9 @@ extend_bootinfo = [
 
 app_include_js = [
 	"monthly_attendance_sheet_colors.bundle.js",
+	# the "existing week offs affected" confirmation, shared by Holiday
+	# Assignment Tool and Bulk Week Off
+	"/assets/upande_ta/js/holiday_overlap_warning.js",
 	# Signed QZ Tray printing. Loaded on every page so any form can print to the
 	# local receipt printer; qz-tray.js itself is fetched only on terminals that
 	# have a printer saved. See upande_ta/upande_ta/api/qz.py.

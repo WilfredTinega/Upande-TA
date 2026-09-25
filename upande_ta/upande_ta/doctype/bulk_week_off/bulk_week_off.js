@@ -24,6 +24,36 @@ frappe.ui.form.on("Bulk Week Off", {
         }, 400);
     },
 
+    /** Before submitting, show what the new assignments would replace, which
+     * later ones take over again, and which days would be left with no week
+     * off; submitting goes ahead only if the user says so. */
+    before_submit: function (frm) {
+        // the form reads frappe.validated after this resolves; a rejection
+        // would leave its Submit button stuck, so a "no" resolves too
+        var stop = function (resolve) {
+            frappe.validated = false;
+            resolve();
+        };
+        return new Promise(function (resolve) {
+            frm.call({ method: "preview_overlaps", doc: frm.doc }).then(function (r) {
+                var result = (r && r.message) || {};
+                if (!(result.employees || []).length) {
+                    resolve();
+                    return;
+                }
+                upande_ta.holiday_overlap
+                    .confirm(result, __("Submit and put {0} employee(s) on the new week off?", [
+                        (frm.doc.employees || []).length,
+                    ]))
+                    .then(resolve, function () {
+                        stop(resolve);
+                    });
+            }, function () {
+                stop(resolve);
+            });
+        });
+    },
+
     clear_filters: function (frm) {
         frm.set_value("department", "");
         frm.set_value("designation", "");
