@@ -328,7 +328,8 @@ class IntegrationTestAbsentMarking(IntegrationTestCase):
 
 		frappe.get_doc("Shift Type", SHIFT).process_auto_attendance()
 
-		self.assertEqual(frappe.db.get_value("Attendance", absent, "docstatus"), 2)
+		# cancelled and then deleted, so no cancelled copy is left beside the Present
+		self.assertFalse(frappe.db.exists("Attendance", absent))
 		self.assertEqual(self._status(self.absentee), "Present")
 		for log in logs:
 			row = frappe.db.get_value(

@@ -126,7 +126,7 @@ def days_in_force(employee, start, end) -> dict:
 	``start .. end``, as HRMS resolves it — the employee's assignments, their
 	company's filling the gaps — so a window laid over an earlier change reads
 	that change for the days it covers and the list beyond it for the rest."""
-	from hrms.utils.holiday_list import (
+	from upande_ta.upande_ta.holiday_ranges import (
 		fill_employee_holiday_list_date_gaps_with_company_holiday_list,
 		get_assigned_holiday_lists_to_employee_and_company,
 	)
@@ -150,7 +150,8 @@ def days_in_force(employee, start, end) -> dict:
 	days, date = {}, start
 	while date <= end:
 		holiday_list = next(
-			(r["holiday_list"] for r in ranges if getdate(r["from_date"]) <= date <= getdate(r["to_date"])), None
+			(r["holiday_list"] for r in ranges if getdate(r["from_date"]) <= date <= getdate(r["to_date"])),
+			None,
 		)
 		h = holidays.get((holiday_list, date))
 		days[date] = {
