@@ -427,7 +427,7 @@ def judge_enrolment(active, inactive, readers, bio, names, visible_companies=Non
 def effective_off_days(people, start, end):
 	"""{employee: {date: holiday row}} for the off days in ``start .. end``,
 	judged by the holiday list in force on each date."""
-	from hrms.utils.holiday_list import (
+	from upande_ta.upande_ta.holiday_ranges import (
 		fill_employee_holiday_list_date_gaps_with_company_holiday_list,
 		get_assigned_holiday_lists_to_employee_and_company,
 	)

@@ -73,7 +73,9 @@ def preview(changes: list) -> dict:
 		after_rows, cancelled = _apply(rows, change, start, window_end)
 
 		last_start = max([getdate(r.from_date) for r in rows] + [window_end or start])
-		end = min(add_days(max(last_start, window_end or start), LOOK_PAST_DAYS), add_days(start, MAX_SPAN_DAYS))
+		end = min(
+			add_days(max(last_start, window_end or start), LOOK_PAST_DAYS), add_days(start, MAX_SPAN_DAYS)
+		)
 
 		company = company_rows.get(companies.get(employee), [])
 		before = _per_day(rows, company, start, end)
@@ -164,7 +166,10 @@ def _apply(rows, change, start, window_end):
 			continue
 		added.append(
 			frappe._dict(
-				name=None, holiday_list=holiday_list, from_date=date, holiday_list_to_date=list_ends.get(holiday_list)
+				name=None,
+				holiday_list=holiday_list,
+				from_date=date,
+				holiday_list_to_date=list_ends.get(holiday_list),
 			)
 		)
 	after = sorted(kept + added, key=lambda r: getdate(r.from_date))
@@ -173,19 +178,22 @@ def _apply(rows, change, start, window_end):
 
 def _per_day(rows, company_rows, start, end) -> dict:
 	"""``{date: holiday list or None}`` as HRMS resolves it."""
-	from hrms.utils.holiday_list import (
+	from upande_ta.upande_ta.holiday_ranges import (
 		build_effective_date_ranges_for_holiday_assignments,
 		fill_employee_holiday_list_date_gaps_with_company_holiday_list,
 	)
 
 	own = build_effective_date_ranges_for_holiday_assignments({"e": rows}, start, end).get("e", [])
-	fallback = build_effective_date_ranges_for_holiday_assignments({"c": company_rows}, start, end).get("c", [])
+	fallback = build_effective_date_ranges_for_holiday_assignments({"c": company_rows}, start, end).get(
+		"c", []
+	)
 	ranges = fill_employee_holiday_list_date_gaps_with_company_holiday_list(own, fallback, start, end)
 
 	days, date = {}, start
 	while date <= end:
 		days[date] = next(
-			(r["holiday_list"] for r in ranges if getdate(r["from_date"]) <= date <= getdate(r["to_date"])), None
+			(r["holiday_list"] for r in ranges if getdate(r["from_date"]) <= date <= getdate(r["to_date"])),
+			None,
 		)
 		date = add_days(date, 1)
 	return days
@@ -198,7 +206,11 @@ def _weekly_offs(lists, start, end) -> set:
 		(h.parent, getdate(h.holiday_date))
 		for h in frappe.get_all(
 			"Holiday",
-			filters={"parent": ["in", list(lists)], "weekly_off": 1, "holiday_date": ["between", [start, end]]},
+			filters={
+				"parent": ["in", list(lists)],
+				"weekly_off": 1,
+				"holiday_date": ["between", [start, end]],
+			},
 			fields=["parent", "holiday_date"],
 		)
 	}
@@ -211,7 +223,12 @@ def _replaced(before, after, today_date) -> list:
 		was, will = before[date], after[date]
 		if not was or was == will:
 			continue
-		if runs and runs[-1]["holiday_list"] == was and runs[-1]["to"] == add_days(date, -1) and runs[-1]["new"] == will:
+		if (
+			runs
+			and runs[-1]["holiday_list"] == was
+			and runs[-1]["to"] == add_days(date, -1)
+			and runs[-1]["new"] == will
+		):
 			runs[-1]["to"] = date
 		else:
 			runs.append({"holiday_list": was, "new": will, "from": date, "to": date})

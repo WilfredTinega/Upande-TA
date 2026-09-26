@@ -98,7 +98,7 @@ def _employees(company, farm, allowed, start, end):
 
 def _off_days(employees, start, end):
 	"""{employee: {date: description}} for every off day in start..end."""
-	from hrms.utils.holiday_list import (
+	from upande_ta.upande_ta.holiday_ranges import (
 		fill_employee_holiday_list_date_gaps_with_company_holiday_list,
 		get_assigned_holiday_lists_to_employee_and_company,
 	)
