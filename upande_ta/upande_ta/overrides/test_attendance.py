@@ -63,7 +63,8 @@ class IntegrationTestAttendanceSupersede(IntegrationTestCase):
 
 		present = self._mark("Present")
 
-		self.assertEqual(frappe.db.get_value("Attendance", absent, "docstatus"), 2)
+		# cancelled and then deleted, so no cancelled copy is left beside the Present
+		self.assertFalse(frappe.db.exists("Attendance", absent))
 		self.assertEqual(frappe.db.get_value("Attendance", present.name, "status"), "Present")
 
 	def test_supersede_is_recorded_on_the_new_record(self):

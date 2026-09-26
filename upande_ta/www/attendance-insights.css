@@ -594,7 +594,8 @@ body::before{display:none!important}
    button row -- click anywhere on the brand to reload. */
 .att-sb-refresh{cursor:pointer;border-radius:8px;transition:background .15s;padding:4px 6px;margin:-4px -6px}
 .att-sb-refresh:hover{background:var(--accent-light)}
-.att-sb-refresh:active{background:var(--accent)}
+.att-sb-refresh{-webkit-tap-highlight-color:transparent}
+.att-sb-refresh:active{background:rgba(10,10,10,.08)}
 
 /* Out of the page and back to the Desk, inline with the brand -- same button
    the Sensors dashboard sidebar carries (lucide Home, 18px, muted until
@@ -1556,7 +1557,7 @@ body.trend-mode.att-loading .att-sb-farm.active,body.trend-mode.att-loading .att
   #panel-actions>.card.act-on>.card-head{flex:0 0 auto!important}
   #panel-actions>.card.act-on>.card-body{flex:1 1 0!important;min-height:0!important;
     display:flex!important;flex-direction:column!important;overflow:hidden!important}
-  #panel-actions>.card.act-on>.card-body>div:not(#att-checklist):not(#shift-checklist){flex:0 0 auto!important}
+  #panel-actions>.card.act-on>.card-body>div:not(#att-checklist):not(#shift-checklist):not(#req-list){flex:0 0 auto!important}
 }
 
 /* ════════ Actions page layout — FINAL, flex-free ════════
@@ -2061,3 +2062,240 @@ body.trend-mode.att-loading .att-sb-farm.active,body.trend-mode.att-loading .att
   overflow-wrap:normal!important;
   word-break:normal!important;
 }
+
+/* Attendance Requests tab: count of requests waiting for the signed-in user */
+.req-badge{display:inline-block;min-width:18px;padding:0 6px;margin-left:4px;border-radius:9px;
+  background:var(--bad);color:#fff;font-size:11px;line-height:18px;text-align:center}
+.req-badge:empty{display:none}
+#req-tbl tr.req-mine td{background:rgba(59,130,246,.04)}
+#req-tbl .req-state{background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap}
+
+/* ════════ Styled dropdowns (see the matching block at the end of the JS) ════════ */
+select.ta-sel-native{display:none!important}
+.ta-sel{
+  display:inline-flex;align-items:center;justify-content:space-between;gap:8px;
+  height:30px;min-width:120px;max-width:100%;padding:0 10px 0 12px;
+  font-family:var(--f-ui);font-size:13px;font-weight:500;color:var(--text);text-align:left;
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--radius-sm)!important;
+  box-shadow:var(--shadow-sm);cursor:pointer;vertical-align:middle;
+  transition:border-color .15s,box-shadow .15s,background .15s}
+.ta-sel:hover{border-color:var(--text-3)}
+.ta-sel:focus-visible,.ta-sel.open{outline:none;border-color:var(--ring);box-shadow:0 0 0 3px rgba(10,10,10,.08)}
+.ta-sel:disabled{opacity:.55;cursor:not-allowed}
+.ta-sel-text{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ta-sel.ta-sel-empty .ta-sel-text{color:var(--text-3)}
+.ta-sel-chev{flex:none;display:flex;color:var(--text-3);transition:transform .15s}
+.ta-sel.open .ta-sel-chev{transform:rotate(180deg);color:var(--text)}
+
+/* the company picker reads as a bold heading, not a field */
+.r-company-wrap.ta-enhanced .r-company-label{display:none!important}
+.ta-sel.ta-sel-plain{height:auto;min-width:0;padding:2px 4px;border:none!important;background:transparent!important;
+  box-shadow:none!important;font-size:19px;font-weight:700}
+.ta-sel.ta-sel-plain .ta-sel-chev{color:var(--text-2)}
+.ta-sel.ta-sel-plain:hover{background:var(--accent-light)!important}
+
+/* position/inset pinned: the page's narrow-screen rules re-flow divs and
+   would drop the menu to the bottom of the page */
+.ta-sel-menu{
+  position:fixed!important;z-index:10050!important;margin:0!important;max-width:min(420px,calc(100vw - 16px));max-height:320px;
+  display:flex;flex-direction:column;overflow:hidden;outline:none;
+  background:#fff;border:1px solid var(--border);border-radius:10px;
+  box-shadow:0 12px 32px -8px rgba(10,10,10,.22),0 2px 6px rgba(10,10,10,.06);
+  font-family:var(--f-ui);animation:ta-sel-in .12s ease-out}
+@keyframes ta-sel-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.ta-sel-search{flex:none;padding:8px;border-bottom:1px solid var(--border-soft)}
+.ta-sel-search input{width:100%;height:30px;padding:5px 10px;font-size:13px;font-family:var(--f-ui);
+  border:1px solid var(--border);border-radius:var(--radius-sm)!important;background:var(--bg);color:var(--text);outline:none}
+.ta-sel-search input:focus{border-color:var(--ring);background:#fff}
+.ta-sel-list{flex:1 1 auto;overflow-y:auto;padding:4px}
+.ta-sel-list::-webkit-scrollbar{width:6px}
+.ta-sel-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.ta-sel-opt{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:7px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text);
+  white-space:nowrap}
+.ta-sel-opt-text{overflow:hidden;text-overflow:ellipsis}
+.ta-sel-opt.active{background:var(--accent-light)}
+.ta-sel-opt.selected{font-weight:600}
+.ta-sel-opt.placeholder .ta-sel-opt-text{color:var(--text-3)}
+.ta-sel-opt.disabled{opacity:.45;cursor:not-allowed}
+.ta-sel-check{flex:none;display:flex;width:14px;color:var(--text)}
+.ta-sel-none{padding:10px;font-size:13px;color:var(--text-3)}
+
+/* Attendance Requests list: use the height of the screen, not a short box */
+#req-list{max-height:calc(100vh - 300px);min-height:420px;overflow-y:auto}
+
+/* per-row Approve / Reject on the Attendance Requests tab */
+#req-tbl td.req-row-acts{white-space:nowrap;text-align:right}
+.req-row-btn{height:24px!important;padding:0 10px!important;font-size:11px!important;margin-left:4px}
+.req-row-ok{background:var(--good)!important;border-color:var(--good)!important;color:#fff!important}
+.req-row-no{color:var(--bad)!important;border-color:var(--bad)!important;background:transparent!important}
+.req-row-btn:disabled{opacity:.5;cursor:wait}
+
+/* Actions toolbars: the filters share the full width evenly, the buttons take
+   the row beneath, spread evenly too */
+.act-filters{display:flex!important;flex-wrap:wrap;gap:12px 14px;align-items:flex-end;
+  margin-bottom:14px;width:100%}
+.act-filters>div{flex:1 1 170px;min-width:0}
+.act-filters .ta-sel,.act-filters select,.act-filters .fdate,.act-filters .fdate .frappe-control,
+.act-filters .fdate .form-group,.act-filters .fdate .control-input-wrapper,.act-filters .fdate .control-input,
+.act-filters .fdate input,.act-filters .att-off-toggle{width:100%!important;max-width:none!important;min-width:0!important}
+.act-filters .att-off-toggle{box-sizing:border-box;height:30px;display:flex;align-items:center}
+.act-filters>.act-buttons{flex:1 1 100%;display:flex;gap:8px;flex-wrap:wrap}
+.act-filters>.act-buttons>.btn{flex:1 1 0;min-width:110px;justify-content:center;text-align:center}
+
+/* Menus live on <body> so cards can't clip them, which puts them in reach of
+   the narrow-screen "body>div { static, no max-height, visible }" release
+   above. They must stay fixed, bounded and scrollable. */
+body>.ss-menu{position:fixed!important;max-height:300px!important;overflow-y:auto!important}
+body>.ta-sel-menu{position:fixed!important;max-height:320px!important;overflow:hidden!important}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BIOMETRIC TEMPLATES PAGE — same card geometry as Lost Hours / Devices:
+   header controls, the summary tiles (.lost-sum), then one table that fills
+   the card down to the sidebar's bottom edge.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media(min-width:901px){
+  #panel-templates,#bt-card,#bt-card>.card-body,#bt-card .card-head,#bt-card .tile-inline-wrap{
+    width:100%!important;max-width:100%!important;box-sizing:border-box!important}
+  #panel-templates.active{display:flex!important;flex-direction:column!important;
+    overflow:hidden!important;min-height:0!important}
+  #bt-card{flex:1 1 0!important;min-height:0!important;margin:0!important;
+    display:flex!important;flex-direction:column!important;overflow:hidden!important}
+  #bt-card>.card-head{flex:0 0 auto!important}
+  #bt-card>.card-body{flex:1 1 0!important;min-height:0!important;padding:0!important;
+    display:flex!important;flex-direction:column!important;overflow:hidden!important}
+  #bt-card>.card-body>*:not(#bt-wrap){flex:0 0 auto!important}
+  #bt-card #bt-wrap{flex:1 1 0!important;height:0!important;max-height:none!important;
+    overflow:auto!important}
+}
+@media(max-width:900px){
+  #bt-card #bt-wrap{height:auto!important;max-height:70vh!important;overflow:auto!important}
+}
+#bt-card .card-head{display:flex!important;flex-wrap:wrap!important;align-items:center!important;
+  gap:8px 10px!important;justify-content:flex-start!important;overflow:visible!important}
+#bt-card .card-head h3{margin:0 auto 0 0!important;white-space:nowrap;font-size:13px!important;letter-spacing:.06em}
+#bt-tabs{flex-wrap:wrap}
+.bt-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex:1 1 100%}
+.bt-tools .lost-dates{flex:0 0 auto}
+.bt-f[hidden]{display:none!important}
+#bt-search{height:28px;width:220px;font-size:13px}
+#bt-xls{margin-left:auto!important}
+
+#bt-msg:empty{display:none}
+#bt-msg{padding:12px 16px 0}
+#bt-msg .alert{margin:0}
+.alert.bt-warn{background:var(--warn-bg);border-color:rgba(217,165,20,.35);color:var(--warn)}
+
+/* summary tiles: ten of them, so a tighter grid than Lost Hours' six */
+#bt-sum{padding:14px 16px 4px;grid-template-columns:repeat(auto-fit,minmax(128px,1fr))!important;gap:10px!important}
+#bt-sum:empty{display:none!important}
+#bt-sum .lost-sum-i{padding:11px 13px!important;text-align:left;cursor:pointer;font:inherit;
+  transition:transform .12s ease,box-shadow .12s ease}
+#bt-sum .lost-sum-i:hover{transform:translateY(-1px);box-shadow:var(--shadow)!important}
+#bt-sum .lost-sum-i b{font-size:22px!important}
+#bt-sum .lost-sum-i small{font-size:11px!important}
+#bt-sum .sk-lbl{height:9px;margin:0}
+#bt-sum .sk-val{height:20px;margin:0}
+.lost-sum-i--unique{--tc:#38a160}
+
+/* readers on one scrolling row */
+.bt-devs{display:flex;gap:6px;overflow-x:auto;padding:10px 16px 2px;scrollbar-width:thin}
+.bt-devs[hidden],.bt-devs:empty{display:none!important}
+.bt-chip{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;
+  border:1px solid var(--border);border-radius:999px;background:var(--panel);font-family:var(--f-ui);
+  font-size:12px;color:var(--text-2);white-space:nowrap}
+.bt-chip b{color:var(--text);font-weight:600}
+.bt-chip i{font-style:normal;color:#b7860b}
+.bt-chip em{font-style:normal;color:#cb2929}
+.bt-chip .sb-dev-dot{background:#cb2929}
+.bt-chip.on .sb-dev-dot{background:#38a160}
+button.bt-orph-btn{cursor:pointer;border-color:#d9a514;background:rgba(217,165,20,.12);color:#8a6100}
+button.bt-orph-btn b{color:#7a5500}
+button.bt-orph-btn:hover{background:rgba(217,165,20,.2)}
+
+.bt-pop{position:fixed;z-index:10060;width:min(560px,calc(100vw - 16px));max-height:360px;display:flex;flex-direction:column;
+  background:#fff;border:1px solid var(--border);border-radius:12px;overflow:hidden;font-family:var(--f-ui);
+  box-shadow:0 12px 32px -8px rgba(10,10,10,.22),0 2px 6px rgba(10,10,10,.06);animation:ta-sel-in .12s ease-out}
+.bt-pop-head{flex:none;padding:10px 14px;border-bottom:1px solid var(--border-soft);font-size:12px;font-weight:600;
+  letter-spacing:.06em;color:var(--text-2);display:flex;align-items:center;gap:8px}
+.bt-pop-list{overflow-y:auto;padding:4px 0}
+.bt-pop-row{display:grid;grid-template-columns:auto 1fr auto;gap:4px 10px;align-items:center;padding:7px 14px;
+  border-bottom:1px solid var(--border-soft);font-size:13px}
+.bt-pop-row:last-child{border-bottom:none}
+.bt-pop-row .t-code{color:var(--text-2);font-variant-numeric:tabular-nums}
+.bt-pop-name{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt-pop-on{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px}
+
+.bt-seg-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:10px 16px 2px}
+.bt-seg-row[hidden]{display:none!important}
+.bt-freq{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-family:var(--f-ui);font-size:12px}
+.bt-freq[hidden]{display:none!important}
+.bt-freq-lbl{font-weight:600;letter-spacing:.06em;color:var(--text-2)}
+.bt-freq-sep{width:1px;height:18px;background:var(--border);margin:0 4px}
+.bt-freq-chip{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 9px;border:1px solid var(--border);
+  border-radius:999px;background:var(--panel);color:var(--text);font:inherit;font-size:12px;white-space:nowrap}
+button.bt-freq-chip{cursor:pointer}
+button.bt-freq-chip:hover{background:var(--accent-light)}
+.bt-freq-chip i{font-style:normal;color:#cb2929;font-weight:600}
+
+#bt-wrap{margin-top:10px;border-top:1px solid var(--border-soft)}
+.bt-sec{position:sticky;left:0;padding:10px 14px 6px;font-family:var(--f-ui);font-size:12px;font-weight:600;
+  letter-spacing:.06em;color:var(--text-2);display:flex;align-items:center;gap:8px}
+.bt-sec[hidden],#bt-part[hidden]{display:none!important}
+#bt-part{margin-top:14px}
+
+/* the first column is an employee code here, not the drill-down's row number */
+#bt-card .tile-inline-tbl th:first-child,#bt-card .tile-inline-tbl td:first-child{width:auto!important}
+#bt-card .tile-inline-tbl{table-layout:auto!important;width:100%!important}
+#bt-card .tile-inline-tbl td{font-size:13px;vertical-align:middle}
+#bt-card .tile-inline-tbl td.bt-chips{white-space:normal!important;min-width:180px}
+#bt-card .tile-inline-tbl.bt-matrix td,#bt-card .tile-inline-tbl.bt-matrix th{padding-left:8px!important;padding-right:8px!important}
+#bt-card .tile-inline-tbl.bt-matrix td.t-code{font-size:12px}
+.bt-mut{color:var(--text-3)}
+.bt-note{display:block;font-size:12px;margin-top:2px;white-space:normal}
+.bt-none{color:var(--text-3)}
+.bt-tag{display:inline-block;margin:1px 3px 1px 0;padding:1px 8px;border-radius:999px;border:1px solid var(--border);
+  background:var(--panel);font-size:12px;color:var(--text-2);white-space:nowrap}
+.bt-tag.gap{border-color:rgba(217,165,20,.55);color:#8a6100;background:rgba(217,165,20,.08)}
+.bt-tag.mut{color:var(--text-3)}
+
+.pill.bt-pill{background:transparent!important;border:1px solid var(--sc,var(--border))!important;
+  color:var(--sc,var(--text))!important;font-weight:600;border-radius:999px!important}
+.pill.bt-unique{--sc:#38a160} .pill.bt-dup{--sc:#cb2929} .pill.bt-multi{--sc:#b7860b}
+.pill.bt-missing{--sc:#64748b} .pill.bt-one{--sc:#318ad8}
+.pill.bt-off{--sc:#7c3aed} .pill.bt-leave{--sc:#318ad8} .pill.bt-absent{--sc:#cb2929}
+.tile-inline-tbl tbody tr.bt-row-dup>td{background:rgba(203,41,41,.06)}
+.tile-inline-tbl tbody tr.bt-row-dup>td:first-child{box-shadow:inset 3px 0 0 #cb2929}
+.tile-inline-tbl tbody tr.bt-row-diff>td:first-child{box-shadow:inset 3px 0 0 #d9a514}
+.tile-inline-tbl tbody tr.bt-row-leave>td:first-child{box-shadow:inset 3px 0 0 #318ad8}
+.tile-inline-tbl tbody tr.bt-row-off>td:first-child{box-shadow:inset 3px 0 0 #7c3aed}
+.bt-more-row td{text-align:center!important;padding:10px!important}
+
+.sb-bt-btn{margin-top:0}
+/* compact pickers, one line of tools */
+#bt-card .bt-dates .fdate{min-width:0!important;width:128px!important}
+#bt-card .bt-dates .fdate .frappe-control,#bt-card .bt-dates .fdate .form-group,
+#bt-card .bt-dates .fdate .control-input-wrapper,#bt-card .bt-dates .fdate .control-input,
+#bt-card .bt-dates .fdate input{width:128px!important;max-width:128px!important;min-width:0!important;margin:0!important}
+#bt-card .bt-dates .fdate .form-group{margin-bottom:0!important}
+/* ten tiles on one row where there is room, labels may take two lines */
+#bt-sum{grid-template-columns:repeat(10,minmax(0,1fr))!important}
+@media(max-width:1200px){#bt-sum{grid-template-columns:repeat(5,minmax(0,1fr))!important}}
+@media(max-width:700px){#bt-sum{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+#bt-sum .lost-sum-i{justify-content:space-between!important;gap:4px!important;padding:9px 11px!important}
+#bt-sum .lost-sum-i small{white-space:normal!important;overflow:visible!important;letter-spacing:.04em!important;
+  line-height:1.2;min-height:2.4em;font-size:11px!important}
+#bt-sum .lost-sum-i b{font-size:20px!important}
+/* keep names and codes on one line; only chips and notes wrap */
+#bt-card .tile-inline-tbl td,#bt-card .tile-inline-tbl th{overflow-wrap:normal!important;word-break:normal!important;white-space:nowrap!important}
+#bt-card .tile-inline-tbl td.bt-chips{white-space:normal!important;min-width:220px}
+#bt-card .tile-inline-tbl .bt-note{white-space:normal!important;min-width:200px;max-width:340px}
+#bt-card>.card-body{margin-top:0!important}
+#bt-search{width:180px}
+#bt-card .tile-inline-tbl td .bt-unit-sub{display:block;font-size:12px;color:var(--text-3)}
+#bt-card{gap:0!important;row-gap:0!important}
+#bt-sum{padding-top:12px!important}
+#bt-sum .lost-sum-i small{word-break:normal!important;overflow-wrap:normal!important;font-size:10.5px!important}
+#bt-card .tile-inline-tbl td,#bt-card .tile-inline-tbl thead th{padding:7px 10px!important}
+#bt-card .tile-inline-tbl tr.bt-empty-row td{width:auto!important;text-align:center!important;padding:28px 12px!important;color:var(--text-3)}
+#bt-card .tile-inline-tbl tr.bt-empty-row:hover{background:transparent}

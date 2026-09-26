@@ -85,6 +85,8 @@
   "absent_preview_date",
   "absent_preview",
   "absent_run_now",
+  "attendance_request_section",
+  "attendance_request_approvers",
   "attendance_filters_tab",
   "attendance_payroll_section",
   "show_employee_summary",
@@ -748,13 +750,24 @@
    "fieldtype": "Check",
    "label": "Disable Week Off Change",
    "description": "On the Monthly Attendance Sheet"
+  },
+  {
+   "fieldname": "attendance_request_section",
+   "fieldtype": "Section Break",
+   "label": "Attendance Request Approvers"
+  },
+  {
+   "fieldname": "attendance_request_approvers",
+   "fieldtype": "Table",
+   "label": "Attendance Request Approvers",
+   "options": "Attendance Request Approver"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-26 03:00:00.000000",
+ "modified": "2026-09-26 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

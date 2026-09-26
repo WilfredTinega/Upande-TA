@@ -69,6 +69,31 @@
   {
    "child": 0,
    "collapsible": 1,
+   "icon": "utensils",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Canteen Analysis",
+   "link_type": "URL",
+   "open_in_new_tab": 1,
+   "show_arrow": 0,
+   "type": "Link",
+   "url": "/canteen-analysis"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "receipt",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Daily Meal Cost",
+   "link_to": "Daily Meal Cost",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
    "icon": "fingerprint",
    "indent": 1,
    "keep_closed": 1,
@@ -233,7 +258,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-22 00:00:00",
+ "modified": "2026-09-26 18:00:00",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "module_onboarding": "Upande TA Onboarding",

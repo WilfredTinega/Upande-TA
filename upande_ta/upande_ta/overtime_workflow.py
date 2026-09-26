@@ -85,7 +85,7 @@ DRAFT = Stage(
 APPROVALS = (
 	Stage(
 		state="Pending Approval",
-		role="HR Manager Kaitet",
+		role="HR Manager",
 		action="Approve",
 		colour="Primary",
 		role_profiles=(),
@@ -93,13 +93,13 @@ APPROVALS = (
 )
 
 #: Approved is the approval: docstatus 1 is what Bulk Overtime pays from.
-APPROVED = Stage(state="Approved", role="HR Manager Kaitet", colour="Success", doc_status="1")
+APPROVED = Stage(state="Approved", role="HR Manager", colour="Success", doc_status="1")
 
 #: A rejection stays a draft — see the module docstring.
 REJECTED = Stage(state="Rejected", role="Farm Manager", colour="Danger", doc_status="0")
 
 #: So the Cancel button leaves a truthful label rather than "Approved".
-CANCELLED = Stage(state="Cancelled", role="HR Manager Kaitet", colour="Inverse", doc_status="2")
+CANCELLED = Stage(state="Cancelled", role="HR Manager", colour="Inverse", doc_status="2")
 
 REJECT_ACTION = "Reject"
 REOPEN_ACTION = "Reopen"

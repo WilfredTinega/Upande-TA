@@ -33,4 +33,17 @@ def get_context(context):
 	# portal container crops them.
 	context.full_width = 1
 	context.title = frappe._("Attendance Insights")
+	context.default_company = default_company()
 	return context
+
+
+def default_company():
+	"""The signed-in user's default Company, else the site's, as long as the
+	user may see it — the page's company picker and trend start from it."""
+	from upande_ta.upande_ta.api.attendance_insights import get_allowed_companies
+
+	company = frappe.defaults.get_user_default("Company") or frappe.defaults.get_global_default("company")
+	allowed = get_allowed_companies()
+	if allowed and company not in allowed:
+		company = sorted(allowed)[0]
+	return company or ""
