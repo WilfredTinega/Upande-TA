@@ -493,22 +493,18 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		rows = self.rows_by_date(self.make_bulk_overtime())
 		self.assertEqual(rows[self.working_day].biometric_hours, 2.5)
 
-	def test_manual_override_survives_a_refetch_and_is_capped_at_the_request(self):
+	def test_approved_hours_cannot_be_typed_in(self):
+		"""Hours come from the attendance only: a figure typed into Approved,
+		or a row marked as overridden, goes back to what was worked."""
 		self.make_request({self.no_punch_day: 2})
 		doc = self.make_bulk_overtime()
-
 		row = self.own_rows(doc)[0]
 		row.manual_override = 1
 		row.approved_hours = 2
-		doc.override_reason = "Scanner missed the clock-out"
-		doc.get_overtime()
+		doc.refresh_entries()
 
 		row = self.own_rows(doc)[0]
-		self.assertEqual((row.manual_override, row.approved_hours), (1, 2))
-
-		row.approved_hours = 5
-		with self.assertRaises(frappe.ValidationError):
-			doc.save()
+		self.assertEqual((row.manual_override, row.approved_hours), (0, 0))
 
 	def test_submit_creates_a_slip_and_an_additional_salary(self):
 		self.make_request({self.working_day: 2, self.rest_day: 4})
@@ -1007,119 +1003,46 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		)
 
 	# ──────────────────────────────────────────────────────────────────────
-	# Biometric hours entered by hand
+	# Hours come from the attendance, never from typing
 	# ──────────────────────────────────────────────────────────────────────
 
-	def _type_biometric(self, doc, hours):
-		row = self.own_rows(doc)[0]
-		row.manual_biometric_hours = 1
-		row.biometric_hours = hours
-		return row
-
-	def test_hand_entered_biometric_is_the_overtime(self):
-		"""A scanner that missed the clock-out leaves Present with no hours.
-		The overtime worked is typed as the Biometric figure, and paid up to
-		the request."""
-		self.make_request({self.no_punch_day: 2})
+	def test_typed_biometric_hours_go_back_to_the_attendance(self):
+		self.make_request({self.working_day: 2})
 		doc = self.make_bulk_overtime()
-		self.assertEqual(self.own_rows(doc)[0].status, "No Clock-Out")
-
-		self._type_biometric(doc, 2)
+		row = self.own_rows(doc)[0]
+		row.manual_biometric_hours = 1  # as a batch saved before the change may carry
+		row.biometric_hours = 5
 		doc.refresh_entries()
 
 		row = self.own_rows(doc)[0]
-		self.assertEqual((row.biometric_hours, row.approved_hours, row.status), (2, 2, "Matched"))
+		self.assertEqual((row.manual_biometric_hours, row.biometric_hours), (0, 2.5))
+		self.assertEqual(row.approved_hours, 2)
+
+	def test_a_missing_clock_out_pays_nothing(self):
+		self.make_request({self.no_punch_day: 2})
+		row = self.own_rows(self.make_bulk_overtime())[0]
+		self.assertEqual((row.status, row.approved_hours), ("No Clock-Out", 0))
 
 	def test_worked_stays_the_attendance(self):
-		"""Worked is never typed: it is what the attendance says, whatever is
-		entered as Biometric — and an old hand-typed Worked goes back to it."""
+		"""Worked is never typed: it is what the attendance says — and an old
+		hand-typed Worked goes back to it."""
 		self.make_request({self.working_day: 2})
 		doc = self.make_bulk_overtime()
 		row = self.own_rows(doc)[0]
 		row.manual_working_hours = 1  # the old way, on a batch saved before
 		row.working_hours = 2
-		self._type_biometric(doc, 1)
 		doc.refresh_entries()
 
 		row = self.own_rows(doc)[0]
 		self.assertEqual(row.working_hours, 11.5)
 		self.assertFalse(row.manual_working_hours)
-		self.assertEqual(row.approved_hours, 1)
-
-	def test_hand_entered_biometric_pays_a_day_without_attendance(self):
-		"""The scanner can fail so badly there is no attendance at all."""
-		from frappe.utils import add_days
-
-		bare_day = add_days(self.from_date, 5)
-		self.make_request({bare_day: 2})
-		doc = self.make_bulk_overtime()
-		self._type_biometric(doc, 1.5)
-		doc.refresh_entries()
-
-		row = self.own_rows(doc)[0]
-		self.assertEqual((row.approved_hours, row.status), (1.5, "Worked Less"))
-
-	def test_hand_entered_biometric_is_capped_at_the_request(self):
-		self.make_request({self.no_punch_day: 2})
-		doc = self.make_bulk_overtime()
-		self._type_biometric(doc, 5)
-		doc.refresh_entries()
-
-		row = self.own_rows(doc)[0]
-		self.assertEqual((row.approved_hours, row.status), (2, "Capped at Request"))
-
-	def test_hand_entered_biometric_needs_a_reason_to_be_paid(self):
-		"""One reason, on the batch, at submit — saving a half-finished grid
-		is fine, paying on HR's word without saying why is not."""
-		self.make_request({self.no_punch_day: 2})
-		doc = self.make_bulk_overtime()
-		self._type_biometric(doc, 2)
-		doc.insert(ignore_permissions=True)
-
-		with self.assertRaises(frappe.ValidationError) as caught:
-			doc.submit()
-		self.assertIn("reason", frappe.utils.strip_html(str(caught.exception)).lower())
-
-		doc.reload()
-		doc.override_reason = "Scanner missed the clock-out"
-		doc.save(ignore_permissions=True)
-		doc.submit()
-		self.assertEqual(doc.docstatus, 1)
-
-	def test_a_manual_override_needs_the_same_one_reason(self):
-		self.make_request({self.no_punch_day: 2})
-		doc = self.make_bulk_overtime()
-
-		row = self.own_rows(doc)[0]
-		row.manual_override = 1
-		row.approved_hours = 2
-		doc.insert(ignore_permissions=True)
-
-		with self.assertRaises(frappe.ValidationError):
-			doc.submit()
-
-		doc.reload()
-		doc.override_reason = "Scanner missed the clock-out"
-		doc.save(ignore_permissions=True)
-		doc.submit()
-		self.assertEqual(doc.docstatus, 1)
-
-	def test_hand_entered_biometric_survives_a_refetch(self):
-		self.make_request({self.no_punch_day: 2})
-		doc = self.make_bulk_overtime()
-		self._type_biometric(doc, 1.25)
-		doc.override_reason = "Scanner missed the clock-out"
-		doc.get_overtime()
-
-		row = self.own_rows(doc)[0]
-		self.assertEqual((row.manual_biometric_hours, row.biometric_hours, row.approved_hours), (1, 1.25, 1.25))
+		self.assertEqual(row.approved_hours, 2)
 
 	def test_untouched_rows_still_come_from_the_biometric(self):
 		self.make_request({self.working_day: 2})
 		doc = self.make_bulk_overtime()
 
 		row = self.own_rows(doc)[0]
-		self.assertFalse(row.manual_biometric_hours)
 		self.assertEqual(row.working_hours, 11.5, "read from the attendance, not typed")
 		self.assertEqual(row.biometric_hours, 2.5)
 
@@ -1134,12 +1057,8 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 
 	def test_a_batch_paying_nothing_says_why(self):
 		"""The refusal names each row and why it pays nothing."""
-		self.make_request({self.working_day: 2})
+		self.make_request({self.no_punch_day: 2})
 		doc = self.make_bulk_overtime()
-		for row in self.own_rows(doc):
-			row.manual_biometric_hours = 1
-			row.biometric_hours = 0
-		doc.override_reason = "scanner failed"
 		doc.insert(ignore_permissions=True)
 		others = [row for row in doc.bulk_overtime_entries if row.employee != self.employee]
 		if any(row.approved_hours for row in others):
@@ -1149,7 +1068,7 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 			doc.submit()
 		message = frappe.utils.strip_html(str(caught.exception))
 		self.assertIn("no approved hours to pay", message)
-		self.assertIn("Biometric set to 0 by hand", message)
+		self.assertIn("No Clock-Out", message)
 
 	def _punch(self, date, clock):
 		from frappe.utils import get_datetime
@@ -1370,6 +1289,303 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		]
 		self.assertTrue(paying, "the daily run should have paid it")
 		self.assertTrue(set(paying) & set(built))
+
+	# ──────────────────────────────────────────────────────────────────────
+	# Hours Budget: approved for a department, allocated from the attendance
+	# ──────────────────────────────────────────────────────────────────────
+
+	#: What the fixture attendance works out to beyond the 9h shift: 2.5 on
+	#: the working day, 4 on the rest day, 5 on the holiday, 1 on the short day.
+	WORKED_OVERTIME = 12.5
+
+	def _budget_department(self) -> str:
+		"""A department of this test's own, so the site's real employees in
+		it cannot eat into the budgets these tests set."""
+		department = frappe.get_doc(
+			{"doctype": "Department", "department_name": f"{PREFIX} Budget Dept", "company": self.company}
+		).insert(ignore_permissions=True, ignore_if_duplicate=True)
+		frappe.db.set_value("Employee", self.employee, "department", department.name)
+		return department.name
+
+	def make_budget_request(self, hours, submit=True, weekly_limit=False, to_date=None, **line):
+		line.setdefault("department", self._budget_department())
+		request = frappe.get_doc(
+			{
+				"doctype": "Overtime Request",
+				"company": self.company,
+				"request_mode": "Hours Budget",
+				"request_for": "Date Range",
+				"overtime_date": self.from_date,
+				"to_date": to_date or self.to_date,
+				"reason": "Peak season",
+				"overtime_type": OT_TYPE,
+				"budgets": [dict(budget_hours=hours, **line)],
+			}
+		)
+		request.flags.ignore_weekly_limit = not weekly_limit
+		request.insert(ignore_permissions=True)
+		if submit:
+			request.submit()
+		return request
+
+	def test_a_budget_names_nobody(self):
+		request = self.make_budget_request(40, submit=False)
+		self.assertEqual(request.employees, [])
+		self.assertEqual(request.total_requested_hours, 40)
+		self.assertEqual(request.number_of_employees, 0)
+
+	def test_a_budget_needs_a_department_or_unit(self):
+		with self.assertRaises(frappe.ValidationError):
+			self.make_budget_request(40, submit=False, department=None)
+
+	def test_a_department_has_one_budget_a_week(self):
+		self.make_budget_request(40, submit=False, weekly_limit=True)
+		with self.assertRaises(frappe.ValidationError):
+			self.make_budget_request(40, submit=False, weekly_limit=True)
+
+	def test_a_budget_pays_whoever_worked_overtime_in_it(self):
+		request = self.make_budget_request(40)
+		doc = self.make_bulk_overtime_for([request.name])
+		rows = self.rows_by_date(doc)
+
+		self.assertEqual(rows[self.working_day].approved_hours, 2.5)
+		self.assertEqual(rows[self.rest_day].approved_hours, 4)
+		self.assertEqual(rows[self.public_holiday].approved_hours, 5)
+		self.assertEqual(rows[self.short_day].approved_hours, 1)
+		for row in rows.values():
+			self.assertEqual(row.overtime_request, request.name)
+			self.assertEqual(row.overtime_budget, request.budgets[0].name)
+			self.assertEqual(row.requested_hours, row.biometric_hours, "nobody named them, so they ask for what they worked")
+
+	def test_a_missing_clock_out_is_not_listed_on_a_budget(self):
+		"""Nobody named them and no hours can be typed in, so a day with no
+		hours to pay is nothing for HR to act on."""
+		doc = self.make_bulk_overtime_for([self.make_budget_request(40).name])
+		self.assertNotIn(self.no_punch_day, self.rows_by_date(doc))
+
+	def test_a_day_without_overtime_is_not_listed(self):
+		from frappe.utils import add_days
+
+		on_time = add_days(self.from_date, 5)
+		self._mark_attendance(on_time, 9)
+		doc = self.make_bulk_overtime_for([self.make_budget_request(40).name])
+		self.assertNotIn(on_time, self.rows_by_date(doc))
+
+	def test_a_name_on_a_request_wins_over_a_budget(self):
+		named = self.make_request({self.working_day: 2})[0]
+		budget = self.make_budget_request(40)
+		doc = self.make_bulk_overtime_for([named, budget.name])
+		row = self.rows_by_date(doc)[self.working_day]
+		self.assertEqual(row.overtime_request, named)
+		self.assertFalse(row.overtime_budget)
+		self.assertEqual(row.approved_hours, 2)
+
+	def test_going_over_budget_is_refused_on_submit(self):
+		doc = self.make_bulk_overtime_for([self.make_budget_request(5).name])
+		doc.insert(ignore_permissions=True)  # only warned: the rows can still be worked down
+		with self.assertRaises(frappe.ValidationError) as caught:
+			doc.submit()
+		self.assertIn("budget", str(caught.exception).lower())
+
+	def test_removing_rows_to_fit_the_budget_lets_it_through(self):
+		doc = self.make_bulk_overtime_for([self.make_budget_request(5).name])
+		for row in list(self.own_rows(doc)):
+			if row.overtime_date not in (self.working_day, self.short_day):
+				doc.remove(row)
+		doc.insert(ignore_permissions=True)
+		doc.submit()
+		self.assertEqual(doc.docstatus, 1)
+
+	def test_submit_records_the_hours_used_and_cancel_gives_them_back(self):
+		request = self.make_budget_request(40)
+		line = request.budgets[0].name
+		doc = self.make_bulk_overtime_for([request.name])
+		doc.insert(ignore_permissions=True)
+		doc.submit()
+
+		used, left = frappe.db.get_value("Overtime Request Budget", line, ["hours_used", "hours_left"])
+		self.assertEqual(used, self.WORKED_OVERTIME)
+		self.assertEqual(left, 40 - self.WORKED_OVERTIME)
+
+		doc.reload()
+		doc.cancel()
+		self.assertEqual(frappe.db.get_value("Overtime Request Budget", line, "hours_used"), 0)
+
+	def test_a_second_batch_counts_what_the_first_paid(self):
+		request = self.make_budget_request(5)
+		line = request.budgets[0].name
+		first = self.make_bulk_overtime_for([request.name])
+		for row in list(self.own_rows(first)):
+			if row.overtime_date != self.working_day:
+				first.remove(row)
+		first.insert(ignore_permissions=True)
+		first.submit()
+
+		# HRMS allows one Overtime Slip per employee per period, so a later
+		# batch is for later days; its row is built directly to test the sum
+		second = frappe.get_doc(
+			{
+				"doctype": "Bulk Overtime",
+				"company": self.company,
+				"bulk_overtime_entries": [
+					{"employee": self.employee, "overtime_budget": line, "approved_hours": 4},
+				],
+			}
+		)
+		usage = {u.line.name: u for u in second.budget_usage()}
+		self.assertEqual(usage[line].elsewhere, 2.5)
+		self.assertEqual(usage[line].here, 4)
+		with self.assertRaises(frappe.ValidationError):
+			second.check_budgets(throw=True)  # 2.5 + 4 is past the 5 budgeted
+
+	def test_the_picker_offers_a_budget(self):
+		request = self.make_budget_request(40)
+		doc = frappe.get_doc({"doctype": "Bulk Overtime", "company": self.company})
+		offered = {r.name: r for r in doc.get_approved_requests()}
+		self.assertIn(request.name, offered)
+		self.assertEqual(offered[request.name].request_mode, "Hours Budget")
+		self.assertEqual(offered[request.name].budget_left, 40)
+
+	def test_days_left_on_a_budget_are_only_days_with_overtime(self):
+		from frappe.utils import add_days
+
+		from upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime import outstanding_days
+
+		on_time = add_days(self.from_date, 5)
+		self._mark_attendance(on_time, 9)
+		request = self.make_budget_request(40)
+		dates = {row.overtime_date for row in outstanding_days(request.name) if row.employee == self.employee}
+		self.assertNotIn(on_time, dates)
+		self.assertIn(self.working_day, dates)
+
+
+	def test_only_the_employees_chosen_are_paid_from_a_budget(self):
+		request = self.make_budget_request(40)
+		doc = frappe.get_doc({"doctype": "Bulk Overtime", "company": self.company})
+		doc.get_overtime(overtime_requests=[request.name], budget_employees=[])
+		self.assertEqual(self.own_rows(doc), [], "nobody ticked, nobody paid")
+
+		doc.get_overtime(overtime_requests=[request.name], budget_employees=[self.employee])
+		self.assertEqual(sum(r.approved_hours for r in self.own_rows(doc)), self.WORKED_OVERTIME)
+
+	def test_the_choice_lists_who_worked_overtime_with_their_hours(self):
+		request = self.make_budget_request(40)
+		doc = frappe.get_doc({"doctype": "Bulk Overtime", "company": self.company})
+		result = doc.get_budget_candidates(overtime_requests=[request.name])
+
+		mine = [e for e in result["employees"] if e.employee == self.employee]
+		self.assertEqual(len(mine), 1)
+		self.assertEqual((mine[0].days, mine[0].hours), (4, self.WORKED_OVERTIME))
+		self.assertEqual([b.name for b in result["budgets"]], [request.budgets[0].name])
+		self.assertEqual(doc.bulk_overtime_entries, [], "choosing leaves the form's table alone")
+
+	def test_a_budget_is_never_batched_automatically(self):
+		self.assertIsNone(self._auto(self.make_budget_request(40).name))
+
+	def test_the_request_form_does_not_build_a_budget_batch_itself(self):
+		from upande_ta.upande_ta.doctype.overtime_request.overtime_request import make_bulk_overtime
+
+		with self.assertRaises(frappe.ValidationError):
+			make_bulk_overtime(self.make_budget_request(40).name)
+
+	def test_a_budget_holds_to_its_max_employees(self):
+		from frappe.utils import add_days, getdate, nowdate
+
+		department = self._budget_department()
+		gender = frappe.get_all("Gender", limit=1, pluck="name")[0]
+		second = self._make_employee(add_days(getdate(nowdate()), -400), gender)
+		frappe.db.set_value("Employee", second, "department", department)
+		attendance = frappe.get_doc(
+			{
+				"doctype": "Attendance",
+				"employee": second,
+				"attendance_date": self.working_day,
+				"status": "Present",
+				"company": self.company,
+				"shift": SHIFT,
+				"working_hours": 11,
+			}
+		)
+		attendance.insert(ignore_permissions=True)
+		attendance.submit()
+
+		request = self.make_budget_request(40, department=department, max_employees=1)
+		doc = self.make_bulk_overtime_for([request.name])
+		self.assertEqual({r.employee for r in doc.bulk_overtime_entries} & {self.employee, second}, {self.employee, second})
+		doc.insert(ignore_permissions=True)
+		with self.assertRaises(frappe.ValidationError) as caught:
+			doc.submit()
+		self.assertIn("allows 1", frappe.utils.strip_html(str(caught.exception)))
+
+
+	# ──────────────────────────────────────────────────────────────────────
+	# Leave, and a budget's own period
+	# ──────────────────────────────────────────────────────────────────────
+
+	def _on_leave(self, date):
+		"""On Leave attendance, written directly: HRMS wants a Leave Type
+		with an allocation behind it, which is beside the point here."""
+		attendance = frappe.get_doc(
+			{
+				"doctype": "Attendance",
+				"employee": self.employee,
+				"attendance_date": date,
+				"status": "On Leave",
+				"company": self.company,
+				"docstatus": 1,
+			}
+		)
+		attendance.db_insert()
+
+	def test_a_day_on_leave_is_left_out_not_counted_as_missing(self):
+		from frappe.utils import add_days
+
+		leave_day = add_days(self.from_date, 5)
+		self._on_leave(leave_day)
+		request = self.make_range_request(self.from_date, self.to_date, 2)
+		doc = frappe.get_doc({"doctype": "Bulk Overtime", "company": self.company})
+		result = doc.get_overtime(overtime_requests=[request.name])
+
+		self.assertNotIn(leave_day, self.rows_by_date(doc))
+		self.assertEqual(result["days_on_leave"], 1)
+		# the last day has no attendance at all, and is still reported as such
+		self.assertEqual(result["days_without_attendance"], 1)
+
+	def test_a_single_day_on_leave_gets_no_row(self):
+		from frappe.utils import add_days
+
+		leave_day = add_days(self.from_date, 5)
+		self._on_leave(leave_day)
+		self.make_request({leave_day: 2})
+		doc = self.make_bulk_overtime()
+		self.assertNotIn(leave_day, self.rows_by_date(doc))
+
+	def test_a_budget_batch_takes_the_budget_period(self):
+		from frappe.utils import add_days, getdate, nowdate
+
+		ends = add_days(getdate(nowdate()), 3)
+		request = self.make_budget_request(40, to_date=ends)
+		doc = frappe.get_doc({"doctype": "Bulk Overtime", "company": self.company})
+		doc.get_overtime(overtime_requests=[request.name])
+		self.assertEqual((getdate(doc.from_date), getdate(doc.to_date)), (getdate(self.from_date), ends))
+
+		doc.insert(ignore_permissions=True)  # saved early is fine
+		with self.assertRaises(frappe.ValidationError) as caught:
+			doc.submit()
+		self.assertIn("once the period is over", frappe.utils.strip_html(str(caught.exception)))
+
+
+	def test_the_batch_names_its_week(self):
+		doc = frappe.get_doc({"doctype": "Bulk Overtime", "company": self.company})
+		doc.from_date, doc.to_date = "2026-08-31", "2026-09-06"
+		doc.set_week()
+		self.assertEqual(doc.week, "Week 36, 2026")
+		doc.from_date = "2026-08-24"
+		doc.set_week()
+		self.assertEqual(doc.week, "Week 35 – 36, 2026")
+		doc.from_date, doc.to_date = "2025-12-29", "2026-01-11"
+		doc.set_week()
+		self.assertEqual(doc.week, "Week 01 – 02, 2026", "ISO week 1 of 2026 starts in December")
 
 
 if __name__ == "__main__":

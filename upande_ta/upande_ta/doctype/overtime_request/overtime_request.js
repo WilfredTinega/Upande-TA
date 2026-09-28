@@ -98,6 +98,8 @@ frappe.ui.form.on("Overtime Request", {
 		}));
 		frm.set_query("department", () => ({ filters: { company: frm.doc.company } }));
 		frm.set_query("custom_farm", () => ({ filters: { company: frm.doc.company } }));
+		frm.set_query("department", "budgets", () => ({ filters: { company: frm.doc.company } }));
+		frm.set_query("custom_farm", "budgets", () => ({ filters: { company: frm.doc.company } }));
 	},
 
 	refresh(frm) {
@@ -105,8 +107,34 @@ frappe.ui.form.on("Overtime Request", {
 		frm.set_df_property("employees", "cannot_add_rows", 1);
 		frm.toggle_display(["get_employees", "default_requested_hours"], frm.doc.docstatus === 0);
 		frm.events.dress_period_fields(frm);
+		frm.events.dress_budget_fields(frm);
 
 		if (frm.doc.docstatus === 1) frm.events.show_bulk_overtime_button(frm);
+	},
+
+	/** Hours Used and Left only mean something once batches pay from it. */
+	dress_budget_fields(frm) {
+		const grid = frm.fields_dict.budgets && frm.fields_dict.budgets.grid;
+		if (!grid) return;
+		const submitted = frm.doc.docstatus === 1;
+		grid.update_docfield_property("hours_used", "in_list_view", submitted ? 1 : 0);
+		grid.update_docfield_property("hours_left", "in_list_view", submitted ? 1 : 0);
+		grid.reset_grid();
+	},
+
+	request_mode(frm) {
+		// the other mode's rows are dropped on save, so say so while it is
+		// still one click to switch back
+		const hidden =
+			frm.doc.request_mode === "Hours Budget" ? frm.doc.employees : frm.doc.budgets;
+		if ((hidden || []).length) {
+			frappe.show_alert({
+				message: __("The {0} row(s) of the other mode will be removed on save.", [
+					hidden.length,
+				]),
+				indicator: "orange",
+			});
+		}
 	},
 
 	/** Create > Bulk Overtime once the request has cleared its last approval
@@ -138,6 +166,15 @@ frappe.ui.form.on("Overtime Request", {
 	/** Build and save the batch on the server, then open it: its rows are
 	 * already stored, so leaving the form cannot lose them. */
 	make_bulk_overtime(frm) {
+		if (frm.doc.request_mode === "Hours Budget") {
+			// a budget names nobody, so the batch opens on choosing who it pays
+			frappe._bo_budget_request = frm.doc.name;
+			frappe.new_doc("Bulk Overtime", {
+				company: frm.doc.company,
+				custom_farm: frm.doc.custom_farm || "",
+			});
+			return;
+		}
 		frappe
 			.call({
 				method: OT_MAKE_BULK_METHOD,
@@ -167,19 +204,6 @@ frappe.ui.form.on("Overtime Request", {
 			ot_hours_label(frm)
 		);
 		frm.refresh_field("employees");
-		frm.events.describe_week(frm);
-	},
-
-	/** Spell out the dates a week number lands on, next to the list itself. */
-	describe_week(frm) {
-		const dates =
-			frm.doc.request_for === "Week" && frm.doc.overtime_date && frm.doc.to_date
-				? __("{0} to {1}", [
-						frappe.datetime.str_to_user(frm.doc.overtime_date),
-						frappe.datetime.str_to_user(frm.doc.to_date),
-				  ])
-				: __("ISO week: Monday to Sunday.");
-		frm.set_df_property("week", "description", dates);
 	},
 
 	/** Week and Month fix both ends; Single Day collapses them. The dates are
@@ -234,7 +258,6 @@ frappe.ui.form.on("Overtime Request", {
 		} finally {
 			frm._setting_period = false;
 		}
-		frm.events.describe_week(frm);
 	},
 
 	request_for(frm) {
@@ -303,6 +326,11 @@ frappe.ui.form.on("Overtime Request", {
 
 	custom_farm(frm) {
 		frm._last_filters = null;
+	},
+
+	budgets_add(frm, cdt, cdn) {
+		// a new line starts from the request's own Unit/Division
+		if (frm.doc.custom_farm) frappe.model.set_value(cdt, cdn, "custom_farm", frm.doc.custom_farm);
 	},
 
 	default_requested_hours(frm) {
@@ -431,7 +459,6 @@ frappe.ui.form.on("Overtime Request", {
 					fieldname: "requested_hours",
 					label: ot_hours_label(frm),
 					default: frm.doc.default_requested_hours || "",
-					description: __("For everyone you tick."),
 				},
 				{ fieldtype: "Section Break" },
 				{ fieldtype: "HTML", fieldname: "summary" },
