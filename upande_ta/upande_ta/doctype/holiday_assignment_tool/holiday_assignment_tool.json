@@ -1,0 +1,121 @@
+{
+ "actions": [],
+ "creation": "2026-09-17 09:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "assignment_section",
+  "holiday_list",
+  "column_break_assignment",
+  "from_date",
+  "column_break_pfzd",
+  "to_date",
+  "section_break_employees",
+  "get_employees",
+  "employees"
+ ],
+ "fields": [
+  {
+   "description": "Whose employees this run is for. The Select Employees list is scoped to it.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "assignment_section",
+   "fieldtype": "Section Break",
+   "label": "Holiday Assignment"
+  },
+  {
+   "fieldname": "holiday_list",
+   "fieldtype": "Link",
+   "ignore_user_permissions": 1,
+   "in_list_view": 1,
+   "label": "Holiday List",
+   "options": "Holiday List",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_assignment",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "from_date",
+   "fieldtype": "Date",
+   "label": "From Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_pfzd",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Leave blank for an open-ended assignment",
+   "fieldname": "to_date",
+   "fieldtype": "Date",
+   "label": "To Date"
+  },
+  {
+   "fieldname": "section_break_employees",
+   "fieldtype": "Section Break",
+   "label": "Employees"
+  },
+  {
+   "fieldname": "get_employees",
+   "fieldtype": "Button",
+   "label": "Select Employees"
+  },
+  {
+   "cannot_add_rows": 1,
+   "fieldname": "employees",
+   "fieldtype": "Table",
+   "label": "Employees",
+   "options": "Holiday Assignment Tool Employee"
+  }
+ ],
+ "hide_toolbar": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-09-23 01:48:00.000000",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Holiday Assignment Tool",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "HR User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

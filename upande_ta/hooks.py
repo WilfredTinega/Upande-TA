@@ -33,9 +33,17 @@ before_job = [
 ]
 
 
+# Tells the desk whether a week off can be changed from a Monthly Attendance
+# Sheet day cell, so the client patch knows without an extra round trip.
+extend_bootinfo = [
+	"upande_ta.upande_ta.overrides.monthly_attendance_sheet.extend_bootinfo",
+]
+
+
 app_include_js = [
-	
 	"monthly_attendance_sheet_colors.bundle.js",
+	# the "existing week offs affected" confirmation used by Holiday Assignment Tool
+	"/assets/upande_ta/js/holiday_overlap_warning.js",
 ]
 
 after_install = [

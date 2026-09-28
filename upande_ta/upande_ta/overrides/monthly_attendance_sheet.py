@@ -4,7 +4,7 @@ import re
 
 import frappe
 from frappe import _
-from frappe.utils import cstr, getdate
+from frappe.utils import cint, cstr, getdate
 
 from upande_ta.upande_ta.holiday_list import (
 	fill_holiday_list_date_gaps,
@@ -667,3 +667,43 @@ def disable_prepared_report():
 			title="upande_ta disable_prepared_report failed",
 			message=frappe.get_traceback(),
 		)
+
+
+#: Where the switches this report reads live.
+SETTING_DOCTYPE = "Biometric Setting"
+
+
+def _setting_enabled(fieldname: str, default: bool) -> bool:
+	"""Read one Check on Biometric Setting, with "never saved" as `default`.
+
+	A Single materialises its field defaults only when it is first saved, so a
+	site that has never opened Biometric Setting has no row for a newly shipped
+	field at all. That must read as the field's own default, or a setting would
+	behave one way until somebody saved a form they have no reason to open and
+	another way afterwards — hence the raw read of `tabSingles` rather than
+	``get_single_value``, which casts a missing Check to 0.
+	"""
+	try:
+		row = frappe.db.sql(
+			"""SELECT value FROM tabSingles WHERE doctype = %s AND field = %s""",
+			(SETTING_DOCTYPE, fieldname),
+		)
+	except Exception:
+		# the setting doctype is not on this site, or has not synced yet
+		return default
+	return bool(cint(row[0][0])) if row else default
+
+
+def week_off_change_disabled() -> bool:
+	"""Whether changing a week off from a day cell is switched off. Off by
+	default, i.e. the change is available."""
+	return _setting_enabled("disable_week_off_change", False)
+
+
+def extend_bootinfo(bootinfo=None):
+	"""Tell the desk whether the week-off change is available, so the sheet
+	knows without a round trip when a day cell is clicked."""
+	try:
+		bootinfo.upande_ta_week_off_change_disabled = week_off_change_disabled()
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Monthly Attendance Sheet bootinfo")

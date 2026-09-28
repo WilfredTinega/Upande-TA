@@ -91,7 +91,9 @@
   "absent_marking_column_actions",
   "absent_preview_date",
   "absent_preview",
-  "absent_run_now"
+  "absent_run_now",
+  "monthly_attendance_sheet_section",
+  "disable_week_off_change"
  ],
  "fields": [
   {
@@ -594,13 +596,25 @@
    "fieldname": "attendance_tab",
    "fieldtype": "Tab Break",
    "label": "Attendance"
+  },
+  {
+   "fieldname": "monthly_attendance_sheet_section",
+   "fieldtype": "Section Break",
+   "label": "Monthly Attendance Sheet"
+  },
+  {
+   "default": "0",
+   "description": "On the Monthly Attendance Sheet",
+   "fieldname": "disable_week_off_change",
+   "fieldtype": "Check",
+   "label": "Disable Week Off Change"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-08 09:00:00.000000",
+ "modified": "2026-09-29 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",
