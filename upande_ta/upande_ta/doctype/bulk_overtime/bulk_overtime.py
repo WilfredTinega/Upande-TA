@@ -12,9 +12,18 @@ period and takes the ones HR picks — "Select All" for the lot. Each is expande
 into one row per employee per date (a request may cover a day, a week or a
 month, and its requested hours are per day), then checked against that day's
 attendance. The hours paid are the lower of what was requested and what the
-biometric shows was worked (see ``upande_ta.upande_ta.overtime_engine``). HR
-may override a row by hand, with a reason, up to the requested hours — for a
-missing clock-out, say.
+biometric shows was worked (see ``upande_ta.upande_ta.overtime_engine``).
+Hours are never typed in: they come from the attendance, and all HR decides is
+who is paid — a row that should not be paid is removed from the table.
+
+A request made as an **Hours Budget** names nobody. **Get Overtime** lists
+the employees of the budgeted Department and/or Unit/Division whose
+attendance shows overtime in the period, and HR ticks the ones to pay; each
+row asks for what was worked, and days with no overtime are not listed. The
+batch cannot be submitted while it would take a budget past its hours or its
+Max Employees — HR removes people until it fits. See
+:meth:`BulkOvertime.check_budgets`. Because someone has to choose, a budget
+request is never turned into a batch automatically.
 
 A request with nothing left to add — every day of it already in another batch —
 is not offered, since a day is paid once. The Overtime Request form can also
@@ -44,6 +53,7 @@ from frappe.model.document import Document
 from frappe.utils import add_days, cint, date_diff, flt, get_link_to_form, getdate, today
 
 from upande_ta.upande_ta import overtime_engine as engine
+from upande_ta.upande_ta.doctype.overtime_request.overtime_request import HOURS_BUDGET, budget_scope
 
 #: Isolates one employee's Overtime Slip from the next, so every failure can be
 #: collected and reported together before the submit is rolled back.
@@ -68,11 +78,14 @@ class BulkOvertime(Document):
 		self.refresh_entries()
 		self.set_totals()
 		self.set_title()
+		self.set_week()
+		self.check_budgets(throw=False)
 
 	def before_submit(self):
 		if not any(flt(row.approved_hours) > 0 for row in self.bulk_overtime_entries):
 			self.throw_nothing_to_pay()
-		self.validate_manual_changes()
+		self.validate_budget_period_over()
+		self.check_budgets(throw=True)
 		for row in self.bulk_overtime_entries:
 			if flt(row.approved_hours) > 0 and not row.overtime_type:
 				frappe.throw(
@@ -80,18 +93,12 @@ class BulkOvertime(Document):
 				)
 
 	def throw_nothing_to_pay(self):
-		"""Refuse a batch that pays nothing, naming each row and why it is 0 —
-		most often worked hours typed by hand as the overtime rather than the
-		whole day, which then falls short of the shift."""
+		"""Refuse a batch that pays nothing, naming each row and why it is 0."""
 		lines = []
 		for row in self.bulk_overtime_entries[:MAX_NAMES_IN_MESSAGE]:
 			who = "{0}, {1}".format(row.employee_name or row.employee, frappe.format(row.overtime_date, "Date"))
 			worked, shift = flt(row.working_hours), flt(row.shift_hours)
-			if row.manual_override:
-				why = _("Approved set to 0 by hand")
-			elif row.manual_biometric_hours:
-				why = _("Biometric set to 0 by hand")
-			elif row.status in (engine.NO_ATTENDANCE, engine.NO_CLOCK_OUT, engine.NO_SHIFT):
+			if row.status in (engine.NO_ATTENDANCE, engine.NO_CLOCK_OUT, engine.NO_SHIFT):
 				why = _(row.status)
 			elif row.day_type == engine.WORKING_DAY and worked <= shift:
 				why = _("{0}h worked on a {1}h shift is no overtime").format(
@@ -107,29 +114,35 @@ class BulkOvertime(Document):
 			title=_("Nothing to Pay"),
 		)
 
-	def validate_manual_changes(self):
-		"""Rows changed by hand are paid on HR's word rather than a punch, so
-		the batch says why — once, on the document, rather than on every row."""
-		changed = [
-			row.idx
-			for row in self.bulk_overtime_entries
-			if row.manual_override or row.manual_biometric_hours
-		]
-		if changed and not (self.override_reason or "").strip():
-			frappe.throw(
-				_("Row(s) {0} were changed by hand. Give the Reason for Manual Changes before submitting.").format(
-					", ".join(str(idx) for idx in changed)
-				),
-				title=_("Reason Needed"),
-			)
-
-	def validate_dates(self):
+	def validate_dates(self, chosen=None):
 		if not (self.from_date and self.to_date):
 			return
 		if getdate(self.from_date) > getdate(self.to_date):
 			frappe.throw(_("From Date cannot be after To Date."))
-		if getdate(self.to_date) > getdate(today()):
+		# a budget's batch runs to the end of the budget, and waits for it at submit
+		if getdate(self.to_date) > getdate(today()) and not self.pays_a_budget(chosen):
 			frappe.throw(_("To Date cannot be in the future: overtime is paid once it has been worked."))
+
+	def pays_a_budget(self, chosen=None) -> bool:
+		requests = set(chosen or []) | {
+			row.overtime_request for row in self.bulk_overtime_entries if row.overtime_request
+		}
+		if not requests:
+			return False
+		return bool(
+			frappe.db.exists(
+				"Overtime Request", {"name": ["in", list(requests)], "request_mode": HOURS_BUDGET}
+			)
+		)
+
+	def validate_budget_period_over(self):
+		if self.to_date and getdate(self.to_date) > getdate(today()) and self.pays_a_budget():
+			frappe.throw(
+				_("The budget runs to {0}. Submit this batch once the period is over.").format(
+					frappe.bold(frappe.format(self.to_date, "Date"))
+				),
+				title=_("Not Yet"),
+			)
 
 	def set_totals(self):
 		rows = self.bulk_overtime_entries
@@ -146,14 +159,33 @@ class BulkOvertime(Document):
 				frappe.format(self.to_date, "Date"),
 			)
 
+	def set_week(self):
+		"""The ISO week(s) the period falls in — "Week 36, 2026", or
+		"Week 35 – 36, 2026" across two — as requests are picked by week."""
+		self.week = None
+		if not (self.from_date and self.to_date):
+			return
+		start_year, start_week, _day = getdate(self.from_date).isocalendar()
+		end_year, end_week, _day = getdate(self.to_date).isocalendar()
+		if (start_year, start_week) == (end_year, end_week):
+			self.week = f"Week {start_week:02d}, {start_year}"
+		elif start_year == end_year:
+			self.week = f"Week {start_week:02d} – {end_week:02d}, {start_year}"
+		else:
+			self.week = f"Week {start_week:02d}, {start_year} – Week {end_week:02d}, {end_year}"
+
 	# ──────────────────────────────────────────────────────────────────────
 	# Get Overtime
 	# ──────────────────────────────────────────────────────────────────────
 
 	@frappe.whitelist()
-	def get_overtime(self, overtime_requests=None):
-		"""Rebuild the table from the approved requests in the period. Rows HR
-		has overridden by hand keep their hours and reason.
+	def get_overtime(self, overtime_requests=None, budget_employees=None):
+		"""Rebuild the table from the approved requests in the period.
+
+		``budget_employees`` is who HR ticked from :meth:`get_budget_candidates`:
+		an Hours Budget names nobody, so its rows are only the people chosen.
+		Left out, everyone the budget covers who worked overtime is taken —
+		which is what the checks behind the request form's buttons count.
 
 		``overtime_requests`` is what **Get Overtime** sends when HR picks the
 		requests from the list, and the batch's own period is taken from them:
@@ -167,16 +199,13 @@ class BulkOvertime(Document):
 		self.set_period_from_requests(chosen)
 		if not (self.from_date and self.to_date):
 			frappe.throw(_("Pick the Overtime Requests to pay — the dates come from them."))
-		self.validate_dates()
+		self.validate_dates(chosen)
 
-		manual = {
-			(row.employee, str(getdate(row.overtime_date))): row
-			for row in self.bulk_overtime_entries
-			if row.manual_override or row.manual_biometric_hours
-		}
-
-		found = frappe._dict(requests=0, days_without_attendance=0)
+		found = frappe._dict(requests=0, days_without_attendance=0, days_on_leave=0)
 		requests = self._approved_request_rows(found, chosen=chosen)
+		if budget_employees is not None:
+			picked = set(_request_names(budget_employees))
+			requests = [r for r in requests if not r.get("budget") or r.employee in picked]
 		claimed = self._claimed_elsewhere(requests)
 		blocked = self._employees_with_overlapping_slips({r.employee for r in requests})
 
@@ -195,7 +224,7 @@ class BulkOvertime(Document):
 				))
 				continue
 
-			row = self.append(
+			self.append(
 				"bulk_overtime_entries",
 				{
 					"employee": request.employee,
@@ -204,32 +233,105 @@ class BulkOvertime(Document):
 					"requested_hours": request.requested_hours,
 					"overtime_type": request.overtime_type,
 					"overtime_request": request.request,
+					"overtime_budget": request.get("budget"),
+					"budget_scope": request.get("budget_scope"),
 				},
 			)
-			kept = manual.get(key)
-			if kept:
-				if kept.manual_override:
-					row.manual_override = 1
-					row.approved_hours = kept.approved_hours
-				if kept.manual_biometric_hours:
-					row.manual_biometric_hours = 1
-					row.biometric_hours = kept.biometric_hours
 
 		self.refresh_entries()
+		self.drop_budget_rows_without_overtime()
 		self.adopt_request_unit(chosen)
 		self.set_totals()
 		self.set_title()
+		self.set_week()
 
 		result = {
 			"rows": len(self.bulk_overtime_entries),
 			"left_out": sorted(set(left_out)),
 			"approved_requests": found.requests,
 			"days_without_attendance": found.days_without_attendance,
+			"days_on_leave": found.days_on_leave,
 			"picked": len(chosen),
 		}
 		if not result["rows"] and found.requests:
 			result["why"] = self._why_nothing_to_pay(chosen)
 		return result
+
+	@frappe.whitelist()
+	def get_budget_candidates(self, overtime_requests=None):
+		"""Who HR can choose from for the Hours Budget requests picked: the
+		employees each budget covers whose attendance shows overtime in the
+		period, one line per person with their days and hours, beside what is
+		left of the budget. Nothing here is saved."""
+		chosen = _request_names(overtime_requests)
+		if not self.company:
+			frappe.throw(_("Set the Company first."))
+		self.set_period_from_requests(chosen)
+		if not (self.from_date and self.to_date):
+			return {"employees": [], "budgets": []}
+
+		rows = self._budget_request_rows(chosen=chosen)
+		claimed = self._claimed_elsewhere(rows)
+		blocked = self._employees_with_overlapping_slips({row.employee for row in rows})
+		rows = [
+			row
+			for row in rows
+			if (row.employee, str(row.overtime_date)) not in claimed and row.employee not in blocked
+		]
+		# measured on a copy: this document's own table is the form's, and the
+		# desk syncs it back from whatever a whitelisted method leaves in it
+		probe = frappe.get_doc(
+			{
+				"doctype": "Bulk Overtime",
+				"company": self.company,
+				"custom_farm": self.custom_farm,
+				"from_date": self.from_date,
+				"to_date": self.to_date,
+			}
+		)
+		entries = _budget_overtime_entries(probe, rows)
+
+		people = {}
+		for entry in entries:
+			person = people.setdefault(
+				entry.employee,
+				frappe._dict(
+					employee=entry.employee,
+					employee_name=entry.employee_name,
+					budget_scope=entry.budget_scope,
+					days=0,
+					hours=0.0,
+				),
+			)
+			person.days += 1
+			person.hours = round(person.hours + flt(entry.approved_hours), 2)
+
+		records = {
+			e.name: e
+			for e in frappe.get_all(
+				"Employee",
+				filters={"name": ["in", list(people) or [""]]},
+				fields=["name", "department"]
+				+ (["custom_farm"] if "custom_farm" in frappe.db.get_table_columns("Employee") else []),
+			)
+		}
+		for person in people.values():
+			record = records.get(person.employee) or {}
+			person.department = record.get("department")
+			person.custom_farm = record.get("custom_farm")
+
+		lines = {row.budget for row in rows}
+		budgets = frappe.get_all(
+			"Overtime Request Budget",
+			filters={"name": ["in", list(lines) or [""]]},
+			fields=["name", "parent", "custom_farm", "department", "budget_hours", "hours_left", "max_employees"],
+		)
+		for line in budgets:
+			line.scope = budget_scope(line)
+		return {
+			"employees": sorted(people.values(), key=lambda p: (p.budget_scope or "", p.employee_name or "")),
+			"budgets": budgets,
+		}
 
 	def _request_scope(self):
 		"""The company/unit the batch pays for, as a join and a filter both the
@@ -271,7 +373,7 @@ class BulkOvertime(Document):
 
 		requests = frappe.db.sql(
 			f"""
-			select req.name, req.request_for, req.overtime_date,
+			select req.name, req.request_for, req.week, req.week_year, req.overtime_date,
 				coalesce(req.to_date, req.overtime_date) as to_date,
 				req.overtime_type, req.reason, req.default_requested_hours,
 				count(distinct row.employee) as employees,
@@ -300,9 +402,14 @@ class BulkOvertime(Document):
 			as_dict=True,
 		)
 
+		requests += self._approved_budget_requests(farm_join, farm_filter, values)
+		requests.sort(key=lambda r: (getdate(r.overtime_date), r.name), reverse=True)
+
 		cutoff = getdate(today())
 		offered = []
 		for request in requests:
+			request.departments = [d for d in (request.departments or "").split("||") if d]
+			request.units = [u for u in (request.get("units") or "").split("||") if u]
 			# what a batch would actually cover: overtime is paid once worked
 			request.days = date_diff(request.to_date, request.overtime_date) + 1
 			request.payable_to = min(getdate(request.to_date), cutoff)
@@ -317,12 +424,58 @@ class BulkOvertime(Document):
 			offered.append(request)
 		return offered
 
+	def _approved_budget_requests(self, farm_join, farm_filter, values) -> list:
+		"""The Hours Budget requests for the picker, shaped like the named ones.
+		A budget with no hours left is not offered: nothing more can be paid
+		from it."""
+		if not frappe.db.exists("DocType", "Overtime Request Budget"):
+			return []
+		line_farm = "and ifnull(line.custom_farm, '') in ('', %(custom_farm)s)" if farm_filter else ""
+		return frappe.db.sql(
+			f"""
+			select req.name, req.request_for, req.week, req.week_year, req.request_mode, req.overtime_date,
+				coalesce(req.to_date, req.overtime_date) as to_date,
+				req.overtime_type, req.reason, req.default_requested_hours,
+				0 as employees,
+				sum(line.budget_hours) as hours_per_day,
+				group_concat(distinct line.department order by line.department separator '||') as departments,
+				group_concat(distinct line.custom_farm order by line.custom_farm separator '||') as units,
+				sum(line.budget_hours - ifnull(line.hours_used, 0)) as budget_left,
+				exists (
+					select 1
+					from `tabBulk Overtime Entry` entry
+					join `tabBulk Overtime` bo on bo.name = entry.parent
+					where entry.parenttype = 'Bulk Overtime'
+						and bo.docstatus < 2
+						and entry.overtime_request = req.name
+				) as in_a_batch
+			from `tabOvertime Request` req
+			join `tabOvertime Request Budget` line
+				on line.parent = req.name and line.parenttype = 'Overtime Request'
+			where req.docstatus = 1
+				and req.company = %(company)s
+				and req.overtime_date <= %(today)s
+				{line_farm}
+			group by req.name
+			having budget_left > 0
+				and (not in_a_batch or max(coalesce(req.to_date, req.overtime_date)) >= %(window_start)s)
+			""",
+			values,
+			as_dict=True,
+		)
+
 	def set_period_from_requests(self, chosen):
 		"""Take the batch's own dates from the requests being paid.
 
 		The period is not something to type in beside the requests that
 		already carry it: it spans them, and stops at today, because overtime
 		is paid against attendance that has already been recorded.
+
+		An Hours Budget is the exception: the batch runs over the budget's own
+		period, whole. It is chosen from and checked against as one, and
+		since HRMS allows one Overtime Slip per employee per period, paying
+		part of it would leave the rest unpayable — so such a batch can be
+		saved early but not submitted until the period is over.
 		"""
 		if not chosen:
 			return
@@ -330,8 +483,9 @@ class BulkOvertime(Document):
 		spans = frappe.get_all(
 			"Overtime Request",
 			filters={"name": ["in", list(chosen)]},
-			fields=["name", "overtime_date", "to_date"],
+			fields=["name", "overtime_date", "to_date", "request_mode"],
 		)
+		budgeted = [span for span in spans if span.request_mode == HOURS_BUDGET and span.overtime_date]
 		# a request another batch has already paid part of starts from its
 		# first day left to pay, so this batch's slips cannot overlap that
 		# batch's — HRMS allows one Overtime Slip per employee per period
@@ -359,6 +513,9 @@ class BulkOvertime(Document):
 			return
 
 		start, end = min(starts), min(max(ends), getdate(today()))
+		if budgeted:
+			start = min([start] + [getdate(span.overtime_date) for span in budgeted])
+			end = max([end] + [getdate(span.to_date or span.overtime_date) for span in budgeted])
 		if start > end:
 			frappe.throw(
 				_(
@@ -438,6 +595,19 @@ class BulkOvertime(Document):
 		if found is not None:
 			found.requests = len({row.request for row in requests})
 
+		rows = self._named_request_rows(requests, found)
+		named = {(row.employee, getdate(row.overtime_date)) for row in rows}
+		# a name on a request is a firmer instruction than a budget, so a day
+		# someone is named for is never also taken from a pool
+		rows += [
+			row
+			for row in self._budget_request_rows(found, chosen)
+			if (row.employee, getdate(row.overtime_date)) not in named
+		]
+		rows.sort(key=lambda r: (r.employee_name or "", r.overtime_date))
+		return rows
+
+	def _named_request_rows(self, requests, found=None) -> list:
 		if not requests:
 			return []
 
@@ -445,7 +615,9 @@ class BulkOvertime(Document):
 
 		# the same lookup refresh_entries uses, so a date is dropped only when
 		# it would have shown up as "No Attendance" anyway
-		attended = set(self._attendance_by_day({r.employee for r in requests}))
+		employees = {r.employee for r in requests}
+		attended = set(self._attendance_by_day(employees))
+		on_leave = self._leave_days(employees) - attended
 		period_start, period_end = getdate(self.from_date), getdate(self.to_date)
 
 		rows = []
@@ -465,7 +637,12 @@ class BulkOvertime(Document):
 						date = add_days(date, 1)
 						continue
 
-				if is_range and (request.employee, date) not in attended:
+				if (request.employee, date) in on_leave:
+					# someone on leave was never going to work the overtime,
+					# so the day is neither paid nor counted as missing
+					if found is not None:
+						found.days_on_leave += 1
+				elif is_range and (request.employee, date) not in attended:
 					if found is not None:
 						found.days_without_attendance += 1
 				else:
@@ -480,9 +657,259 @@ class BulkOvertime(Document):
 						)
 					)
 				date = add_days(date, 1)
-
-		rows.sort(key=lambda r: (r.employee_name or "", r.overtime_date))
 		return rows
+
+	def _budget_lines(self, chosen=None) -> list:
+		"""Budget lines of the approved Hours Budget requests overlapping this
+		period. A batch for one Unit/Division takes that unit's lines and the
+		ones naming only a Department — the unit then narrows who is in them."""
+		if not frappe.db.exists("DocType", "Overtime Request Budget"):
+			return []
+		values = {"company": self.company, "from_date": self.from_date, "to_date": self.to_date}
+		filters = ""
+		if chosen:
+			filters += " and req.name in %(chosen)s"
+			values["chosen"] = tuple(chosen)
+		if self.custom_farm:
+			filters += " and ifnull(line.custom_farm, '') in ('', %(custom_farm)s)"
+			values["custom_farm"] = self.custom_farm
+		return frappe.db.sql(
+			f"""
+			select req.name as request, req.overtime_date,
+				coalesce(req.to_date, req.overtime_date) as request_to_date,
+				req.overtime_type, line.name as budget, line.custom_farm, line.department
+			from `tabOvertime Request` req
+			join `tabOvertime Request Budget` line
+				on line.parent = req.name and line.parenttype = 'Overtime Request'
+			where req.docstatus = 1
+				and req.company = %(company)s
+				and req.overtime_date <= %(to_date)s
+				and coalesce(req.to_date, req.overtime_date) >= %(from_date)s
+				{filters}
+			order by req.overtime_date, line.idx
+			""",
+			values,
+			as_dict=True,
+		)
+
+	def _budget_employees(self, lines) -> dict:
+		"""``{request: {employee: (line, employee record)}}`` — the Active
+		employees each budget line covers. Someone two lines of one request
+		both cover is counted against the more specific one, Unit/Division and
+		Department together before either alone."""
+		if not lines:
+			return {}
+		has_farm = "custom_farm" in frappe.db.get_table_columns("Employee")
+		fields = ["name", "employee_name", "department"] + (["custom_farm"] if has_farm else [])
+		scope = []
+		departments = {line.department for line in lines if line.department}
+		farms = {line.custom_farm for line in lines if line.custom_farm}
+		if departments:
+			scope.append(["department", "in", list(departments)])
+		if farms and has_farm:
+			scope.append(["custom_farm", "in", list(farms)])
+		if not scope:
+			return {}
+		filters = {"company": self.company, "status": "Active"}
+		if self.custom_farm and has_farm:
+			filters["custom_farm"] = self.custom_farm
+		employees = frappe.get_all("Employee", filters=filters, or_filters=scope, fields=fields)
+
+		by_request = {}
+		specific_first = sorted(lines, key=lambda line: not (line.department and line.custom_farm))
+		for line in specific_first:
+			covered = by_request.setdefault(line.request, {})
+			for employee in employees:
+				if employee.name in covered:
+					continue
+				if line.department and employee.department != line.department:
+					continue
+				if line.custom_farm and employee.get("custom_farm") != line.custom_farm:
+					continue
+				covered[employee.name] = (line, employee)
+		return by_request
+
+	def _budget_request_rows(self, found=None, chosen=None) -> list:
+		"""One row per employee per day with Present attendance, for everyone a
+		budget covers. Nobody is named, so each asks for nothing yet —
+		``refresh_entries`` sets that to the overtime they worked, and
+		:meth:`drop_budget_rows_without_overtime` takes out the days with none."""
+		lines = self._budget_lines(chosen)
+		if found is not None:
+			found.requests += len({line.request for line in lines})
+		covered = self._budget_employees(lines)
+		if not covered:
+			return []
+
+		everyone = {employee for request in covered.values() for employee in request}
+		if not everyone:
+			return []
+		attended = sorted(self._attendance_by_day(everyone))
+		period_start, period_end = getdate(self.from_date), getdate(self.to_date)
+		spans = {
+			line.request: (
+				max(getdate(line.overtime_date), period_start),
+				min(getdate(line.request_to_date), period_end),
+				line.overtime_type,
+			)
+			for line in lines
+		}
+
+		rows, taken = [], set()
+		for request, members in covered.items():
+			start, end, overtime_type = spans[request]
+			for employee, date in attended:
+				if employee not in members or not (start <= date <= end) or (employee, date) in taken:
+					continue
+				taken.add((employee, date))
+				line, record = members[employee]
+				rows.append(
+					frappe._dict(
+						request=request,
+						overtime_date=date,
+						overtime_type=overtime_type,
+						employee=employee,
+						employee_name=record.employee_name,
+						requested_hours=0,
+						budget=line.budget,
+						budget_scope=budget_scope(line),
+					)
+				)
+		return rows
+
+	def drop_budget_rows_without_overtime(self):
+		"""A budget covers a whole department, most of whom go home on time on
+		any given day; only the days someone worked overtime are listed."""
+		kept = [row for row in self.bulk_overtime_entries if _worth_listing(row)]
+		if len(kept) == len(self.bulk_overtime_entries):
+			return
+		self.set("bulk_overtime_entries", [])
+		for idx, row in enumerate(kept, start=1):
+			row.idx = idx
+			self.append("bulk_overtime_entries", row)
+
+	# ──────────────────────────────────────────────────────────────────────
+	# Hours Budget
+	# ──────────────────────────────────────────────────────────────────────
+
+	def budget_usage(self) -> list:
+		"""Per budget line this batch draws on: the hours and people it takes,
+		beside what submitted batches have already taken from it."""
+		lines = {row.overtime_budget for row in self.bulk_overtime_entries if row.overtime_budget}
+		if not lines:
+			return []
+
+		budgets = {
+			line.name: line
+			for line in frappe.get_all(
+				"Overtime Request Budget",
+				filters={"name": ["in", list(lines)]},
+				fields=["name", "parent", "custom_farm", "department", "budget_hours", "max_employees"],
+			)
+		}
+		taken = frappe.db.sql(
+			"""
+			select entry.overtime_budget, entry.employee, entry.approved_hours
+			from `tabBulk Overtime Entry` entry
+			join `tabBulk Overtime` bo on bo.name = entry.parent
+			where entry.parenttype = 'Bulk Overtime'
+				and bo.docstatus = 1
+				and bo.name != %(name)s
+				and entry.overtime_budget in %(lines)s
+				and entry.approved_hours > 0
+			""",
+			{"name": self.name or "", "lines": tuple(lines)},
+			as_dict=True,
+		)
+
+		usage = {}
+		for name, line in budgets.items():
+			usage[name] = frappe._dict(
+				line=line, scope=budget_scope(line), elsewhere=0.0, here=0.0, people=set()
+			)
+		for row in taken:
+			if row.overtime_budget in usage:
+				usage[row.overtime_budget].elsewhere += flt(row.approved_hours)
+				usage[row.overtime_budget].people.add(row.employee)
+		for row in self.bulk_overtime_entries:
+			if row.overtime_budget in usage and flt(row.approved_hours) > 0:
+				usage[row.overtime_budget].here += flt(row.approved_hours)
+				usage[row.overtime_budget].people.add(row.employee)
+		return list(usage.values())
+
+	def check_budgets(self, throw: bool):
+		"""A budget is the most that may be paid from it, in hours and in
+		people. On save this only warns, so people can be removed until it
+		fits; the submit refuses."""
+		problems = []
+		for use in self.budget_usage():
+			budget = flt(use.line.budget_hours)
+			total = use.elsewhere + use.here
+			if total > budget + 0.001:
+				problems.append(
+					_("{0} ({1}): {2} h of {3} h budgeted, {4} h over.").format(
+						frappe.bold(use.scope),
+						get_link_to_form("Overtime Request", use.line.parent),
+						frappe.format(total, "Float"),
+						frappe.format(budget, "Float"),
+						frappe.bold(frappe.format(total - budget, "Float")),
+					)
+					+ (
+						" " + _("{0} h already paid by other batches.").format(frappe.format(use.elsewhere, "Float"))
+						if use.elsewhere
+						else ""
+					)
+				)
+			limit = cint(use.line.max_employees)
+			if limit and len(use.people) > limit:
+				problems.append(
+					_("{0} ({1}): {2} employees, the budget allows {3}.").format(
+						frappe.bold(use.scope),
+						get_link_to_form("Overtime Request", use.line.parent),
+						len(use.people),
+						limit,
+					)
+				)
+		if not problems:
+			return
+
+		message = _("This batch goes past its overtime budget:<br>{0}<br>Remove people from the table until it fits.").format(
+			"<br>".join(problems)
+		)
+		if throw:
+			frappe.throw(message, title=_("Over Budget"))
+		frappe.msgprint(message, title=_("Over Budget"), indicator="orange")
+
+	def update_budget_usage(self):
+		"""Write each budget line's Hours Used from the submitted batches, so
+		the request shows what is left. Read from the database rather than
+		counted up and down, so a cancel and a resubmit cannot drift it."""
+		lines = {row.overtime_budget for row in self.bulk_overtime_entries if row.overtime_budget}
+		if not lines:
+			return
+		used = dict(
+			frappe.db.sql(
+				"""
+				select entry.overtime_budget, sum(entry.approved_hours)
+				from `tabBulk Overtime Entry` entry
+				join `tabBulk Overtime` bo on bo.name = entry.parent
+				where entry.parenttype = 'Bulk Overtime'
+					and bo.docstatus = 1
+					and entry.overtime_budget in %(lines)s
+				group by entry.overtime_budget
+				""",
+				{"lines": tuple(lines)},
+			)
+		)
+		for line in lines:
+			hours = flt(used.get(line))
+			budget = flt(frappe.db.get_value("Overtime Request Budget", line, "budget_hours"))
+			frappe.db.set_value(
+				"Overtime Request Budget",
+				line,
+				{"hours_used": hours, "hours_left": max(budget - hours, 0)},
+				update_modified=False,
+			)
 
 	def _why_nothing_to_pay(self, chosen=None) -> dict:
 		"""What the attendance actually says, when it says nothing payable.
@@ -521,6 +948,8 @@ class BulkOvertime(Document):
 				as_dict=True,
 			)
 		]
+		budgeted = self._budget_employees(self._budget_lines(chosen))
+		employees += sorted({e for members in budgeted.values() for e in members} - set(employees))
 		if not employees:
 			return {}
 
@@ -531,6 +960,7 @@ class BulkOvertime(Document):
 			from `tabAttendance`
 			where docstatus = 1 and employee in %(employees)s
 				and attendance_date between %(from_date)s and %(to_date)s
+				and status != 'On Leave'
 			group by status
 			order by days desc
 			""",
@@ -635,42 +1065,67 @@ class BulkOvertime(Document):
 			row.working_hours = worked
 			row.shift_hours = shift_hours.get(row.shift) or default_hours
 
+			# Hours are never typed in: a row once marked as edited by hand
+			# goes back to what the attendance says.
+			row.manual_biometric_hours = row.manual_override = 0
 			cap = caps.get(row.overtime_type) or 0
-			if row.manual_biometric_hours:
-				# the scanner failed that day, so HR types the overtime that
-				# was worked. It stands in for the punches — attendance or not
-				# — and is still capped at the day's maximum and the request.
-				# The reason is asked for at submit rather than here: these are
-				# typed straight into the grid, and a half-finished row should
-				# not stop the batch being saved.
-				entered = max(flt(row.biometric_hours), 0)
-				row.biometric_hours = round(min(entered, cap) if cap else entered, 2)
-				approved, row.status = engine.settle(
-					row.requested_hours, row.biometric_hours, has_attendance=True, has_hours=True
-				)
-			else:
-				row.biometric_hours = engine.biometric_overtime(
-					worked, row.shift_hours, row.day_type, maximum_hours=cap
-				)
-				approved, row.status = engine.settle(
-					row.requested_hours,
-					row.biometric_hours,
-					has_attendance=bool(record),
-					has_hours=worked > 0,
-					# a rest day pays every hour worked, so it needs no shift length
-					has_shift=bool(row.shift_hours) or row.day_type != engine.WORKING_DAY,
-				)
+			row.biometric_hours = engine.biometric_overtime(
+				worked, row.shift_hours, row.day_type, maximum_hours=cap
+			)
+			if row.overtime_budget:
+				# nobody named this person, so they ask for what they worked;
+				# the budget, not the row, is what holds the total down
+				row.requested_hours = row.biometric_hours
+			row.approved_hours, row.status = engine.settle(
+				row.requested_hours,
+				row.biometric_hours,
+				has_attendance=bool(record),
+				has_hours=worked > 0,
+				# a rest day pays every hour worked, so it needs no shift length
+				has_shift=bool(row.shift_hours) or row.day_type != engine.WORKING_DAY,
+			)
 
-			if row.manual_override:
-				# the reason is asked for once on the batch, at submit
-				if flt(row.approved_hours) > flt(row.requested_hours):
-					frappe.throw(
-						_("Row #{0}: {1} cannot be paid more than the {2} hours requested.").format(
-							row.idx, frappe.bold(row.employee_name or row.employee), flt(row.requested_hours)
-						)
-					)
-			else:
-				row.approved_hours = approved
+	def _leave_days(self, employees) -> set:
+		"""(employee, date) pairs of full days on leave in this period: marked
+		On Leave, or covered by an approved Leave Application the attendance
+		has not caught up with yet. A half day still leaves time to work."""
+		if not employees:
+			return set()
+		days = {
+			(row.employee, getdate(row.attendance_date))
+			for row in frappe.get_all(
+				"Attendance",
+				filters={
+					"employee": ["in", list(employees)],
+					"attendance_date": ["between", [self.from_date, self.to_date]],
+					"docstatus": 1,
+					"status": "On Leave",
+				},
+				fields=["employee", "attendance_date"],
+			)
+		}
+		if not frappe.db.exists("DocType", "Leave Application"):
+			return days
+
+		period_start, period_end = getdate(self.from_date), getdate(self.to_date)
+		for leave in frappe.get_all(
+			"Leave Application",
+			filters={
+				"employee": ["in", list(employees)],
+				"docstatus": 1,
+				"status": "Approved",
+				"from_date": ["<=", self.to_date],
+				"to_date": [">=", self.from_date],
+			},
+			fields=["employee", "from_date", "to_date", "half_day", "half_day_date"],
+		):
+			half = getdate(leave.half_day_date or leave.from_date) if leave.half_day else None
+			date = max(getdate(leave.from_date), period_start)
+			while date <= min(getdate(leave.to_date), period_end):
+				if date != half:
+					days.add((leave.employee, date))
+				date = add_days(date, 1)
+		return days
 
 	def _attendance_by_day(self, employees) -> dict:
 		records = frappe.get_all(
@@ -762,8 +1217,6 @@ class BulkOvertime(Document):
 				check = "No Punches"
 			elif not last:
 				check = "One Punch"
-			elif row.manual_biometric_hours or row.manual_override:
-				check = "Entered by Hand"
 			elif abs(beyond - flt(row.biometric_hours)) > 0.1:
 				check = "Differs"
 			else:
@@ -800,6 +1253,7 @@ class BulkOvertime(Document):
 
 	def on_submit(self):
 		self.create_overtime_slips()
+		self.update_budget_usage()
 
 	def create_overtime_slips(self):
 		"""One Overtime Slip per employee, one line per date. Submitting a slip
@@ -880,6 +1334,7 @@ class BulkOvertime(Document):
 				frappe.get_doc("Additional Salary", additional_salary).cancel()
 			frappe.get_doc("Overtime Slip", slip).cancel()
 
+		self.update_budget_usage()
 		if slips:
 			frappe.msgprint(
 				_("{0} Overtime Slip(s) cancelled.").format(len(slips)), indicator="orange", alert=True
@@ -902,6 +1357,13 @@ def _daily_caps(overtime_types) -> dict:
 		fields=["name", "maximum_overtime_hours_allowed"],
 	)
 	return {row.name: flt(row.maximum_overtime_hours_allowed) for row in rows}
+
+
+def _worth_listing(row) -> bool:
+	"""Whether a row stays in the table. A budget row with no overtime is just
+	someone who went home on time; nobody named them, and nothing can be
+	typed in for them, so there is nothing for HR to act on."""
+	return not row.overtime_budget or flt(row.approved_hours) > 0
 
 
 def _hours_by_date(requests) -> dict:
@@ -1131,7 +1593,43 @@ def outstanding_days(overtime_request: str, batch: str | None = None) -> list:
 	probe.name = batch or ""
 	rows = probe._approved_request_rows(chosen=[overtime_request])
 	claimed = probe._claimed_elsewhere(rows)
-	return [row for row in rows if (row.employee, str(row.overtime_date)) not in claimed]
+	rows = [row for row in rows if (row.employee, str(row.overtime_date)) not in claimed]
+	return _with_budget_overtime(probe, rows)
+
+
+def _budget_overtime_entries(probe, rows) -> list:
+	"""The budget rows among ``rows`` as entries measured against the
+	attendance, keeping only the days with overtime. Uses ``probe``'s table,
+	so it must be a document nothing else is about to save."""
+	budget_rows = [row for row in rows if row.get("budget")]
+	if not budget_rows:
+		return []
+	probe.set("bulk_overtime_entries", [])
+	for row in budget_rows:
+		probe.append(
+			"bulk_overtime_entries",
+			{
+				"employee": row.employee,
+				"employee_name": row.employee_name,
+				"overtime_date": row.overtime_date,
+				"overtime_type": row.overtime_type,
+				"overtime_budget": row.budget,
+				"budget_scope": row.budget_scope,
+			},
+		)
+	probe.refresh_entries()
+	return [entry for entry in probe.bulk_overtime_entries if _worth_listing(entry)]
+
+
+def _with_budget_overtime(probe, rows) -> list:
+	"""Budget rows only where the attendance shows overtime: a whole
+	department's days at work are not days "left to pay"."""
+	if not any(row.get("budget") for row in rows):
+		return rows
+	listed = {
+		(entry.employee, getdate(entry.overtime_date)) for entry in _budget_overtime_entries(probe, rows)
+	}
+	return [row for row in rows if not row.get("budget") or (row.employee, getdate(row.overtime_date)) in listed]
 
 
 def build_batch_for_request(overtime_request: str):
@@ -1166,9 +1664,15 @@ def batch_for_request(overtime_request: str, wait_until_worked: bool = False) ->
 	week paid mid-week — is picked up by the next one. A day is paid once.
 	"""
 	request = frappe.db.get_value(
-		"Overtime Request", overtime_request, ["docstatus", "overtime_date", "to_date"], as_dict=True
+		"Overtime Request",
+		overtime_request,
+		["docstatus", "overtime_date", "to_date", "request_mode"],
+		as_dict=True,
 	)
 	if not request or request.docstatus != 1:
+		return None
+	if request.request_mode == "Hours Budget":
+		# someone has to choose who a budget pays, so it is never automatic
 		return None
 	if wait_until_worked and getdate(request.to_date or request.overtime_date) >= getdate(today()):
 		return None
