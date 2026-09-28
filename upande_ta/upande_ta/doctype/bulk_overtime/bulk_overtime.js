@@ -46,13 +46,23 @@ const bo_busy = (frm, fieldname, busy) => {
  * worked into attendance yet. Saying which sends people to the right place. */
 const bo_nothing_to_pay = (result) => {
 	const why = result.why || {};
-	const lines = [
-		__("Found <b>{0}</b> approved Overtime Request(s) covering <b>{1}</b> employee-day(s), none of them payable.", [
-			result.approved_requests,
-			result.days_without_attendance,
-		]),
-		__("Overtime is paid against attendance marked <b>Present</b>, with hours on it."),
-	];
+	const lines = [];
+	if (result.days_without_attendance || !result.days_on_leave) {
+		lines.push(
+			__("Found <b>{0}</b> approved Overtime Request(s) covering <b>{1}</b> employee-day(s), none of them payable.", [
+				result.approved_requests,
+				result.days_without_attendance,
+			]),
+			__("Overtime is paid against attendance marked <b>Present</b>, with hours on it."),
+		);
+	}
+	if (result.days_on_leave) {
+		lines.push(
+			__("<b>{0}</b> employee-day(s) on leave were left out: someone on leave is not paid overtime.", [
+				result.days_on_leave,
+			]),
+		);
+	}
 
 	const statuses = why.statuses || [];
 	if (statuses.length) {
@@ -114,6 +124,14 @@ frappe.ui.form.on("Bulk Overtime", {
 		// rows only come from the Get Overtime picker
 		frm.set_df_property("bulk_overtime_entries", "cannot_add_rows", 1);
 		frm.toggle_display("get_from_overtime_request", frm.doc.docstatus === 0);
+
+		// Create > Bulk Overtime on an Hours Budget request lands here, to
+		// choose who it pays
+		const pending = frappe._bo_budget_request;
+		if (pending && frm.is_new() && frm.doc.company) {
+			frappe._bo_budget_request = null;
+			frm.events.choose_budget_employees(frm, [pending]);
+		}
 
 		if (frm.doc.docstatus === 1) {
 			frm.add_custom_button(__("Overtime Slips"), () =>
@@ -240,15 +258,6 @@ frappe.ui.form.on("Bulk Overtime", {
 	/** The one way rows get here: pick the approved requests to pay. Sweeping
 	 * the whole period blindly is what "Select All" in the dialog does, and
 	 * this way the cost is paid once, with the list in front of you. */
-	/** Worked is the attendance and always read-only. Biometric — the
-	 * overtime the punches support — opens for typing when this is ticked,
-	 * for a day the scanner failed. The lock is the child field's own
-	 * read_only_depends_on, evaluated against this document; the grid only
-	 * needs redrawing. */
-	edit_worked_hours(frm) {
-		frm.refresh_field("bulk_overtime_entries");
-	},
-
 	get_from_overtime_request(frm) {
 		if (!frm.doc.company) {
 			frappe.msgprint({
@@ -287,6 +296,19 @@ frappe.ui.form.on("Bulk Overtime", {
 	},
 
 	show_request_dialog(frm, requests) {
+		// a budget is approved for units and departments, so they are what it
+		// is; a named request is its people, and says so already. Either
+		// can span many, and the first few say enough.
+		const listed = (label, names) => {
+			if (!(names || []).length) return "";
+			const shown = names.slice(0, 3).map(bo_esc).join(", ");
+			const more = names.length > 3 ? ` ${__("+{0} more", [names.length - 3])}` : "";
+			return `${label}: ${shown}${more}<br>`;
+		};
+		const departments = (request) =>
+			request.request_mode === "Hours Budget"
+				? listed(__("Unit/Division"), request.units) + listed(__("Department"), request.departments)
+				: "";
 		const line = (request) => {
 			const span =
 				request.overtime_date === request.to_date
@@ -307,7 +329,11 @@ frappe.ui.form.on("Bulk Overtime", {
 				<label class="checkbox" style="display:block; padding:8px 0; border-bottom:1px solid var(--border-color);">
 					<input type="checkbox" class="ot-request" data-name="${bo_esc(request.name)}">
 					<b>${bo_esc(request.name)}</b>
-					<span class="text-muted">${bo_esc(request.request_for || "")}</span>
+					<span class="text-muted">${bo_esc(
+						request.request_for === "Week" && request.week
+							? `${request.week}, ${request.week_year}`
+							: request.request_for || "",
+					)}</span>
 					${
 						short
 							? `<span class="indicator-pill orange" style="margin-left:6px;">${__(
@@ -326,11 +352,18 @@ frappe.ui.form.on("Bulk Overtime", {
 					}
 					<div class="text-muted small" style="margin-left:22px;">
 						${bo_esc(span)} · ${covered}<br>
-						${__("{0} employee(s)", [request.employees])} ·
+						${departments(request)}
 						${
-							request.request_for === "Week"
-								? __("{0} h for the week in total", [request.hours_per_day])
-								: __("{0} h/day in total", [request.hours_per_day])
+							request.request_mode === "Hours Budget"
+								? __("Hours Budget: {0} h, {1} h left", [
+										request.hours_per_day,
+										request.budget_left,
+								  ])
+								: `${__("{0} employee(s)", [request.employees])} · ${
+										request.request_for === "Week"
+											? __("{0} h for the week in total", [request.hours_per_day])
+											: __("{0} h/day in total", [request.hours_per_day])
+								  }`
 						}
 						${request.reason ? ` · ${bo_esc(request.reason)}` : ""}
 					</div>
@@ -364,7 +397,11 @@ frappe.ui.form.on("Bulk Overtime", {
 					return;
 				}
 				dialog.hide();
-				frm.events.fetch_overtime(frm, picked);
+				const budgeted = requests.some(
+					(r) => r.request_mode === "Hours Budget" && picked.includes(r.name),
+				);
+				if (budgeted) frm.events.choose_budget_employees(frm, picked);
+				else frm.events.fetch_overtime(frm, picked);
 			},
 		});
 
@@ -372,11 +409,143 @@ frappe.ui.form.on("Bulk Overtime", {
 		dialog.show();
 	},
 
+	/** An Hours Budget names nobody, so HR ticks who it pays: everyone the
+	 * budget covers whose attendance shows overtime, with their days and
+	 * hours, against what is left of each budget. */
+	choose_budget_employees(frm, overtime_requests) {
+		const stop = bo_progress(frm, __("Get Overtime"), __("Finding who worked overtime..."));
+		bo_busy(frm, "get_from_overtime_request", true);
+		frm.call({
+			doc: frm.doc,
+			method: "get_budget_candidates",
+			args: { overtime_requests },
+		})
+		.then((r) => {
+			stop();
+			const { employees = [], budgets = [] } = r.message || {};
+			if (!employees.length) {
+				frappe.msgprint({
+					title: __("Nobody to Choose"),
+					indicator: "orange",
+					message: __(
+						"Nobody the budget covers has overtime in the attendance for this period that is not already being paid.",
+					),
+				});
+				// named requests picked alongside are still paid
+				frm.events.fetch_overtime(frm, overtime_requests, []);
+				return;
+			}
+			frm.events.show_budget_dialog(frm, overtime_requests, employees, budgets);
+		})
+		.finally(() => {
+			stop();
+			bo_busy(frm, "get_from_overtime_request", false);
+		});
+	},
+
+	show_budget_dialog(frm, overtime_requests, employees, budgets) {
+		const budget_lines = budgets
+			.map((b) =>
+				__("<b>{0}</b> ({1}): {2} h left of {3} h{4}", [
+					bo_esc(b.scope),
+					bo_esc(b.parent),
+					flt(b.hours_left || b.budget_hours),
+					flt(b.budget_hours),
+					cint(b.max_employees) ? __(", up to {0} employees", [b.max_employees]) : "",
+				]),
+			)
+			.join("<br>");
+
+		const dialog = new frappe.ui.Dialog({
+			title: __("Choose Who to Pay ({0})", [employees.length]),
+			size: "extra-large",
+			fields: [
+				{ fieldtype: "HTML", fieldname: "budgets" },
+				{ fieldtype: "HTML", fieldname: "selected" },
+				{ fieldtype: "HTML", fieldname: "employees_table" },
+			],
+			primary_action_label: __("Add Selected"),
+			primary_action() {
+				const chosen = checked().map((e) => e.employee);
+				if (!chosen.length) {
+					frappe.msgprint(__("Tick at least one employee."));
+					return;
+				}
+				dialog.hide();
+				frm.events.fetch_overtime(frm, overtime_requests, chosen);
+			},
+		});
+
+		const checked = () => {
+			const table = dialog.employees_datatable;
+			if (!table) return [];
+			const rows = table.datamanager.data || [];
+			return (table.rowmanager.getCheckedRows() || [])
+				.map((index) => (typeof index === "object" ? index : rows[index]))
+				.filter((row) => row && row.employee);
+		};
+		const show_selected = () => {
+			const rows = checked();
+			const hours = rows.reduce((sum, row) => sum + flt(row.hours), 0);
+			dialog
+				.get_field("selected")
+				.$wrapper.html(
+					`<div class="text-muted" style="margin:8px 0;">${__(
+						"Selected: <b>{0}</b> employee(s), <b>{1}</b> h",
+						[rows.length, Math.round(hours * 100) / 100],
+					)}</div>`,
+				);
+		};
+
+		dialog
+			.get_field("budgets")
+			.$wrapper.html(`<div class="alert alert-info" style="padding:8px 12px;">${budget_lines}</div>`);
+		dialog.show();
+
+		// built after the modal is laid out, or every column measures 0 wide
+		setTimeout(() => {
+			const $wrapper = dialog.get_field("employees_table").$wrapper.empty();
+			const $container = $(`<div style="min-height: 300px;"></div>`).appendTo($wrapper);
+			const columns = [
+				{ id: "employee", content: __("Employee"), width: 120 },
+				{ id: "employee_name", content: __("Employee Name"), width: 200 },
+				{ id: "custom_farm", content: __("Unit/Division"), width: 140 },
+				{ id: "department", content: __("Department"), width: 160 },
+				{ id: "budget_scope", content: __("Budget"), width: 180 },
+				{ id: "days", content: __("Days"), width: 70 },
+				{ id: "hours", content: __("Overtime (h)"), width: 110 },
+			].map((column) => ({
+				...column,
+				name: column.id,
+				editable: false,
+				focusable: false,
+				dropdown: false,
+				align: ["days", "hours"].includes(column.id) ? "right" : "left",
+				format: (value) => bo_esc(value),
+			}));
+			dialog.employees_datatable = new frappe.DataTable($container.get(0), {
+				columns,
+				data: employees,
+				checkboxColumn: true,
+				checkedRowStatus: false,
+				serialNoColumn: false,
+				inlineFilters: true,
+				layout: "fluid",
+				cellHeight: 35,
+				disableReorderColumn: true,
+				events: { onCheckRow: show_selected },
+			});
+			// the header's check-all box does not fire onCheckRow
+			$container.on("click", ".dt-cell--col-0", () => setTimeout(show_selected, 0));
+			show_selected();
+		}, 150);
+	},
+
 	/** The fetch itself. Reached from the picker, and from Create > Bulk
 	 * Overtime on an Overtime Request. Frappe calls a field handler as
 	 * (frm, doctype, name), so no button may point here directly: its second
 	 * argument would arrive as the doctype name. */
-	fetch_overtime(frm, overtime_requests) {
+	fetch_overtime(frm, overtime_requests, budget_employees) {
 		if (!frm.doc.company) {
 			frappe.msgprint({
 				title: __("Missing Details"),
@@ -391,7 +560,12 @@ frappe.ui.form.on("Bulk Overtime", {
 		frm.call({
 			doc: frm.doc,
 			method: "get_overtime",
-			args: { overtime_requests: overtime_requests || null },
+			args: {
+				overtime_requests: overtime_requests || null,
+				// undefined, not null, when no budget was picked: null would
+				// read as "nobody chosen" and leave a budget's rows out
+				...(budget_employees ? { budget_employees } : {}),
+			},
 		})
 		.then((r) => {
 			stop();
@@ -430,17 +604,5 @@ frappe.ui.form.on("Bulk Overtime", {
 			stop();
 			bo_busy(frm, "get_from_overtime_request", false);
 		});
-	},
-});
-
-frappe.ui.form.on("Bulk Overtime Entry", {
-	/** Typing a figure is the whole statement: the row's marker follows the
-	 * typing rather than having to be ticked first. It is what keeps the
-	 * figure when the batch is fetched again. */
-	biometric_hours(frm, cdt, cdn) {
-		const row = locals[cdt][cdn];
-		if (frm.doc.edit_worked_hours && !row.manual_biometric_hours) {
-			frappe.model.set_value(cdt, cdn, "manual_biometric_hours", 1);
-		}
 	},
 });

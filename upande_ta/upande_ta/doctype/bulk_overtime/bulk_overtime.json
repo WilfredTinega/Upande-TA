@@ -13,6 +13,7 @@
   "from_date",
   "column_break_title",
   "to_date",
+  "week",
   "column_break_uwap",
   "bulk_overtime_title",
   "section_break_zxgn",
@@ -20,7 +21,6 @@
   "column_break_xmdk",
   "verify_check_ins",
   "column_break_ufns",
-  "edit_worked_hours",
   "column_break_cpbe",
   "override_reason",
   "section_break_entries",
@@ -110,17 +110,11 @@
    "options": "Bulk Overtime Entry"
   },
   {
-   "default": "0",
-   "depends_on": "eval:doc.docstatus===0 && (doc.bulk_overtime_entries || []).length",
-   "fieldname": "edit_worked_hours",
-   "fieldtype": "Check",
-   "label": "Edit Biometric Hours"
-  },
-  {
-   "depends_on": "eval:doc.edit_worked_hours || (doc.bulk_overtime_entries || []).some(r => r.manual_override || r.manual_biometric_hours)",
+   "depends_on": "eval:doc.override_reason",
    "fieldname": "override_reason",
    "fieldtype": "Small Text",
-   "label": "Reason for Manual Changes"
+   "label": "Reason for Manual Changes",
+   "read_only": 1
   },
   {
    "fieldname": "section_break_totals",
@@ -207,6 +201,15 @@
   {
    "fieldname": "column_break_cpbe",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "week",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Week",
+   "no_copy": 1,
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
@@ -218,7 +221,7 @@
    "link_fieldname": "custom_bulk_overtime"
   }
  ],
- "modified": "2026-09-25 23:48:36.945474",
+ "modified": "2026-09-29 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime",

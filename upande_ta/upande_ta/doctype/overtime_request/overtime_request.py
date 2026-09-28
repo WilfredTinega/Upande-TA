@@ -9,6 +9,13 @@ Week 40 — Monday to Sunday), a calendar month, or any two dates. Bulk Overtime
 expands the range one day at a time and pays each day against what the
 attendance shows was worked.
 
+A request is made one of two ways. **Named Employees** lists who is to work
+and for how long. **Hours Budget** approves a pool of hours for a Department
+and/or Unit/Division before anyone is named — a supervisor rarely knows on
+Monday who will stay late on Thursday — and Bulk Overtime allocates it to the
+people the attendance shows working overtime, never past the budget. See
+:meth:`OvertimeRequest.validate_budgets`.
+
 What Requested Hours means depends on the range. On a **Week** request it is
 the employee's total for the week, shared out evenly over their working days —
 rest days and public holidays from the holiday list in force on each date get
@@ -50,18 +57,31 @@ WEEK = "Week"
 MONTH = "Month"
 DATE_RANGE = "Date Range"
 
+NAMED_EMPLOYEES = "Named Employees"
+HOURS_BUDGET = "Hours Budget"
+
 
 class OvertimeRequest(Document):
 	def validate(self):
 		self.set_date_range()
 		self.validate_dates()
-		self.validate_employees()
-		self.validate_one_request_per_week()
+		self.request_mode = self.request_mode or NAMED_EMPLOYEES
+		if self.is_budget():
+			self.validate_budgets()
+			self.validate_one_budget_per_week()
+		else:
+			self.set("budgets", [])
+			self.validate_employees()
+			self.validate_one_request_per_week()
 		self.set_daily_hours()
 		self.set_totals()
 
+	def is_budget(self) -> bool:
+		return self.request_mode == HOURS_BUDGET
+
 	def before_submit(self):
-		self.validate_not_already_requested()
+		if not self.is_budget():
+			self.validate_not_already_requested()
 
 	def on_submit(self):
 		self.queue_bulk_overtime()
@@ -186,6 +206,112 @@ class OvertimeRequest(Document):
 				)
 			)
 
+	# ──────────────────────────────────────────────────────────────────────
+	# Hours Budget
+	# ──────────────────────────────────────────────────────────────────────
+
+	def validate_budgets(self):
+		"""One line per Department and Unit/Division, each naming at least one
+		of the two — a budget for "everyone in the company" is not a scope
+		anybody approves overtime for.
+
+		Employees are cleared rather than refused: the table is hidden in this
+		mode, so rows left over from before the mode was switched would be
+		invisible yet still get paid.
+		"""
+		self.set("employees", [])
+		if not self.budgets:
+			frappe.throw(_("Add at least one Budget line."))
+
+		has_farm = "custom_farm" in frappe.db.get_table_columns("Employee")
+		seen = set()
+		for row in self.budgets:
+			if not has_farm:
+				row.custom_farm = None
+			if not (row.department or row.custom_farm):
+				frappe.throw(_("Budget row #{0}: set a Department, a Unit/Division or both.").format(row.idx))
+			if flt(row.budget_hours) <= 0:
+				frappe.throw(_("Budget row #{0}: Budget Hours must be more than 0.").format(row.idx))
+
+			key = (row.custom_farm or "", row.department or "")
+			if key in seen:
+				frappe.throw(
+					_("Budget row #{0}: {1} is budgeted more than once.").format(row.idx, frappe.bold(budget_scope(row)))
+				)
+			seen.add(key)
+
+			if row.department:
+				company = frappe.db.get_value("Department", row.department, "company")
+				if company and company != self.company:
+					frappe.throw(
+						_("Budget row #{0}: {1} is not in {2}.").format(
+							row.idx, frappe.bold(row.department), frappe.bold(self.company)
+						)
+					)
+			row.hours_left = max(flt(row.budget_hours) - flt(row.hours_used), 0)
+
+		# the batch's Unit/Division is read off the request, so a request whose
+		# lines all sit in one unit carries it
+		units = {row.custom_farm for row in self.budgets}
+		self.custom_farm = units.pop() if len(units) == 1 else None
+		self.department = self.designation = None
+
+	def validate_one_budget_per_week(self):
+		"""A Department and Unit/Division has one budget per ISO week, for the
+		same reason an employee is on one request per week: a second one would
+		be a second pool for the same people and the same days."""
+		if self.flags.ignore_weekly_limit or not (self.overtime_date and self.to_date and self.budgets):
+			return
+
+		start = getdate(self.overtime_date)
+		end = getdate(self.to_date)
+		monday = add_days(start, -start.weekday())
+		sunday = add_days(end, 6 - end.weekday())
+
+		Request = frappe.qb.DocType("Overtime Request")
+		Line = frappe.qb.DocType("Overtime Request Budget")
+		other_end = Coalesce(Request.to_date, Request.overtime_date)
+		query = (
+			frappe.qb.from_(Line)
+			.join(Request)
+			.on(Request.name == Line.parent)
+			.select(Line.custom_farm, Line.department, Request.name, Request.overtime_date, other_end.as_("end_date"))
+			.where(
+				(Request.docstatus < 2)
+				& (Request.company == self.company)
+				& (Request.overtime_date <= sunday)
+				& (other_end >= monday)
+				& (Line.parenttype == "Overtime Request")
+			)
+		)
+		if not self.is_new():
+			query = query.where(Request.name != self.name)
+		if frappe.db.has_column("Overtime Request", "workflow_state"):
+			query = query.where(Coalesce(Request.workflow_state, "") != "Rejected")
+
+		mine = {(row.custom_farm or "", row.department or "") for row in self.budgets}
+		clashes = [
+			line for line in query.run(as_dict=True) if (line.custom_farm or "", line.department or "") in mine
+		]
+		if not clashes:
+			return
+
+		lines = "<br>".join(
+			"{0}: {1} ({2} to {3})".format(
+				frappe.bold(budget_scope(c)),
+				get_link_to_form("Overtime Request", c.name),
+				frappe.format(c.overtime_date, "Date"),
+				frappe.format(c.end_date, "Date"),
+			)
+			for c in clashes[:20]
+		)
+		frappe.throw(
+			_("A Department and Unit/Division can have one budget per week. Already budgeted in the same week:<br>{0}").format(
+				lines
+			),
+			title=_("Already Budgeted This Week"),
+		)
+
 	def validate_one_request_per_week(self):
 		"""An employee is on one request per ISO week, Monday to Sunday: a
 		second day of overtime in a week belongs on that week's request.
@@ -292,7 +418,7 @@ class OvertimeRequest(Document):
 		a holiday list, before the request is approved — is reflected at once.
 		"""
 		self.set("daily_hours", [])
-		if self.request_for != WEEK or not (self.overtime_date and self.to_date):
+		if self.is_budget() or self.request_for != WEEK or not (self.overtime_date and self.to_date):
 			return
 
 		from upande_ta.upande_ta import overtime_engine as engine
@@ -328,8 +454,14 @@ class OvertimeRequest(Document):
 			)
 
 	def set_totals(self):
-		self.number_of_employees = len(self.employees)
 		self.number_of_days = self.number_of_days_in_range()
+		if self.is_budget():
+			# a budget is already the whole period's, and names nobody yet
+			self.number_of_employees = 0
+			self.total_requested_hours = sum(flt(row.budget_hours) for row in self.budgets)
+			return
+
+		self.number_of_employees = len(self.employees)
 		hours = sum(flt(row.requested_hours) for row in self.employees)
 		# a week's hours are already the whole week's
 		self.total_requested_hours = hours if self.request_for == WEEK else hours * self.number_of_days
@@ -338,6 +470,11 @@ class OvertimeRequest(Document):
 # ──────────────────────────────────────────────────────────────────────────
 # Weeks are picked by ISO number and year; months by the browser's own picker
 # ──────────────────────────────────────────────────────────────────────────
+
+
+def budget_scope(line) -> str:
+	""""Unit A / Packhouse", however much of it a budget line names."""
+	return " / ".join(part for part in (line.custom_farm, line.department) if part)
 
 
 def week_label(number: int) -> str:
@@ -427,6 +564,10 @@ def make_bulk_overtime(overtime_request: str) -> str:
 	doc = frappe.get_doc("Overtime Request", overtime_request)
 	if not is_finally_approved(doc):
 		frappe.throw(_("{0} is not approved yet.").format(frappe.bold(doc.name)))
+	if doc.get("request_mode") == HOURS_BUDGET:
+		frappe.throw(
+			_("{0} is an Hours Budget: choose who it pays on a new Bulk Overtime.").format(frappe.bold(doc.name))
+		)
 
 	batch, result = build_batch_for_request(doc.name)
 	if not result["rows"]:
