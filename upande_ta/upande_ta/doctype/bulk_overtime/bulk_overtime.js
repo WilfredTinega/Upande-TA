@@ -32,6 +32,11 @@ const bo_progress = (frm, title, message) => {
 	};
 };
 
+/** frm.call hands back a jQuery promise, and jQuery deferreds have no
+ * .finally(): chained straight onto one it throws, so a failed call never
+ * stops its bar or frees its button. Promise.resolve() makes it a real one. */
+const bo_call = (frm, opts) => Promise.resolve(frm.call({ doc: frm.doc, ...opts }));
+
 /** The button must not be clickable twice while its own fetch is running —
  * nothing is blocking the page any more. */
 const bo_busy = (frm, fieldname, busy) => {
@@ -146,7 +151,7 @@ frappe.ui.form.on("Bulk Overtime", {
 
 	verify_checkins(frm) {
 		const stop = bo_progress(frm, __("Verify Check-ins"), __("Reading check-ins..."));
-		frm.call({ doc: frm.doc, method: "verify_checkins" })
+		bo_call(frm, { method: "verify_checkins" })
 			.then((r) => {
 				stop();
 				frm.events.show_verification(frm, r.message || []);
@@ -342,8 +347,7 @@ frappe.ui.form.on("Bulk Overtime", {
 
 		const stop = bo_progress(frm, __("Get Overtime"), __("Looking for approved requests..."));
 		bo_busy(frm, "get_from_overtime_request", true);
-		frm.call({
-			doc: frm.doc,
+		bo_call(frm, {
 			method: "get_approved_requests",
 		})
 		.then((r) => {
@@ -487,8 +491,7 @@ frappe.ui.form.on("Bulk Overtime", {
 	choose_budget_employees(frm, overtime_requests) {
 		const stop = bo_progress(frm, __("Get Overtime"), __("Finding who worked overtime..."));
 		bo_busy(frm, "get_from_overtime_request", true);
-		frm.call({
-			doc: frm.doc,
+		bo_call(frm, {
 			method: "get_budget_candidates",
 			args: { overtime_requests },
 		})
@@ -629,8 +632,7 @@ frappe.ui.form.on("Bulk Overtime", {
 
 		const stop = bo_progress(frm, __("Get Overtime"), __("Checking requests against attendance..."));
 		bo_busy(frm, "get_from_overtime_request", true);
-		frm.call({
-			doc: frm.doc,
+		bo_call(frm, {
 			method: "get_overtime",
 			args: {
 				overtime_requests: overtime_requests || null,
