@@ -243,6 +243,7 @@
 						device_sn: $row.data("sn"),
 						privilege: show_controls ? $row.find(".privilege-sel").val() || "0" : "0",
 						skip_name: show_controls && $row.find(".skip-name-check").is(":checked") ? 1 : 0,
+						skip_face: show_controls && d.$wrapper.find("#ta-skip-face").is(":checked") ? 1 : 0,
 					});
 				});
 				d.hide();
@@ -283,6 +284,9 @@
 				<button class="btn btn-xs btn-default" id="ta-select-all">${__("Select All")}</button>
 				<button class="btn btn-xs btn-default" id="ta-deselect-all">${__("Deselect All")}</button>
 				${show_controls ? `<button class="btn btn-xs btn-default" id="ta-skip-all">${__("Skip")}</button>` : ""}
+				${show_controls ? `<label style="display:inline-flex;align-items:center;gap:4px;margin:0;font-size:12px;cursor:pointer">
+					<input type="checkbox" id="ta-skip-face" style="margin:0">${__("Skip Face")}
+				</label>` : ""}
 				<span style="font-size:12px;color:var(--color-text-secondary)" id="ta-selected-count">0 / ${devices.length}</span>
 			</div>
 			<div style="max-height:400px;overflow-y:auto;border:1px solid var(--color-border-tertiary);border-radius:8px">
@@ -379,7 +383,7 @@
 
 			const dev = per_device[done];
 			const users = base_users.map((u) =>
-				Object.assign({}, u, { privilege: dev.privilege, skip_name: dev.skip_name })
+				Object.assign({}, u, { privilege: dev.privilege, skip_name: dev.skip_name, skip_face: dev.skip_face })
 			);
 
 			frappe.call({

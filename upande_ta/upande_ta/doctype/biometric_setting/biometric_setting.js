@@ -1721,33 +1721,30 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 	});
 
 	function build_per_device_assignments() {
-		const container = d.$wrapper.find("#bulk-user-table");
-		const by_sn = {};
-		(d._selected_sns || []).forEach(sn => { by_sn[sn] = []; });
-
-		container.find(".bulk-device-cell-check:checked").each(function() {
-			if (String($(this).data("locked")) === "1") return;
-			const sn  = $(this).data("sn");
-			const idx = parseInt($(this).data("idx"));
-			if (!by_sn[sn]) return;
-			const user = (d._bulk_users_data || [])[idx];
-			if (!user) return;
-
-			const priv = container.find(`.privilege-sel[data-idx="${idx}"]`).val()
-				|| user.privilege || "0";
-			const skip_name = container.find(`.skip-name-check[data-idx="${idx}"]`).is(":checked");
-			by_sn[sn].push({
-				user_id:       user.user_id,
-				employee_name: user.employee_name,
-				privilege:     priv,
-				row_name:      user.row_name || null,
-				skip_name:     skip_name ? 1 : 0
-			});
-		});
-
-		return Object.keys(by_sn)
-			.filter(sn => by_sn[sn].length)
-			.map(sn => ({ device_sn: sn, users: by_sn[sn] }));
+		const m = d._bulk_model;
+		if (!m) return [];
+		const skip_face = d.$wrapper.find("#skip-face-check").is(":checked");
+		return (d._selected_sns || [])
+			.filter(sn => m.checked[sn])
+			.map(sn => {
+				const checked = m.checked[sn];
+				const locked = m.locked[sn];
+				const users = [];
+				for (let i = 0; i < m.users.length; i++) {
+					if (!checked[i] || locked[i]) continue;
+					const user = m.users[i];
+					users.push({
+						user_id:       user.user_id,
+						employee_name: user.employee_name,
+						privilege:     m.privilege[i] || user.privilege || "0",
+						row_name:      user.row_name || null,
+						skip_name:     m.skip[i] ? 1 : 0,
+						skip_face:     skip_face ? 1 : 0
+					});
+				}
+				return { device_sn: sn, users };
+			})
+			.filter(a => a.users.length);
 	}
 
 	const apply_toolbar_layout = () => {
@@ -1848,8 +1845,10 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		}
 	});
 
+	let reload_timer = null;
 	function reload_users() {
-		load_users();
+		clearTimeout(reload_timer);
+		reload_timer = setTimeout(load_users, 30);
 	}
 
 	if (any_filter_enabled) refresh_filter_options();
@@ -1943,6 +1942,15 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		let frm_ = d.get_value("filter_farm");
 		if (!emp || (!dept && !desg && !comp && !frm_)) return;
 
+		if (d._employees) {
+			const e = d._employees.find(x => x.employee === emp);
+			if (!e || (dept && e.department !== dept) || (desg && e.designation !== desg)
+				|| (comp && e.company !== comp) || (frm_ && e.farm !== frm_)) {
+				d.set_value("filter_employee", "");
+			}
+			return;
+		}
+
 		let filters = { name: emp };
 		if (dept) filters.department  = dept;
 		if (desg) filters.designation = desg;
@@ -1977,195 +1985,213 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 		};
 	}
 
+	// Device rosters and the active employee list are fetched once per dialog;
+	// every filter change after that is answered from memory.
+	function fetch_dialog_data() {
+		if (d._data_promise) return d._data_promise;
+		const all_sns = (d._devices || []).map(dev => dev.device_sn);
+		const call = (method, args) => new Promise(resolve => frappe.call({
+			method, args,
+			callback: r => resolve((r && r.message) || null),
+			error: () => resolve(null)
+		}));
+		d._data_promise = Promise.all([
+			call("upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_device_users_multi",
+				{ device_sns: JSON.stringify(all_sns) }),
+			call("upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_employees",
+				{ status: "Active" })
+		]).then(([payload, employees]) => {
+			payload = payload || { users: [], pins_by_device: {} };
+			d._device_users = payload.users || [];
+			d._device_pins = {};
+			for (const sn_key in (payload.pins_by_device || {})) {
+				d._device_pins[sn_key] = new Set(payload.pins_by_device[sn_key] || []);
+			}
+			d._employees = employees || [];
+			d._has_farm = d._employees.some(e => e.farm);
+		});
+		return d._data_promise;
+	}
+
+	// Same rules as biometric_user.get_employees, applied to the cached roster.
+	function filter_employees(f) {
+		const device_farms = f.farms ? JSON.parse(f.farms) : [];
+		let scoped = null;
+		if (d._has_farm) {
+			if (device_farms.length) {
+				scoped = (f.farm && device_farms.includes(f.farm)) ? [f.farm] : device_farms;
+			} else if (f.farm) {
+				scoped = [f.farm];
+			}
+		}
+		return (d._employees || []).filter(e =>
+			(!f.employee    || e.employee    === f.employee)
+			&& (!f.designation || e.designation === f.designation)
+			&& (!f.department  || e.department  === f.department)
+			&& (!f.company     || e.company     === f.company)
+			&& (!scoped        || scoped.includes(e.farm))
+		);
+	}
+
 	function load_users() {
 		let container = d.$wrapper.find("#bulk-user-table");
-		container.html(`<p style="color:var(--color-text-secondary)">Loading...</p>`);
-
-		let filters = get_filter_args();
-		const all_sns = (d._devices || []).map(dev => dev.device_sn);
-
-		const proceed = () => _load_users_inner(all_sns, filters, container);
-
-		if (d._template_devices) {
-			proceed();
-			return;
+		if (!d._employees) {
+			container.html(`<p style="color:var(--color-text-secondary)">Loading...</p>`);
 		}
-		frappe.call({
-			method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.get_templated_pins_per_device",
-			callback(tr) {
-				const data = (tr && tr.message) || { devices: [], pins_by_device: {} };
-				d._template_devices = data.devices || [];
-				d._template_pins_by_device = {};
-				for (const sn_key in (data.pins_by_device || {})) {
-					d._template_pins_by_device[sn_key] = new Set(data.pins_by_device[sn_key] || []);
-				}
-				proceed();
-			},
-			error() {
-				d._template_devices = [];
-				d._template_pins_by_device = {};
-				proceed();
+		const seq = (d._load_seq = (d._load_seq || 0) + 1);
+
+		fetch_dialog_data().then(() => {
+			if (seq !== d._load_seq) return;
+			const filters = get_filter_args();
+			const has_filters = filters.employee || filters.designation || filters.department
+				|| filters.company || filters.farm;
+
+			if (command_type === "Add User" || command_type === "Poll BioData") {
+				render_table(filter_employees(filters).map(e => ({
+					user_id:       e.user_id,
+					employee_name: e.full_name,
+					privilege:     "0"
+				})), command_type);
+			} else if (!has_filters) {
+				render_table(d._device_users, command_type);
+			} else {
+				const allowed_pins = new Set(filter_employees(filters).map(e => e.user_id));
+				render_table(d._device_users.filter(u => allowed_pins.has(u.user_id)), command_type);
 			}
 		});
 	}
 
-	function _load_users_inner(sns, filters, container) {
-		frappe.call({
-			method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_device_users_multi",
-			args: { device_sns: JSON.stringify(sns) },
-			callback(r) {
-				let payload = (r && r.message) || { users: [], pins_by_device: {} };
-				let device_users = payload.users || [];
-				d._device_pins = {};
-				for (const sn_key in (payload.pins_by_device || {})) {
-					d._device_pins[sn_key] = new Set(payload.pins_by_device[sn_key] || []);
-				}
-				let has_filters = filters.employee || filters.designation || filters.department
-					|| filters.company || filters.farm;
-
-				if (command_type === "Add User" || command_type === "Poll BioData") {
-					frappe.call({
-						method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_employees",
-						args: Object.assign({ status: "Active" }, filters),
-						callback(er) {
-							let employees = er.message || [];
-							render_table(employees.map(e => ({
-								user_id:       e.user_id,
-								employee_name: e.full_name,
-								privilege:     "0"
-							})), command_type);
-						}
-					});
-
-				} else if (command_type === "Delete User" || command_type === "Update User") {
-					if (!has_filters) {
-						render_table(device_users, command_type);
-						return;
-					}
-					frappe.call({
-						method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_employees",
-						args: Object.assign({ status: "Active" }, filters),
-						callback(er) {
-							let allowed_pins = new Set((er.message || []).map(e => e.user_id));
-							let matching     = device_users.filter(u => allowed_pins.has(u.user_id));
-							render_table(matching, command_type);
-						}
-					});
-				}
-			}
-		});
-	}
+	// The roster can be thousands of employees × every device, so the ticks,
+	// Skip and Privilege live in memory and only the rows scrolled into view
+	// are in the DOM. Handlers are delegated on the container.
+	const OVERSCAN = 10;
 
 	function render_table(users, action) {
 		let container = d.$wrapper.find("#bulk-user-table");
+		d._bulk_users_data = users;
 
 		if (!users.length) {
-			container.html(`<p style="color:var(--color-text-secondary);padding:8px 0">
+			d._bulk_model = null;
+			container[0].innerHTML = `<p style="color:var(--color-text-secondary);padding:8px 0">
 				No users found for this action on the selected device.
-			</p>`);
+			</p>`;
 			return;
 		}
 
+		const esc = frappe.utils.escape_html;
+		const n = users.length;
 		let show_privilege = action === "Add User" || action === "Update User";
 		let show_skip_name = action === "Add User" || action === "Update User";
 		let skip_name_col  = show_skip_name ? `<th class="bulk-col-skip" style="text-align:center;white-space:nowrap">Skip?</th>` : "";
 		let privilege_col  = show_privilege ? `<th class="bulk-col-priv" style="white-space:nowrap">Privilege</th>` : "";
 		const all_devices  = d._devices || [];
-		const selected_sn_set = new Set(d._selected_sns || []);
 		let device_pins    = d._device_pins || {};
 
+		let lock_title = "";
+		if (action === "Add User") lock_title = "Already enrolled on this device";
+		else if (action === "Update User" || action === "Delete User") lock_title = "Not enrolled on this device";
+		lock_title = esc(lock_title);
+
+		const cell_state = (has, is_target) => {
+			let default_check;
+			let locked = false;
+			if (action === "Add User") {
+				default_check = !has;
+				locked = has;
+			} else if (action === "Update User" || action === "Delete User") {
+				default_check = has;
+				locked = !has;
+			} else {
+				default_check = true;
+			}
+			return { locked, checked: locked ? (is_target && has) : (is_target && default_check) };
+		};
+
+		const active_filters = get_filter_args();
+		const fill_all = !!(active_filters.employee || active_filters.designation || active_filters.department
+			|| active_filters.company || active_filters.farm);
+
+		const targets = new Set(d._selected_sns || []);
+		const m = d._bulk_model = {
+			users,
+			has: {}, locked: {}, checked: {},
+			skip: new Uint8Array(n),
+			privilege: users.map(u => u.privilege === "14" ? "14" : "0")
+		};
+		for (const dev of all_devices) {
+			const sn = dev.device_sn;
+			const pins = device_pins[sn] || new Set();
+			const has = m.has[sn] = new Uint8Array(n);
+			const locked = m.locked[sn] = new Uint8Array(n);
+			const checked = m.checked[sn] = new Uint8Array(n);
+			const is_target = targets.has(sn);
+			for (let i = 0; i < n; i++) {
+				has[i] = pins.has(users[i].user_id) ? 1 : 0;
+				const st = cell_state(!!has[i], is_target);
+				locked[i] = st.locked ? 1 : 0;
+				checked[i] = (st.checked || (fill_all && is_target && !st.locked)) ? 1 : 0;
+			}
+		}
+
 		let device_cols = all_devices.map(dev => {
-			const checked = selected_sn_set.has(dev.device_sn) ? "checked" : "";
+			const checked = targets.has(dev.device_sn) ? "checked" : "";
 			const label = dev.device_location || dev.device_sn;
 			return `<th style="min-width:120px;text-align:center;white-space:nowrap;padding:6px 10px"
-				title="${frappe.utils.escape_html(label)} (${frappe.utils.escape_html(dev.device_sn)})">
+				title="${esc(label)} (${esc(dev.device_sn)})">
 				<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;margin:0;white-space:nowrap">
 					<input type="checkbox" class="bulk-device-header-check"
-						data-sn="${frappe.utils.escape_html(dev.device_sn)}" ${checked}
+						data-sn="${esc(dev.device_sn)}" ${checked}
 						style="margin:0;flex:0 0 auto">
-					<span style="white-space:nowrap">${frappe.utils.escape_html(label)}</span>
+					<span style="white-space:nowrap">${esc(label)}</span>
 				</label>
 			</th>`;
 		}).join("");
+		const n_cols = 2 + (show_skip_name ? 1 : 0) + (show_privilege ? 1 : 0) + all_devices.length;
 
-		let rows = users.map((u, i) => {
-			let skip_name_cell = show_skip_name ? `
-				<td class="bulk-col-skip" style="text-align:center;white-space:nowrap">
-					<input type="checkbox" class="skip-name-check" data-idx="${i}">
-				</td>` : "";
+		function row_html(i) {
+			const u = users[i];
+			const live = new Set(d._selected_sns || []);
+			let skip_name_cell = show_skip_name
+				? `<td class="bulk-col-skip" style="text-align:center"><input type="checkbox" class="skip-name-check" data-idx="${i}"${m.skip[i] ? " checked" : ""}></td>`
+				: "";
+			let privilege_cell = show_privilege
+				? `<td class="bulk-col-priv"><select class="form-control form-control-sm privilege-sel" data-idx="${i}" style="width:100px"><option value="0"${m.privilege[i] === "14" ? "" : " selected"}>User</option><option value="14"${m.privilege[i] === "14" ? " selected" : ""}>Admin</option></select></td>`
+				: "";
+			let device_cells = "";
+			for (const dev of all_devices) {
+				const sn = dev.device_sn;
+				const has = m.has[sn][i];
+				const locked = m.locked[sn][i];
+				device_cells += `<td class="bdc${live.has(sn) ? " is-target" : ""}" data-sn="${esc(sn)}"><span class="bulk-device-presence${has ? " has" : ""}">${has ? "✓" : "—"}</span><input type="checkbox" class="bulk-device-cell-check"${locked ? ` title="${lock_title}" disabled` : ""}${m.checked[sn][i] ? " checked" : ""}></td>`;
+			}
+			let status_badge = u.status ? ` <span class="bulk-status">${esc(u.status)}</span>` : "";
+			return `<tr class="vr" data-idx="${i}"><td class="bulk-col-pin">${esc(u.user_id || "")}</td><td class="bulk-col-name">${esc(u.employee_name || "")}${status_badge}</td>${skip_name_cell}${privilege_cell}${device_cells}</tr>`;
+		}
 
-			let privilege_cell = show_privilege ? `
-				<td class="bulk-col-priv" style="white-space:nowrap">
-					<select class="form-control form-control-sm privilege-sel"
-							data-idx="${i}" style="width:100px">
-						<option value="0"  ${u.privilege === "0"  ? "selected" : ""}>User</option>
-						<option value="14" ${u.privilege === "14" ? "selected" : ""}>Admin</option>
-					</select>
-				</td>` : "";
-
-			let device_cells = all_devices.map(dev => {
-				const pins = device_pins[dev.device_sn] || new Set();
-				const has = pins.has(u.user_id);
-				const is_target = selected_sn_set.has(dev.device_sn);
-				const presence = has
-					? `<span style="color:var(--green-500)">✓</span>`
-					: `<span style="color:var(--text-muted)">—</span>`;
-				let default_check;
-				let locked = false;
-				if (action === "Add User") {
-					default_check = !has;
-					locked = has;
-				} else if (action === "Update User" || action === "Delete User") {
-					default_check = has;
-					locked = !has;
-				} else {
-					default_check = true;
-				}
-				const visible_checked = locked
-					? has
-					: (is_target && default_check);
-				return `<td style="min-width:120px;text-align:center"
-					data-sn="${frappe.utils.escape_html(dev.device_sn)}">
-					<span class="bulk-device-presence" style="display:${is_target ? "none" : "inline"}">${presence}</span>
-					<input type="checkbox" class="bulk-device-cell-check"
-						data-sn="${frappe.utils.escape_html(dev.device_sn)}"
-						data-idx="${i}"
-						data-has="${has ? 1 : 0}"
-						data-locked="${locked ? 1 : 0}"
-						title="${locked ? frappe.utils.escape_html(action === "Add User" ? "Already enrolled on this device" : "Not enrolled on this device") : ""}"
-						style="display:${is_target ? "inline-block" : "none"};margin:0${locked ? ";opacity:0.6;cursor:not-allowed" : ""}"
-						${visible_checked ? "checked" : ""}
-						${locked ? "disabled" : ""}>
-				</td>`;
-			}).join("");
-
-			let status_badge = u.status ? `
-				<span style="font-size:11px;padding:2px 6px;border-radius:4px;
-					background:var(--color-background-success);
-					color:var(--color-text-success)">
-					${u.status}
-				</span>` : "";
-
-			return `
-				<tr data-idx="${i}">
-					<td class="bulk-col-pin" style="width:90px;font-family:var(--font-mono);font-size:13px">
-						${frappe.utils.escape_html(u.user_id || "")}
-					</td>
-					<td class="bulk-col-name" style="width:220px">
-						${frappe.utils.escape_html(u.employee_name || "")}
-						${status_badge}
-					</td>
-					${skip_name_cell}
-					${privilege_cell}
-					${device_cells}
-				</tr>`;
-		}).join("");
-
+		const skip_face_on = container.find("#skip-face-check").is(":checked");
 		let skip_names_toggle = show_skip_name ? `
 			<button class="btn btn-xs btn-default" id="skip-names-btn"
-					title="Toggle Skip for all rows">Skip</button>` : "";
+					title="Toggle Skip for all rows">Skip</button>
+			<label style="display:inline-flex;align-items:center;gap:4px;margin:0;font-size:12px;cursor:pointer">
+				<input type="checkbox" id="skip-face-check" style="margin:0" ${skip_face_on ? "checked" : ""}>${__("Skip Face")}
+			</label>` : "";
 
-		container.html(`
+		container[0].innerHTML = `
+			<style>
+				#bulk-user-table tr.vr { height:37px; }
+				#bulk-user-table tr.vr > td { vertical-align:middle; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+				#bulk-user-table tr.vspace > td { padding:0; border:0; }
+				#bulk-user-table td.bulk-col-pin { font-family:var(--font-mono); font-size:13px; }
+				#bulk-user-table .bulk-status { font-size:11px; padding:2px 6px; border-radius:4px;
+					background:var(--color-background-success); color:var(--color-text-success); }
+				#bulk-user-table td.bdc { min-width:120px; text-align:center; }
+				#bulk-user-table td.bdc .bulk-device-presence { color:var(--text-muted); }
+				#bulk-user-table td.bdc .bulk-device-presence.has { color:var(--green-500); }
+				#bulk-user-table td.bdc .bulk-device-cell-check { display:none; margin:0; }
+				#bulk-user-table td.bdc.is-target .bulk-device-presence { display:none; }
+				#bulk-user-table td.bdc.is-target .bulk-device-cell-check { display:inline-block; }
+				#bulk-user-table td.bdc .bulk-device-cell-check:disabled { opacity:0.6; cursor:not-allowed; }
+			</style>
 			<div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
 				<button class="btn btn-xs btn-default" id="select-all-btn"
 					title="Tick every cell in currently-selected device columns">Select All in Targets</button>
@@ -2187,78 +2213,104 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 							${device_cols}
 						</tr>
 					</thead>
-					<tbody>${rows}</tbody>
+					<tbody></tbody>
 				</table>
 			</div>
-		`);
+		`;
+		const scroller = container[0].querySelector(".bulk-user-scroller");
+		const tbody = container[0].querySelector("tbody");
+		let row_h = 37;
+		let drawn = [-1, -1];
 
-		container.find("#select-all-btn").on("click", () => {
-			container.find(".bulk-device-cell-check:visible").prop("checked", true);
-			update_count();
-		});
-		container.find("#deselect-all-btn").on("click", () => {
-			container.find(".bulk-device-cell-check").prop("checked", false);
-			update_count();
-		});
-		container.find(".bulk-device-cell-check").on("change", update_count);
-
-		container.find(".bulk-device-header-check").on("change", function(e) {
-			e.stopPropagation();
-			const sn = $(this).data("sn");
-			const turned_on = this.checked;
-			const cur = new Set(d._selected_sns || []);
-			if (turned_on) cur.add(sn); else cur.delete(sn);
-			d._selected_sns = Array.from(cur);
-
-			const sn_attr = $.escapeSelector ? $.escapeSelector(sn) : sn;
-			const $cells = container.find(`td[data-sn="${sn_attr}"]`);
-			$cells.find(".bulk-device-presence").css("display", turned_on ? "none" : "inline");
-			$cells.find(".bulk-device-cell-check").each(function() {
-				const has = String($(this).data("has")) === "1";
-				let default_check;
-				let locked = false;
-				if (action === "Add User") {
-					default_check = !has;
-					locked = has;
-				} else if (action === "Update User" || action === "Delete User") {
-					default_check = has;
-					locked = !has;
-				} else {
-					default_check = true;
-				}
-				const checked_state = locked ? (turned_on && has) : (turned_on && default_check);
-				$(this).css("display", turned_on ? "inline-block" : "none")
-					.prop("disabled", locked)
-					.prop("checked", checked_state);
-			});
-			update_count();
-		});
-
-		let active_filters = get_filter_args();
-		if (active_filters.employee || active_filters.designation || active_filters.department
-			|| active_filters.company || active_filters.farm) {
-			container.find(".bulk-device-cell-check:visible").prop("checked", true);
-		}
-		update_count();
-
-		if (show_skip_name) {
-			container.find("#skip-names-btn").on("click", function() {
-				const $btn = $(this);
-				const turn_on = container.find(".skip-name-check:checked").length
-								< container.find(".skip-name-check").length;
-				container.find(".skip-name-check").prop("checked", turn_on);
-				$btn.toggleClass("btn-primary btn-default");
-			});
+		function draw(force) {
+			const view_h = scroller.clientHeight || 400;
+			const first = Math.max(0, Math.floor(scroller.scrollTop / row_h) - OVERSCAN);
+			const last = Math.min(n, Math.ceil((scroller.scrollTop + view_h) / row_h) + OVERSCAN);
+			if (!force && first === drawn[0] && last === drawn[1]) return;
+			drawn = [first, last];
+			let html = first ? `<tr class="vspace"><td colspan="${n_cols}" style="height:${first * row_h}px"></td></tr>` : "";
+			for (let i = first; i < last; i++) html += row_html(i);
+			if (last < n) html += `<tr class="vspace"><td colspan="${n_cols}" style="height:${(n - last) * row_h}px"></td></tr>`;
+			tbody.innerHTML = html;
 		}
 
 		function update_count() {
-			let n = container.find('.bulk-device-cell-check:checked').filter(function() {
-				return String($(this).data("locked")) !== "1";
-			}).length;
-			container.find("#selected-count").text(`${n} pick(s)`);
+			let picks = 0;
+			for (const sn of (d._selected_sns || [])) {
+				const checked = m.checked[sn], locked = m.locked[sn];
+				if (!checked) continue;
+				for (let i = 0; i < n; i++) if (checked[i] && !locked[i]) picks++;
+			}
+			container.find("#selected-count").text(`${picks} pick(s)`);
 		}
 
-		d._bulk_users_data = users;
+		const cell_of = el => {
+			const $td = $(el).closest("td");
+			return { sn: $td.attr("data-sn"), i: parseInt($td.closest("tr").attr("data-idx")) };
+		};
+
+		container.off(".bulk")
+			.on("click.bulk", "#select-all-btn", () => {
+				for (const sn of (d._selected_sns || [])) {
+					const checked = m.checked[sn], locked = m.locked[sn];
+					if (checked) for (let i = 0; i < n; i++) if (!locked[i]) checked[i] = 1;
+				}
+				draw(true);
+				update_count();
+			})
+			.on("click.bulk", "#deselect-all-btn", () => {
+				for (const sn in m.checked) m.checked[sn].fill(0);
+				draw(true);
+				update_count();
+			})
+			.on("change.bulk", ".bulk-device-cell-check", function() {
+				const { sn, i } = cell_of(this);
+				if (m.checked[sn]) m.checked[sn][i] = this.checked ? 1 : 0;
+				update_count();
+			})
+			.on("change.bulk", ".skip-name-check", function() {
+				m.skip[parseInt($(this).attr("data-idx"))] = this.checked ? 1 : 0;
+			})
+			.on("change.bulk", ".privilege-sel", function() {
+				m.privilege[parseInt($(this).attr("data-idx"))] = $(this).val() || "0";
+			})
+			.on("change.bulk", ".bulk-device-header-check", function(e) {
+				e.stopPropagation();
+				const sn = String($(this).attr("data-sn"));
+				const turned_on = this.checked;
+				const cur = new Set(d._selected_sns || []);
+				if (turned_on) cur.add(sn); else cur.delete(sn);
+				d._selected_sns = Array.from(cur);
+
+				const has = m.has[sn], locked = m.locked[sn], checked = m.checked[sn];
+				if (has) {
+					for (let i = 0; i < n; i++) {
+						const st = cell_state(!!has[i], turned_on);
+						locked[i] = st.locked ? 1 : 0;
+						checked[i] = st.checked ? 1 : 0;
+					}
+				}
+				draw(true);
+				update_count();
+			});
+
+		if (show_skip_name) {
+			container.on("click.bulk", "#skip-names-btn", function() {
+				const turn_on = m.skip.some(v => !v);
+				m.skip.fill(turn_on ? 1 : 0);
+				$(this).toggleClass("btn-primary btn-default");
+				draw(true);
+			});
+		}
+
+		scroller.addEventListener("scroll", () => draw(false), { passive: true });
+		draw(true);
+		const measured = tbody.querySelector("tr.vr");
+		if (measured && measured.offsetHeight && measured.offsetHeight !== row_h) {
+			row_h = measured.offsetHeight;
+			draw(true);
+		}
+		update_count();
 	}
 
 }

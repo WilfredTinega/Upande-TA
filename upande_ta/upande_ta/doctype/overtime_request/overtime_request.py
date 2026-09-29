@@ -22,11 +22,10 @@ rest days and public holidays from the holiday list in force on each date get
 none — and the share each date carries is stored in **Hours by Date**, which is
 what Bulk Overtime pays from. On every other kind it is hours per day.
 
-Approval runs through the **Overtime Request Approval** workflow: HR User
-raises it, HR Manager approves or rejects, and each step is a Workflow Action
-on the record. Approving is what submits the document, and docstatus 1 is what
-Bulk Overtime pays from — which is why a rejection stays at docstatus 0 rather
-than submitting. See ``upande_ta.patches.v1.create_overtime_workflows``.
+Approval runs through the **Overtime Request Approval** workflow, which is
+configured on each site rather than shipped with the app. Approving is what
+submits the document, and docstatus 1 is what Bulk Overtime pays from — so a
+rejection must stay at docstatus 0 rather than submitting.
 """
 
 import datetime
