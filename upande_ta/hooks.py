@@ -114,6 +114,9 @@ doc_events = {
 		"after_insert": "upande_ta.upande_ta.overrides.stock_entry.verify_pending_stock_entries",
 		"on_update": "upande_ta.upande_ta.overrides.stock_entry.verify_pending_stock_entries",
 	},
+	"Holiday List Assignment": {
+		"on_submit": "upande_ta.upande_ta.overrides.holiday_list_assignment.cancel_auto_absent_on_week_off",
+	},
 }
 
 scheduler_events = {
