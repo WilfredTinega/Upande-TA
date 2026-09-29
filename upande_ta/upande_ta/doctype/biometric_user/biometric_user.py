@@ -512,6 +512,7 @@ def bulk_command(device_sn, users, command_type):
             employee_name = str(user.get("employee_name") or "").strip()
             privilege     = str(user.get("privilege") or "0").strip()
             skip_name     = bool(user.get("skip_name"))
+            skip_face     = bool(user.get("skip_face"))
 
             if not user_id:
                 failed.append({"user_id": user_id, "reason": "Missing PIN"})
@@ -604,6 +605,7 @@ def bulk_command(device_sn, users, command_type):
                 "employee":      employee,
                 "tpl":           tpl,
                 "force_biodata": force_biodata,
+                "skip_face":     skip_face,
                 "command_type":  command_type,
                 "command_id":    cmd_id,
             })
@@ -626,6 +628,7 @@ def bulk_command(device_sn, users, command_type):
                 tpl=entry["tpl"],
                 force=entry["force_biodata"],
                 caps=caps,
+                skip_modalities=("Face",) if entry["skip_face"] else (),
             )
 
     return {
@@ -1233,7 +1236,8 @@ def _build_userinfo_command(cmd_id, user_id, employee_name, fallback_privilege, 
     )
 
 
-def _queue_biodata_for_user(device_sn, user_id, employee=None, tpl=None, force=False, caps=None):
+def _queue_biodata_for_user(device_sn, user_id, employee=None, tpl=None, force=False, caps=None,
+                            skip_modalities=()):
     """Push the user's biometric templates to one device.
 
     Two filters apply, in order:
@@ -1246,6 +1250,9 @@ def _queue_biodata_for_user(device_sn, user_id, employee=None, tpl=None, force=F
        on-device data if our stored copy were ever corrupted. ``force``
        bypasses this second filter (fresh add, re-add, PIN re-key) but never
        the first.
+
+    ``skip_modalities`` (e.g. ``("Face",)``) are never pushed, whatever the
+    device supports — the operator opted out of that modality for this push.
     """
     if not device_sn or not user_id:
         return 0
@@ -1275,6 +1282,8 @@ def _queue_biodata_for_user(device_sn, user_id, employee=None, tpl=None, force=F
     skipped = 0
     unsupported = []
     for label, type_code, no_f, idx_f, valid_f, major_f, minor_f, type_f, tmp_f in _BIO_TYPES:
+        if label in skip_modalities:
+            continue
         template = tpl.get(tmp_f)
         if not template:
             continue

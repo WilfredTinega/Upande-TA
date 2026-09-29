@@ -291,6 +291,7 @@ function show_multi_device_dialog(frm, command_type, pin, devices, all_template_
 					device_sn: $row.data("sn"),
 					privilege: show_controls ? ($row.find(".privilege-sel").val() || "0") : "0",
 					skip_name: show_controls && $row.find(".skip-name-check").is(":checked") ? 1 : 0,
+					skip_face: show_controls && $container.find("#emp-skip-face-check").is(":checked") ? 1 : 0,
 				});
 			});
 
@@ -366,7 +367,10 @@ function render_multi_device_table(d, command_type, pin, devices, all_template_d
 
 	const skip_toggle = show_controls
 		? `<button class="btn btn-xs btn-default" id="emp-skip-names-btn"
-				title="Toggle Skip">Skip</button>` : "";
+				title="Toggle Skip">Skip</button>
+			<label style="display:inline-flex;align-items:center;gap:4px;margin:0;font-size:12px;cursor:pointer">
+				<input type="checkbox" id="emp-skip-face-check" style="margin:0">${__("Skip Face")}
+			</label>` : "";
 
 	$container.html(`
 		<div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
@@ -439,6 +443,7 @@ function run_multi_device_command(frm, command_type, pin, per_device, dialog) {
 			employee_name: full_name,
 			privilege:     spec.privilege || "0",
 			skip_name:     spec.skip_name ? 1 : 0,
+			skip_face:     spec.skip_face ? 1 : 0,
 		}],
 	}));
 
