@@ -13,12 +13,17 @@ not this module's business at all — they live on the Overtime Type.
 Two steps per employee per date:
 
 1. :func:`biometric_overtime` — what the attendance says was worked over the
-   shift. On a working day that is worked hours minus the shift length; on a
-   rest day or public holiday every worked hour is overtime.
+   shift. On a working day that is worked hours minus the shift length,
+   counted from the shift's start: time clocked before the shift begins is
+   not overtime (:func:`hours_before_shift`), while a late arrival is made up
+   out of the time stayed past the shift's end before any of it becomes
+   overtime. On a rest day or public holiday every worked hour is overtime.
 2. :func:`settle` — what gets paid: the lower of requested and biometric.
 
 A Week request carries a weekly total rather than hours per day;
-:func:`split_across_working_days` turns it into the per-day hours step 2 reads.
+:func:`split_across_working_days` turns it into the per-day hours step 2 reads,
+and :func:`settle_week` then pays the week against that total rather than day
+by day, so a short day is made up by a long one.
 """
 
 from __future__ import annotations
@@ -37,9 +42,12 @@ __all__ = [
 	"WORKED_LESS",
 	"WORKING_DAY",
 	"biometric_overtime",
+	"hours_before_shift",
 	"settle",
+	"settle_week",
 	"shift_length_hours",
 	"split_across_working_days",
+	"swapped_rest_days",
 ]
 
 WORKING_DAY = "Working Day"
@@ -88,7 +96,18 @@ def shift_length_hours(start_time, end_time) -> float | None:
 	return round(length, 4) or None
 
 
-def biometric_overtime(working_hours, shift_hours, day_type: str, *, maximum_hours: float = 0) -> float:
+def hours_before_shift(first_in, shift_start) -> float:
+	"""Hours clocked in before the shift began: ``first_in`` and
+	``shift_start`` are datetimes; 0 when either is missing or the arrival
+	was on time or late."""
+	if not first_in or not shift_start:
+		return 0.0
+	return round(max((shift_start - first_in).total_seconds() / 3600, 0.0), 4)
+
+
+def biometric_overtime(
+	working_hours, shift_hours, day_type: str, *, maximum_hours: float = 0, early_hours: float = 0
+) -> float:
 	"""Overtime hours the attendance supports for one day.
 
 	:param working_hours: Attendance.working_hours. Negative or missing is 0.
@@ -96,12 +115,18 @@ def biometric_overtime(working_hours, shift_hours, day_type: str, *, maximum_hou
 	:param day_type: one of :data:`DAY_TYPES`.
 	:param maximum_hours: cap per day, from the Overtime Type's Maximum
 	        Overtime Hours Allowed; 0 means no cap.
+	:param early_hours: hours worked before the shift started
+	        (:func:`hours_before_shift`). On a working day they are not
+	        overtime, so the day is measured from the shift's start: someone
+	        who came in an hour late must stay an hour past the end before
+	        anything counts. Ignored on rest days and public holidays.
 	"""
 	if day_type not in DAY_TYPES:
 		raise ValueError(f"unknown day type {day_type!r}")
 
 	worked = max(float(working_hours or 0), 0.0)
 	if day_type == WORKING_DAY:
+		worked = max(worked - max(float(early_hours or 0), 0.0), 0.0)
 		raw = max(worked - float(shift_hours or 0), 0.0)
 	else:
 		raw = worked
@@ -160,3 +185,56 @@ def settle(
 	if biometric == requested:
 		return requested, MATCHED
 	return biometric, WORKED_LESS
+
+
+def settle_week(allowance, requested, biometric) -> list[tuple[float, str]]:
+	"""``(hours to pay, status)`` for each payable day of one employee's week.
+
+	A Week request approves a total for the week, not a fixed amount each day:
+	3 hours on Monday and none on Tuesday is the same week as 1.5 on each. So
+	the days are paid in date order, each up to the overtime the attendance
+	supports, until ``allowance`` — the week's total less anything already paid
+	in another batch — runs out.
+
+	``requested`` is each day's share of the total and only decides the status;
+	``biometric`` is what :func:`biometric_overtime` found. Days :func:`settle`
+	refused (no attendance, no clock-out, no shift) are left out by the caller.
+	"""
+	if len(requested) != len(biometric):
+		raise ValueError("requested and biometric must be the same length")
+
+	left = max(float(allowance or 0), 0.0)
+	settled = []
+	for share, worked in zip(requested, biometric, strict=True):
+		share = max(float(share or 0), 0.0)
+		worked = max(float(worked or 0), 0.0)
+		paid = round(min(worked, left), 2)
+		left = max(round(left - paid, 2), 0.0)
+		if paid < worked:
+			status = CAPPED
+		elif paid < share:
+			status = WORKED_LESS
+		else:
+			status = MATCHED
+		settled.append((paid, status))
+	return settled
+
+
+def swapped_rest_days(week) -> dict:
+	"""``{rest day: day off}`` for one employee's Monday-to-Sunday week.
+
+	``week`` is ``(date, day_type, worked, off)`` per day: ``worked`` when the
+	attendance shows them at work, ``off`` when a working day they were due at
+	work has no attendance and no leave. A rest day worked while a working day
+	of the same week was taken off is a moved off, not overtime; each day off
+	pairs with one worked rest day, in date order.
+	"""
+	rest_worked, days_off = [], []
+	for date, day_type, worked, off in sorted(week, key=lambda day: day[0]):
+		if day_type not in DAY_TYPES:
+			raise ValueError(f"unknown day type {day_type!r}")
+		if day_type == REST_DAY and worked:
+			rest_worked.append(date)
+		elif day_type == WORKING_DAY and off and not worked:
+			days_off.append(date)
+	return dict(zip(rest_worked, days_off, strict=False))

@@ -172,6 +172,53 @@ frappe.ui.form.on("Bulk Overtime", {
 			)
 			.join("");
 
+		const totals = {};
+		rows.forEach((row) => {
+			const key = `${row.employee}|${row.overtime_request || ""}`;
+			const t = (totals[key] ||= {
+				employee: row.employee,
+				employee_name: row.employee_name,
+				overtime_request: row.overtime_request,
+				week: row.week_requested_hours,
+				elsewhere: flt(row.week_paid_elsewhere),
+				requested: 0,
+				beyond: 0,
+				approved: 0,
+				days: 0,
+			});
+			t.requested += flt(row.requested_hours);
+			t.beyond += flt(row.beyond_shift);
+			t.approved += flt(row.approved_hours);
+			t.days += 1;
+		});
+		const weekly = Object.values(totals)
+			.map((t) => {
+				const requested = t.week === null || t.week === undefined ? t.requested : flt(t.week);
+				const remaining = Math.max(requested - t.elsewhere - t.approved, 0);
+				const pill =
+					t.approved + t.elsewhere >= requested - 0.005
+						? "green"
+						: t.approved > 0
+							? "orange"
+							: "red";
+				return `
+					<tr>
+						<td><b>${bo_esc(t.employee_name || t.employee)}</b><div class="text-muted small">${bo_esc(
+							t.employee,
+						)}</div></td>
+						<td>${bo_esc(t.overtime_request || "")}</td>
+						<td class="text-right">${t.days}</td>
+						<td class="text-right">${bo_hours(requested)}</td>
+						<td class="text-right">${bo_hours(t.elsewhere)}</td>
+						<td class="text-right"><b>${bo_hours(t.beyond)}</b></td>
+						<td class="text-right"><b>${bo_hours(t.approved)}</b></td>
+						<td class="text-right"><span class="indicator-pill ${pill}">${bo_hours(
+							remaining,
+						)}</span></td>
+					</tr>`;
+			})
+			.join("");
+
 		const body = rows
 			.map((row) => {
 				const date = row.overtime_date;
@@ -187,7 +234,13 @@ frappe.ui.form.on("Bulk Overtime", {
 						)}</div></td>
 						<td>${frappe.datetime.str_to_user(date)}<div class="text-muted small">${bo_esc(
 							__(row.day_type || ""),
-						)}</div></td>
+						)}</div>${
+							row.day_off
+								? `<span class="indicator-pill orange">${__("Rest day, off on {0}", [
+										frappe.datetime.str_to_user(row.day_off),
+									])}</span>`
+								: ""
+						}</td>
 						<td>${bo_esc(shift)}<div class="text-muted small">${bo_hours(row.shift_hours)} h</div></td>
 						<td>${bo_esc(bo_clock(row.first_in, date))}</td>
 						<td>${bo_esc(bo_clock(row.last_out, date))}</td>
@@ -208,10 +261,29 @@ frappe.ui.form.on("Bulk Overtime", {
 			size: "extra-large",
 			fields: [
 				{ fieldtype: "HTML", fieldname: "summary" },
+				{ fieldtype: "HTML", fieldname: "weekly" },
 				{ fieldtype: "HTML", fieldname: "table" },
 			],
 		});
 		dialog.get_field("summary").$wrapper.html(`<div style="margin-bottom:8px;">${summary}</div>`);
+		dialog.get_field("weekly").$wrapper.html(`
+			<div style="max-height:30vh; overflow:auto; margin-bottom:12px;">
+				<table class="table table-bordered table-sm" style="font-size:12px; margin:0;">
+					<thead style="position:sticky; top:0; background:var(--card-bg); z-index:1;">
+						<tr>
+							<th>${__("Employee")}</th>
+							<th>${__("Overtime Request")}</th>
+							<th class="text-right">${__("Days")}</th>
+							<th class="text-right">${__("Requested")}</th>
+							<th class="text-right">${__("Paid Before")}</th>
+							<th class="text-right">${__("Beyond Shift")}</th>
+							<th class="text-right">${__("Approved")}</th>
+							<th class="text-right">${__("Remaining")}</th>
+						</tr>
+					</thead>
+					<tbody>${weekly}</tbody>
+				</table>
+			</div>`);
 		dialog.get_field("table").$wrapper.html(`
 			<div style="max-height:65vh; overflow:auto;">
 				<table class="table table-bordered table-sm" style="font-size:12px; margin:0;">

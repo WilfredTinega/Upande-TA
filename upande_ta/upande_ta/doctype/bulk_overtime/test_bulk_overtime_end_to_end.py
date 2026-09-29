@@ -122,7 +122,6 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		cls._mark_attendance(cls.short_day, 10)
 		cls._mark_attendance(cls.no_punch_day, 0)
 
-
 	@classmethod
 	def _quieten_workflow_emails(cls, *doctypes):
 		"""Stop the approval workflow's e-mail from taking the submit with it.
@@ -282,7 +281,11 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 					"payroll_frequency": "Monthly",
 					"currency": currency,
 					"earnings": [
-						{"salary_component": cls._basic_component(), "amount": 50000, "amount_based_on_formula": 0}
+						{
+							"salary_component": cls._basic_component(),
+							"amount": 50000,
+							"amount_based_on_formula": 0,
+						}
 					],
 				}
 			)
@@ -459,7 +462,12 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		rows = self.rows_by_date(self.make_bulk_overtime())
 
 		self.assertEqual(
-			(rows[self.working_day].day_type, rows[self.working_day].biometric_hours, rows[self.working_day].approved_hours, rows[self.working_day].status),
+			(
+				rows[self.working_day].day_type,
+				rows[self.working_day].biometric_hours,
+				rows[self.working_day].approved_hours,
+				rows[self.working_day].status,
+			),
 			("Working Day", 2.5, 2, "Capped at Request"),
 		)
 		self.assertEqual(
@@ -467,7 +475,11 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 			("Rest Day", 4, "Worked Less"),
 		)
 		self.assertEqual(
-			(rows[self.public_holiday].day_type, rows[self.public_holiday].approved_hours, rows[self.public_holiday].status),
+			(
+				rows[self.public_holiday].day_type,
+				rows[self.public_holiday].approved_hours,
+				rows[self.public_holiday].status,
+			),
 			("Public Holiday", 5, "Matched"),
 		)
 		self.assertEqual(rows[self.short_day].approved_hours, 1)
@@ -579,9 +591,7 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 
 		self.assertEqual(
 			sorted(self.rows_by_date(doc)),
-			sorted(
-				[self.working_day, self.rest_day, self.public_holiday, self.short_day, self.no_punch_day]
-			),
+			sorted([self.working_day, self.rest_day, self.public_holiday, self.short_day, self.no_punch_day]),
 		)
 
 	def test_a_range_requests_its_hours_every_day(self):
@@ -945,7 +955,7 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 
 	def _needs_workflow(self, doctype):
 		if not frappe.db.exists("Workflow", {"document_type": doctype, "is_active": 1}):
-			raise unittest.SkipTest(f"no active Workflow on {doctype}; run bench migrate")
+			raise unittest.SkipTest(f"no active Workflow on {doctype} on this site")
 
 	def test_approving_a_request_through_the_workflow_pays_it(self):
 		self._needs_workflow("Overtime Request")
@@ -1070,17 +1080,25 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		self.assertIn("no approved hours to pay", message)
 		self.assertIn("No Clock-Out", message)
 
-	def _punch(self, date, clock):
+	def _punch(self, date, clock, log_type="IN"):
 		from frappe.utils import get_datetime
 
 		frappe.get_doc(
 			{
 				"doctype": "Employee Checkin",
 				"employee": self.employee,
-				"log_type": "IN",
+				"log_type": log_type,
 				"time": get_datetime(f"{date} {clock}"),
 			}
 		).insert(ignore_permissions=True)
+
+	def _labels_are_strict(self):
+		frappe.db.set_value(
+			"Shift Type",
+			SHIFT,
+			"determine_check_in_and_check_out",
+			"Strictly based on Log Type in Employee Checkin",
+		)
 
 	def _verified(self, doc, date):
 		from frappe.utils import getdate
@@ -1112,6 +1130,88 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		self._punch(self.working_day, "17:30:00")  # 0.5h beyond, attendance says 2.5
 		self.make_request({self.working_day: 2})
 		self.assertEqual(self._verified(self.make_bulk_overtime(), self.working_day)["check"], "Differs")
+
+	def test_time_before_the_shift_is_not_overtime(self):
+		"""In at 07:00 on the 08:00-17:00 shift: of the 11.5h worked, the hour
+		before the start is not overtime, so 1.5h is, not 2.5h."""
+		attendance = frappe.db.get_value(
+			"Attendance",
+			{"employee": self.employee, "attendance_date": self.working_day, "docstatus": 1},
+			"name",
+		)
+		frappe.db.set_value("Attendance", attendance, "in_time", f"{self.working_day} 07:00:00")
+		self.make_request({self.working_day: 2})
+		row = self.rows_by_date(self.make_bulk_overtime())[self.working_day]
+
+		self.assertEqual(
+			(row.working_hours, row.early_in_hours, row.biometric_hours, row.approved_hours),
+			(11.5, 1, 1.5, 1.5),
+		)
+
+	def test_a_late_start_is_made_up_before_overtime(self):
+		"""In at 09:00: the attendance's 11.5h already runs from the late
+		arrival, so nothing comes off it and 2.5h beyond the shift stands."""
+		attendance = frappe.db.get_value(
+			"Attendance",
+			{"employee": self.employee, "attendance_date": self.working_day, "docstatus": 1},
+			"name",
+		)
+		frappe.db.set_value("Attendance", attendance, "in_time", f"{self.working_day} 09:00:00")
+		self.make_request({self.working_day: 3})
+		row = self.rows_by_date(self.make_bulk_overtime())[self.working_day]
+
+		self.assertEqual((row.early_in_hours, row.biometric_hours), (0, 2.5))
+
+	def test_verify_leaves_out_punches_before_the_shift(self):
+		self._punch(self.working_day, "07:00:00")
+		self._punch(self.working_day, "19:30:00")  # 12.5h on the clock, 1h of it early
+		self.make_request({self.working_day: 2})
+		row = self._verified(self.make_bulk_overtime(), self.working_day)
+
+		self.assertEqual((row["punch_hours"], row["beyond_shift"], row["check"]), (12.5, 2.5, "Agrees"))
+
+	def test_two_ins_are_an_arrival_and_a_departure(self):
+		"""A shift that reads labels strictly, punched IN at 07:00 and IN at
+		19:30: first punch in, last punch out — 12.5h, 1h before the start, 2.5h over."""
+		self._labels_are_strict()
+		self._punch(self.working_day, "07:00:00", "IN")
+		self._punch(self.working_day, "19:30:00", "IN")
+		self.make_request({self.working_day: 3})
+		row = self.rows_by_date(self.make_bulk_overtime())[self.working_day]
+
+		self.assertEqual(
+			(row.working_hours, row.early_in_hours, row.biometric_hours, row.approved_hours),
+			(12.5, 1, 2.5, 2.5),
+		)
+
+	def test_two_outs_are_an_arrival_and_a_departure(self):
+		"""OUT at 08:00 and OUT at 19:00 on a day the attendance read as no
+		hours at all: it is 11h worked, 2h over, not a missing clock-out."""
+		self._labels_are_strict()
+		self._punch(self.no_punch_day, "08:00:00", "OUT")
+		self._punch(self.no_punch_day, "19:00:00", "OUT")
+		self.make_request({self.no_punch_day: 2})
+		row = self.rows_by_date(self.make_bulk_overtime())[self.no_punch_day]
+
+		self.assertEqual((row.working_hours, row.biometric_hours, row.status), (11, 2, "Matched"))
+
+	def test_alternating_shifts_keep_the_attendance_hours(self):
+		"""An alternating shift already takes the first punch as IN and the
+		last as OUT, so its attendance hours stand."""
+		self._punch(self.working_day, "07:00:00", "IN")
+		self._punch(self.working_day, "19:30:00", "IN")
+		self.make_request({self.working_day: 3})
+		row = self.rows_by_date(self.make_bulk_overtime())[self.working_day]
+
+		self.assertEqual(row.working_hours, 11.5)
+
+	def test_a_single_punch_on_a_strict_shift_is_still_no_clock_out(self):
+		self._labels_are_strict()
+		self._punch(self.no_punch_day, "08:00:00", "OUT")
+		self.make_request({self.no_punch_day: 2})
+		row = self.rows_by_date(self.make_bulk_overtime())[self.no_punch_day]
+
+		self.assertEqual((row.approved_hours, row.status), (0, "No Clock-Out"))
 
 	def test_verify_flags_missing_punches(self):
 		self.make_request({self.short_day: 2})
@@ -1355,7 +1455,11 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		for row in rows.values():
 			self.assertEqual(row.overtime_request, request.name)
 			self.assertEqual(row.overtime_budget, request.budgets[0].name)
-			self.assertEqual(row.requested_hours, row.biometric_hours, "nobody named them, so they ask for what they worked")
+			self.assertEqual(
+				row.requested_hours,
+				row.biometric_hours,
+				"nobody named them, so they ask for what they worked",
+			)
 
 	def test_a_missing_clock_out_is_not_listed_on_a_budget(self):
 		"""Nobody named them and no hours can be typed in, so a day with no
@@ -1458,7 +1562,6 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		self.assertNotIn(on_time, dates)
 		self.assertIn(self.working_day, dates)
 
-
 	def test_only_the_employees_chosen_are_paid_from_a_budget(self):
 		request = self.make_budget_request(40)
 		doc = frappe.get_doc({"doctype": "Bulk Overtime", "company": self.company})
@@ -1511,12 +1614,13 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 
 		request = self.make_budget_request(40, department=department, max_employees=1)
 		doc = self.make_bulk_overtime_for([request.name])
-		self.assertEqual({r.employee for r in doc.bulk_overtime_entries} & {self.employee, second}, {self.employee, second})
+		self.assertEqual(
+			{r.employee for r in doc.bulk_overtime_entries} & {self.employee, second}, {self.employee, second}
+		)
 		doc.insert(ignore_permissions=True)
 		with self.assertRaises(frappe.ValidationError) as caught:
 			doc.submit()
 		self.assertIn("allows 1", frappe.utils.strip_html(str(caught.exception)))
-
 
 	# ──────────────────────────────────────────────────────────────────────
 	# Leave, and a budget's own period
@@ -1573,7 +1677,6 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		with self.assertRaises(frappe.ValidationError) as caught:
 			doc.submit()
 		self.assertIn("once the period is over", frappe.utils.strip_html(str(caught.exception)))
-
 
 	def test_the_batch_names_its_week(self):
 		doc = frappe.get_doc({"doctype": "Bulk Overtime", "company": self.company})
