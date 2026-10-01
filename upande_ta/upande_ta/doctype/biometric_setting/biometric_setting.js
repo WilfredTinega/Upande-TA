@@ -237,8 +237,8 @@ frappe.ui.form.on("Biometric Setting", {
 	absent_cron_format:       autosave_on_change,
 
 	detect_capabilities: function(frm) {
-		// Dry run first, always: the report says what each device has actually
-		// delivered before anything is switched off.
+		// Dry run first, always: the report shows what would be cleared
+		// before any stored credential is touched.
 		run_with_progress(
 			__("Detecting device capabilities"),
 			__("Reading the templates each device has delivered..."),
@@ -390,69 +390,93 @@ const CAPABILITY_LABELS = {
 };
 
 function show_capability_report(frm, res) {
-	const rows = (res.report || []).map(d => {
+	const esc = frappe.utils.escape_html;
+	const flags = Object.keys(CAPABILITY_LABELS);
+	const report = res.report || [];
+	const to_clear = res.clear || 0;
+
+	// Ticked: rows carrying it. Not ticked: nothing, or what Apply clears.
+	const rows = report.map(d => {
 		const ev = d.evidence || {};
-		const cells = Object.keys(CAPABILITY_LABELS).map(flag => {
+		const cells = flags.map(flag => {
 			const n = ev[flag] || 0;
-			const change = d.changes && Object.prototype.hasOwnProperty.call(d.changes, flag)
-				? d.changes[flag] : null;
-			let cell = String(n);
-			if (change === 1) cell = `<b style="color:var(--green-600)">${n} → on</b>`;
-			if (change === 0) cell = `<b style="color:var(--red-600)">${n} → off</b>`;
-			return `<td style="text-align:right;padding:2px 8px">${cell}</td>`;
+			if ((d.flags || {})[flag]) return `<td class="cap-num${n ? "" : " zero"}">${n}</td>`;
+			const clear = (d.clear || {})[flag] || 0;
+			return clear
+				? `<td class="cap-num cap-off">${clear}<span class="cap-pill off">${__("clear")}</span></td>`
+				: `<td class="cap-num cap-off" title="${__("Not supported")}">—</td>`;
 		}).join("");
-		const note = d.skipped
-			? `<div style="color:var(--color-text-secondary);font-size:11px">${d.skipped}</div>`
-			: "";
 		return `<tr>
-			<td style="padding:2px 8px">${frappe.utils.escape_html(d.device_location || d.device_sn)}${note}</td>
-			<td style="text-align:right;padding:2px 8px">${d.template_rows || 0}</td>
+			<td class="cap-dev" title="${esc(d.device_sn)}">${esc(d.device_location || d.device_sn)}</td>
+			<td class="cap-num">${d.template_rows || 0}</td>
 			${cells}
 		</tr>`;
 	}).join("");
 
 	const head = Object.values(CAPABILITY_LABELS)
-		.map(l => `<th style="text-align:right;padding:2px 8px">${l}</th>`).join("");
+		.map(l => `<th class="cap-num">${l}</th>`).join("");
+
+	const summary = __("{0} unsupported credential(s) to clear", [to_clear]);
 
 	const d = new frappe.ui.Dialog({
 		title: __("Device Capabilities"),
-		size: "large",
+		size: "extra-large",
 		fields: [{
 			fieldtype: "HTML",
 			options: `
-				<p>${__("Rows carrying each credential, from the templates every device has delivered. Nothing has been changed yet.")}</p>
-				<div style="overflow-x:auto">
-				<table class="table table-bordered" style="font-size:12px;margin-bottom:0">
-					<thead><tr>
-						<th style="padding:2px 8px">${__("Device")}</th>
-						<th style="text-align:right;padding:2px 8px">${__("Rows")}</th>
-						${head}
-					</tr></thead>
-					<tbody>${rows}</tbody>
-				</table></div>`
+				<style>
+					.cap-report .cap-summary { color:var(--text-muted); font-size:var(--text-sm,13px); margin-bottom:12px; }
+					.cap-report .cap-wrap { max-height:60vh; overflow:auto; border:1px solid var(--border-color); border-radius:8px; }
+					.cap-report table { width:100%; margin:0; border-collapse:separate; border-spacing:0; font-size:var(--text-sm,13px); }
+					.cap-report th, .cap-report td { padding:10px 16px; white-space:nowrap; vertical-align:middle;
+						border-bottom:1px solid var(--border-color); }
+					.cap-report thead th { background:var(--subtle-fg, var(--bg-light-gray)); color:var(--text-muted);
+						font-weight:500; position:sticky; top:0; z-index:1; }
+					.cap-report tbody tr:last-child td { border-bottom:0; }
+					.cap-report .cap-num { text-align:right; font-variant-numeric:tabular-nums; width:1%; }
+					.cap-report .cap-num.zero { color:var(--text-light, var(--text-muted)); }
+					.cap-report td.cap-dev { color:var(--text-color); font-weight:500; }
+					.cap-report td.cap-off { background:var(--subtle-fg, var(--bg-light-gray)); color:var(--text-light, var(--text-muted)); }
+					.cap-report .cap-pill { display:inline-block; margin-left:8px; padding:0 8px; line-height:18px;
+						border-radius:9px; font-size:var(--text-xs,11px); font-weight:500; vertical-align:middle; }
+					.cap-report .cap-pill.off { background:var(--bg-red, #fff0f0); color:var(--red-600, #e03636); }
+				</style>
+				<div class="cap-report">
+					<div class="cap-summary">${summary}</div>
+					<div class="cap-wrap">
+						<table>
+							<thead><tr>
+								<th>${__("Device")}</th>
+								<th class="cap-num">${__("Rows")}</th>
+								${head}
+							</tr></thead>
+							<tbody>${rows}</tbody>
+						</table>
+					</div>
+				</div>`
 		}],
-		primary_action_label: res.changes
-			? __("Apply {0} change(s)", [res.changes])
-			: __("Close"),
+		primary_action_label: to_clear ? __("Clear {0}", [to_clear]) : __("Close"),
 		primary_action() {
-			d.hide();
-			if (!res.changes) return;
-			run_with_progress(
-				__("Applying capabilities"),
-				__("Writing the capability flags..."),
-				{
-					method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.detect_device_capabilities",
-					args: { apply: 1 },
-					callback(r2) {
-						if (r2.exc) return;
-						frm.reload_doc();
-						frappe.show_alert({
-							message: __("{0} capability flag(s) updated.", [(r2.message || {}).changes || 0]),
-							indicator: "green"
-						}, 7);
+			if (!to_clear) { d.hide(); return; }
+			frappe.confirm(__("Clear {0} unsupported credential(s) from the stored templates?", [to_clear]), () => {
+				d.hide();
+				run_with_progress(
+					__("Clearing unsupported credentials"),
+					__("Clearing templates..."),
+					{
+						method: "upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.detect_device_capabilities",
+						args: { apply: 1 },
+						callback(r2) {
+							if (r2.exc) return;
+							frm.reload_doc();
+							frappe.show_alert({
+								message: __("{0} credential(s) cleared.", [(r2.message || {}).clear || 0]),
+								indicator: "green"
+							}, 7);
+						}
 					}
-				}
-			);
+				);
+			});
 		}
 	});
 	d.show();
