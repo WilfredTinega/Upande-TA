@@ -1001,10 +1001,22 @@ _CAPABILITY_EVIDENCE = {
 	"supports_password":    "password",
 }
 
-# A handful of rows is noise (a test enrolment, a default card of "0"), not
-# proof that a terminal has the sensor. Require a real share of its roster.
-_CAPABILITY_MIN_ROWS = 5
-_CAPABILITY_MIN_SHARE = 0.02
+# What clearing a credential blanks on a Bio Template row: the credential
+# itself plus the fields that would otherwise still claim it.
+_CAPABILITY_CLEAR = {
+	"supports_fingerprint": {"fingerprint_template": "", "fp_valid": 0, "fp_size": 0, "fp_raw_log": ""},
+	"supports_face":        {"face_template": "", "face_valid": 0, "face_size": 0, "face_raw_log": ""},
+	"supports_palm":        {"palm_template": "", "palm_valid": 0, "palm_size": 0, "palm_raw_log": ""},
+	"supports_card":        {"card": "", "vice_card": ""},
+	"supports_password":    {"password": ""},
+}
+
+
+def _capability_condition(column):
+	# card/password are text fields where "0" is the device's own "unset".
+	if column.endswith("_template"):
+		return f"`{column}` IS NOT NULL AND `{column}` <> ''"
+	return f"COALESCE(`{column}`, '') NOT IN ('', '0')"
 
 
 def _capability_evidence(device_sn):
@@ -1015,14 +1027,10 @@ def _capability_evidence(device_sn):
 	if not parent_name:
 		return 0, {}
 
-	cols = []
-	for flag, column in _CAPABILITY_EVIDENCE.items():
-		# card/password are text fields where "0" is the device's own "unset".
-		if column.endswith("_template"):
-			cond = f"`{column}` IS NOT NULL AND `{column}` <> ''"
-		else:
-			cond = f"COALESCE(`{column}`, '') NOT IN ('', '0')"
-		cols.append(f"SUM({cond}) AS `{flag}`")
+	cols = [
+		f"SUM({_capability_condition(column)}) AS `{flag}`"
+		for flag, column in _CAPABILITY_EVIDENCE.items()
+	]
 
 	row = frappe.db.sql(
 		f"""
@@ -1042,22 +1050,14 @@ def _capability_evidence(device_sn):
 
 @frappe.whitelist()
 def detect_device_capabilities(device_sn=None, apply=0):
-	"""Map each device's capability flags from the templates it has delivered.
+	"""Hold each device's stored credentials to its capability flags.
 
-	All five credentials share the Bio Template row, so what a terminal has
-	actually uploaded is the best evidence of what it can store. Two rules keep
-	this from disabling a working device:
+	The flags are authoritative: a credential the device is not ticked for is
+	one it cannot hold, so any Bio Template row of that device still carrying it
+	is cleared. Flags are never changed here.
 
-	* a flag is only turned **on** when the credential appears on at least
-	  ``_CAPABILITY_MIN_ROWS`` rows **and** 2% of the device's roster — one
-	  stray card number is noise, not a card reader;
-	* nothing is turned **off** for a device that has delivered **no templates
-	  at all**. A device with an empty Biometric Template cannot be told apart
-	  from one whose uploads are failing upstream, and switching its flags off
-	  would quietly stop every future push.
-
-	Dry run by default: pass ``apply=1`` to write. Returns one entry per device
-	with the evidence counts and the flags that would change.
+	Dry run by default: pass ``apply=1`` to clear. Returns one entry per device
+	with the evidence counts, its current flags and the rows to clear per flag.
 	"""
 	frappe.only_for(("System Manager", "HR Manager"))
 	apply = int(apply or 0)
@@ -1071,55 +1071,49 @@ def detect_device_capabilities(device_sn=None, apply=0):
 		frappe.throw("No matching device in Biometric Setting")
 
 	report = []
-	changed_total = 0
+	clear_total = 0
 	for d in rows:
 		total, counts = _capability_evidence(d.device_sn)
-		entry = {
+		flags = {flag: int(d.get(flag) or 0) for flag in _CAPABILITY_EVIDENCE}
+		clear = {
+			flag: counts.get(flag, 0)
+			for flag, on in flags.items()
+			if not on and counts.get(flag, 0)
+		}
+		report.append({
 			"device_sn":       d.device_sn,
 			"device_location": d.device_location or d.device_sn,
 			"template_rows":   total,
 			"evidence":        counts,
-			"changes":         {},
-			"skipped":         "",
-		}
+			"flags":           flags,
+			"clear":           clear,
+		})
+		clear_total += sum(clear.values())
 
-		has_any_template = any(
-			counts.get(flag, 0)
-			for flag, column in _CAPABILITY_EVIDENCE.items()
-			if column.endswith("_template")
-		)
-		if not has_any_template:
-			entry["skipped"] = (
-				"no biometric template has ever arrived from this device — "
-				"cannot tell a missing sensor from a broken upload, flags left as they are"
-			)
-			report.append(entry)
+		if not (apply and clear):
 			continue
+		parent_name = frappe.db.get_value("Biometric Template", {"device_sn": d.device_sn}, "name")
+		for flag in clear:
+			values = _CAPABILITY_CLEAR[flag]
+			assignments = ", ".join(f"`{col}` = %({col})s" for col in values)
+			frappe.db.sql(
+				f"""
+				UPDATE `tabBio Template`
+				   SET {assignments}, `modified` = %(now)s
+				 WHERE parent = %(parent)s AND parentfield = 'bio_templates'
+				   AND {_capability_condition(_CAPABILITY_EVIDENCE[flag])}
+				""",
+				{**values, "now": frappe.utils.now(), "parent": parent_name},
+			)
 
-		threshold = max(_CAPABILITY_MIN_ROWS, int(total * _CAPABILITY_MIN_SHARE))
-		for flag in _CAPABILITY_EVIDENCE:
-			wanted = 1 if counts.get(flag, 0) >= threshold else 0
-			if int(d.get(flag) or 0) != wanted:
-				entry["changes"][flag] = wanted
-
-		if entry["changes"] and apply:
-			for flag, wanted in entry["changes"].items():
-				frappe.db.set_value(
-					"Biometric Device", d.name, flag, wanted, update_modified=False
-				)
-				d.set(flag, wanted)
-		changed_total += len(entry["changes"])
-		report.append(entry)
-
-	if apply and changed_total:
+	if apply and clear_total:
 		frappe.db.commit()
-		frappe.clear_cache(doctype="Biometric Setting")
 
 	return {
-		"applied":  bool(apply),
-		"devices":  len(report),
-		"changes":  changed_total,
-		"report":   report,
+		"applied": bool(apply),
+		"devices": len(report),
+		"clear":   clear_total,
+		"report":  report,
 	}
 
 
