@@ -291,11 +291,13 @@ function show_multi_device_dialog(frm, command_type, pin, devices, all_template_
 					device_sn: $row.data("sn"),
 					privilege: show_controls ? ($row.find(".privilege-sel").val() || "0") : "0",
 					skip_name: show_controls && $row.find(".skip-name-check").is(":checked") ? 1 : 0,
-					skip_face: show_controls && $container.find("#emp-skip-face-check").is(":checked") ? 1 : 0,
+					skip_face: show_controls && !$container.find("#emp-source-device-sel").val()
+						&& $container.find("#emp-skip-face-check").is(":checked") ? 1 : 0,
 				});
 			});
 
-			run_multi_device_command(frm, command_type, pin, per_device, d);
+			const source_sn = show_controls ? ($container.find("#emp-source-device-sel").val() || "") : "";
+			run_multi_device_command(frm, command_type, pin, per_device, d, source_sn);
 		},
 		secondary_action_label: __("Cancel"),
 		secondary_action() { d.hide(); },
@@ -368,17 +370,26 @@ function render_multi_device_table(d, command_type, pin, devices, all_template_d
 	const skip_toggle = show_controls
 		? `<button class="btn btn-xs btn-default" id="emp-skip-names-btn"
 				title="Toggle Skip">Skip</button>
-			<label style="display:inline-flex;align-items:center;gap:4px;margin:0;font-size:12px;cursor:pointer">
-				<input type="checkbox" id="emp-skip-face-check" style="margin:0">${__("Skip Face")}
+			<label id="emp-skip-face-label" class="uds-check-label">
+				<input type="checkbox" id="emp-skip-face-check" style="margin:0" checked>${__("Skip Face")}
+			</label>
+			<label class="uds-field">
+				<span>${__("Templates from")}</span>
+				<select id="emp-source-device-sel">
+					<option value="">${__("Any device")}</option>
+					${(all_template_devices || [])
+						.filter(dev => (pins_by_device[dev.device_sn] || new Set()).has(pin))
+						.map(dev => `<option value="${frappe.utils.escape_html(dev.device_sn)}" data-sub="${frappe.utils.escape_html(dev.device_sn)}">${frappe.utils.escape_html(dev.device_location || dev.device_sn)}</option>`)
+						.join("")}
+				</select>
 			</label>` : "";
 
 	$container.html(`
-		<div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
+		<div class="uds-toolbar">
 			<button class="btn btn-xs btn-default" id="emp-select-all-btn">Select All</button>
 			<button class="btn btn-xs btn-default" id="emp-deselect-all-btn">Deselect All</button>
 			${skip_toggle}
-			<span style="font-size:12px;color:var(--color-text-secondary)"
-				  id="emp-selected-count">0 / ${devices.length}</span>
+			<span class="uds-count" id="emp-selected-count">0 / ${devices.length}</span>
 		</div>
 		<div style="max-height:400px;overflow-y:auto;
 			border:1px solid var(--color-border-tertiary);border-radius:8px">
@@ -397,6 +408,14 @@ function render_multi_device_table(d, command_type, pin, devices, all_template_d
 			</table>
 		</div>
 	`);
+
+	const source_sel = $container.find("#emp-source-device-sel")[0];
+	if (source_sel && upande_ta.device_select && upande_ta.device_select.enhance) upande_ta.device_select.enhance(source_sel);
+	$(source_sel).on("change", function () {
+		const picked = !!$(this).val();
+		if (!picked) $container.find("#emp-skip-face-check").prop("checked", true);
+		$container.find("#emp-skip-face-label").css("display", picked ? "none" : "inline-flex");
+	});
 
 	function update_count() {
 		const $boxes = $container.find(".device-check");
@@ -428,7 +447,7 @@ function render_multi_device_table(d, command_type, pin, devices, all_template_d
 }
 
 // Dispatch one bulk_command per device with that device's own privilege + skip_name.
-function run_multi_device_command(frm, command_type, pin, per_device, dialog) {
+function run_multi_device_command(frm, command_type, pin, per_device, dialog, source_sn) {
 	const full_name = (frm.doc.employee_name || frm.doc.name || "").trim();
 	const verb = {
 		"Add User":    __("Add"),
@@ -452,6 +471,7 @@ function run_multi_device_command(frm, command_type, pin, per_device, dialog) {
 		args: {
 			assignments: JSON.stringify(assignments),
 			command_type: command_type,
+			source_device_sn: source_sn || null,
 		},
 		callback(rr) {
 			const m = (rr && rr.message) || {};

@@ -226,6 +226,107 @@ def hydrate_users_from_templates(device_sn):
     return {"created": created, "skipped": skipped}
 
 
+# Above this many people the sync runs as a background job: each one is two or
+# three Node-RED posts with a 10s timeout, too long for a desk request.
+_SYNC_INLINE_LIMIT = 50
+
+
+@frappe.whitelist()
+def sync_templates_from_device(device_sn, source_device_sn=None):
+    """Sync ``device_sn`` from ``source_device_sn``'s templates (A to B).
+
+    Everyone holding templates on the source is Added to the target, or
+    Updated where the target already lists their PIN, with templates pinned to
+    the source (see ``bulk_command``). With no source, or the target itself,
+    this is the old roster sync from the device's own templates.
+    """
+    device_sn = str(device_sn or "").strip()
+    source_device_sn = str(source_device_sn or "").strip()
+    if not device_sn:
+        frappe.throw("device_sn is required")
+    if not source_device_sn or source_device_sn == device_sn:
+        return hydrate_users_from_templates(device_sn)
+    if not frappe.db.get_single_value("Biometric Setting", "enable_users"):
+        frappe.throw("Enable Users")
+
+    source_label = _lookup_device_location(source_device_sn) or source_device_sn
+    source_parent = _template_parent_for_device(source_device_sn)
+    if not source_parent:
+        frappe.throw(f"No templates on {source_label}")
+
+    rows = frappe.get_all(
+        "Bio Template",
+        filters={"parent": source_parent, "parentfield": "bio_templates", "deleted": 0},
+        fields=["user_id", "employee", "employee_name",
+                "fp_valid", "face_valid", "palm_valid",
+                "fingerprint_template", "face_template", "palm_template"],
+    )
+    pins = {}
+    for r in rows:
+        pin = (r.user_id or "").strip()
+        held = (
+            (r.fp_valid and (r.fingerprint_template or "").strip())
+            or (r.face_valid and (r.face_template or "").strip())
+            or (r.palm_valid and (r.palm_template or "").strip())
+        )
+        if pin and r.employee and held:
+            pins.setdefault(pin, r.employee_name or "")
+    if not pins:
+        frappe.throw(f"No templates on {source_label}")
+
+    on_target = {
+        (u.user_id or "").strip(): u
+        for u in (_get_parent_doc(device_sn).users or [])
+    }
+    add, update = [], []
+    for pin, name in pins.items():
+        existing = on_target.get(pin)
+        user = {
+            "user_id":       pin,
+            "employee_name": (existing.employee_name if existing else None) or name,
+            "privilege":     (existing.privilege if existing else None) or "0",
+        }
+        (update if existing else add).append(user)
+
+    kwargs = {"device_sn": device_sn, "source_device_sn": source_device_sn,
+              "add": add, "update": update}
+    if len(add) + len(update) <= _SYNC_INLINE_LIMIT:
+        return _run_template_sync(**kwargs)
+
+    frappe.enqueue(
+        "upande_ta.upande_ta.doctype.biometric_user.biometric_user._run_template_sync",
+        queue="long",
+        timeout=3600,
+        notify_user=frappe.session.user,
+        **kwargs,
+    )
+    return {"queued_job": 1, "add": len(add), "update": len(update)}
+
+
+def _run_template_sync(device_sn, source_device_sn, add, update, notify_user=None):
+    queued = failed = 0
+    errors = []
+    for users, command_type in ((add, "Add User"), (update, "Update User")):
+        if not users:
+            continue
+        result = bulk_command(device_sn, users, command_type, source_device_sn)
+        queued += int(result.get("queued") or 0)
+        failed += int(result.get("failed") or 0)
+        errors.extend(result.get("errors") or [])
+
+    out = {"added": len(add), "updated": len(update), "queued": queued,
+           "failed": failed, "errors": errors[:50]}
+    if notify_user:
+        target = _lookup_device_location(device_sn) or device_sn
+        source = _lookup_device_location(source_device_sn) or source_device_sn
+        frappe.publish_realtime(
+            "upande_ta_template_sync_done",
+            dict(out, device=target, source=source),
+            user=notify_user,
+        )
+    return out
+
+
 @frappe.whitelist()
 def send_device_command(name, command_type, override=None):
     if not frappe.db.get_single_value("Biometric Setting", "enable_users"):
@@ -473,7 +574,7 @@ def get_active_filter_options(department=None, designation=None, company=None, f
 
 
 @frappe.whitelist()
-def bulk_command(device_sn, users, command_type):
+def bulk_command(device_sn, users, command_type, source_device_sn=None):
     if not frappe.db.get_single_value("Biometric Setting", "enable_users"):
         frappe.throw("Enable Users")
 
@@ -482,6 +583,18 @@ def bulk_command(device_sn, users, command_type):
 
     if not device_sn or not users:
         frappe.throw("device_sn and users are required")
+
+    # Templates pinned to one terminal ("sync A to B"); only Add/Update push any.
+    source_device_sn = (
+        str(source_device_sn or "").strip()
+        if command_type in ("Add User", "Update User") else ""
+    )
+    source_label = (
+        _lookup_device_location(source_device_sn) or source_device_sn
+        if source_device_sn else ""
+    )
+    if source_device_sn and not _template_parent_for_device(source_device_sn):
+        frappe.throw(f"No templates on {source_label}")
 
     parent = _get_parent_doc(device_sn)
 
@@ -545,7 +658,12 @@ def bulk_command(device_sn, users, command_type):
                     "name",
                 )
 
-                tpl = _get_template_row(employee, device_sn)
+                tpl = _get_template_row(employee, device_sn, source_device_sn)
+                if source_device_sn:
+                    reason = _source_push_refusal(tpl, caps, source_label, skip_face)
+                    if reason:
+                        failed.append({"user_id": user_id, "reason": reason})
+                        continue
                 device_name = "" if skip_name else employee_name
                 command = _build_userinfo_command(cmd_id, user_id, device_name, privilege, tpl, caps)
 
@@ -573,7 +691,12 @@ def bulk_command(device_sn, users, command_type):
                     "name",
                 ) or existing.employee
 
-                tpl = _get_template_row(employee, device_sn)
+                tpl = _get_template_row(employee, device_sn, source_device_sn)
+                if source_device_sn:
+                    reason = _source_push_refusal(tpl, caps, source_label, skip_face)
+                    if reason:
+                        failed.append({"user_id": user_id, "reason": reason})
+                        continue
                 device_name = "" if skip_name else employee_name
                 command = _build_userinfo_command(cmd_id, user_id, device_name, privilege, tpl, caps)
 
@@ -590,6 +713,11 @@ def bulk_command(device_sn, users, command_type):
 
             else:
                 frappe.throw(f"Unknown command type: {command_type}")
+
+            # A pinned source is pushed whole even where the target already
+            # holds identical bytes, so it ends up with exactly A's templates.
+            if source_device_sn:
+                force_biodata = True
 
             post_queue.append({
                 "payload": {
@@ -640,8 +768,23 @@ def bulk_command(device_sn, users, command_type):
     }
 
 
+def _source_push_refusal(tpl, caps, source_label, skip_face=False):
+    """Why a pinned-source push would send no template at all, else None."""
+    if not tpl:
+        return f"No templates on {source_label}"
+    held = [
+        label for label, *_mid, tmp_f in _BIO_TYPES
+        if tpl.get(tmp_f) and not (skip_face and label == "Face")
+    ]
+    if not held:
+        return f"No templates on {source_label}"
+    if not any(_device_supports(caps, _MODALITY_CAPABILITY[label]) for label in held):
+        return f"{', '.join(held)} not enabled on this device"
+    return None
+
+
 @frappe.whitelist()
-def bulk_command_per_device(assignments, command_type):
+def bulk_command_per_device(assignments, command_type, source_device_sn=None):
     import time
     from pymysql.err import OperationalError
 
@@ -673,7 +816,7 @@ def bulk_command_per_device(assignments, command_type):
         while True:
             attempts += 1
             try:
-                result = bulk_command(sn, users, command_type)
+                result = bulk_command(sn, users, command_type, source_device_sn)
                 overall_queued += int(result.get("queued") or 0)
                 overall_failed += int(result.get("failed") or 0)
                 by_device.append({
@@ -709,7 +852,7 @@ def bulk_command_per_device(assignments, command_type):
 
 
 @frappe.whitelist()
-def bulk_command_multi(device_sns, users, command_type):
+def bulk_command_multi(device_sns, users, command_type, source_device_sn=None):
     if isinstance(device_sns, str):
         device_sns = json.loads(device_sns)
     device_sns = [str(sn).strip() for sn in (device_sns or []) if str(sn).strip()]
@@ -723,7 +866,7 @@ def bulk_command_multi(device_sns, users, command_type):
 
     for sn in device_sns:
         try:
-            result = bulk_command(sn, users, command_type)
+            result = bulk_command(sn, users, command_type, source_device_sn)
             overall_queued += int(result.get("queued") or 0)
             overall_failed += int(result.get("failed") or 0)
             by_device.append({
@@ -743,6 +886,115 @@ def bulk_command_multi(device_sns, users, command_type):
         "by_device": by_device,
         "errors":    errors,
     }
+
+
+# Bits of one user's state on one device, in get_user_sync_status's matrix.
+_SYNC_ON = 1        # listed on the device's Bio User roster
+_SYNC_CREDENTIALS = (  # (bit, label, capability, template column, valid column)
+    (2,  "FP",       "supports_fingerprint", "fingerprint_template", "fp_valid"),
+    (4,  "Face",     "supports_face",        "face_template",        "face_valid"),
+    (8,  "Palm",     "supports_palm",        "palm_template",        "palm_valid"),
+    (16, "Card",     "supports_card",        "card",                 None),
+    (32, "Password", "supports_password",    "password",             None),
+)
+
+
+@frappe.whitelist()
+def get_user_sync_status(device_sn):
+    """Where each user of ``device_sn`` is enrolled, across every device.
+
+    ``devices`` lists every configured terminal with its capability bits;
+    ``status[pin]`` holds one bitmask per device (same order): _SYNC_ON when
+    the roster lists the PIN, plus a bit per credential the device holds a
+    valid copy of. ``eligible[pin]`` is the device indexes the employee's farm
+    may be enrolled on (farm-scoped devices refuse everyone else).
+    """
+    if not device_sn:
+        return {"devices": [], "status": {}, "eligible": {}}
+
+    settings_rows = frappe.get_all(
+        "Biometric Device",
+        filters={"parent": "Biometric Setting", "parentfield": "devices"},
+        fields=["device_sn", "device_location", "farms"],
+        order_by="idx asc",
+    )
+    devices = [r for r in settings_rows if r.device_sn]
+    index = {d.device_sn: i for i, d in enumerate(devices)}
+
+    pins = {
+        (u.user_id or "").strip()
+        for u in frappe.get_all(
+            "Bio User",
+            filters={"parent": frappe.db.get_value("Biometric User", {"device_sn": device_sn}, "name") or "",
+                     "parentfield": "users"},
+            fields=["user_id"],
+        )
+    } - {""}
+    if not pins:
+        return {"devices": [], "status": {}, "eligible": {}, "farm": {}}
+
+    status = {pin: [0] * len(devices) for pin in pins}
+
+    roster_parents = {
+        p.name: p.device_sn
+        for p in frappe.get_all("Biometric User", fields=["name", "device_sn"])
+        if p.device_sn in index
+    }
+    if roster_parents:
+        for r in frappe.get_all(
+            "Bio User",
+            filters={"parent": ("in", list(roster_parents)), "parentfield": "users",
+                     "user_id": ("in", list(pins))},
+            fields=["parent", "user_id"],
+        ):
+            status[r.user_id][index[roster_parents[r.parent]]] |= _SYNC_ON
+
+    template_parents = {}
+    if frappe.db.exists("DocType", "Biometric Template"):
+        template_parents = {
+            p.name: p.device_sn
+            for p in frappe.get_all("Biometric Template", fields=["name", "device_sn"])
+            if p.device_sn in index
+        }
+    if template_parents:
+        columns = {"parent", "user_id"}
+        for _bit, _label, _cap, tmp_f, valid_f in _SYNC_CREDENTIALS:
+            columns.add(tmp_f)
+            if valid_f:
+                columns.add(valid_f)
+        for r in frappe.get_all(
+            "Bio Template",
+            filters={"parent": ("in", list(template_parents)), "parentfield": "bio_templates",
+                     "deleted": 0, "user_id": ("in", list(pins))},
+            fields=sorted(columns),
+        ):
+            bits = 0
+            for bit, _label, _cap, tmp_f, valid_f in _SYNC_CREDENTIALS:
+                value = str(r.get(tmp_f) or "").strip()
+                if value and value != "0" and (valid_f is None or r.get(valid_f)):
+                    bits |= bit
+            status[r.user_id][index[template_parents[r.parent]]] |= bits
+
+    farm_by_pin = _employee_farms_by_pin(pins)
+    device_farms = [_parse_farms(d.farms) for d in devices]
+    eligible = {
+        pin: [i for i, farms in enumerate(device_farms)
+              if not farms or farm_by_pin.get(pin) in farms]
+        for pin in pins
+    }
+
+    out_devices = []
+    for d, farms in zip(devices, device_farms):
+        caps = _device_capabilities(d.device_sn)
+        out_devices.append({
+            "device_sn":       d.device_sn,
+            "device_location": d.device_location or d.device_sn,
+            "farms":           farms,
+            "caps":            sum(bit for bit, _l, cap, _t, _v in _SYNC_CREDENTIALS
+                                   if _device_supports(caps, cap)),
+        })
+    farm = {pin: farm_by_pin.get(pin) or "" for pin in pins}
+    return {"devices": out_devices, "status": status, "eligible": eligible, "farm": farm}
 
 
 @frappe.whitelist()
@@ -873,15 +1125,15 @@ _MODALITY_CAPABILITY = {
 def _device_capabilities(device_sn):
     """The credentials this terminal can actually store, from Biometric Setting.
 
-    Returns ``{}`` when the device is unknown or the site has not migrated the
-    capability fields yet; ``_device_supports`` reads that as "everything
-    allowed", so an un-migrated site keeps its previous behaviour rather than
-    silently pushing nothing.
+    Only a ticked capability is sent: a device missing from Biometric Setting
+    gets ``{}``, which ``_device_supports`` reads as "nothing allowed". A site
+    that has not migrated the capability fields yet has no boxes to tick, so it
+    keeps its previous behaviour (everything allowed).
     """
     if not device_sn:
         return {}
     if not frappe.db.has_column("Biometric Device", "supports_fingerprint"):
-        return {}
+        return dict.fromkeys(_CAPABILITY_FIELDS, 1)
     row = frappe.db.get_value(
         "Biometric Device",
         {
@@ -994,10 +1246,8 @@ def _device_algo_versions(device_sn):
 
 
 def _device_supports(caps, field):
-    """An unknown capability means allowed — only an explicit 0 blocks a push."""
-    if not caps or caps.get(field) is None:
-        return True
-    return bool(caps.get(field))
+    """Only a ticked capability allows a push; unknown means not allowed."""
+    return bool((caps or {}).get(field))
 
 
 def _template_parent_for_device(device_sn):
@@ -1075,8 +1325,49 @@ _DEVICE_LOCAL_USER_FIELDS = (
 )
 
 
-def _get_template_row(employee, device_sn=None):
+def _get_source_template_row(employee, device_sn, source_device_sn):
+    """What to push to ``device_sn`` when the operator named the source device.
+
+    Every biometric modality comes from ``source_device_sn``'s row and nowhere
+    else: a modality the source lacks — or holds but is not ticked for in its
+    capabilities — is blanked rather than filled from a third terminal, so the
+    target ends up with exactly the source's templates.
+    The target's own row (when it has one) still supplies the device-local
+    access fields; card and password come from the source first.
+    Returns None when the source holds nothing for this employee.
+    """
+    source = _get_device_template_row(employee, source_device_sn)
+    if source is None:
+        return None
+    source_caps = _device_capabilities(source_device_sn)
+    own = _get_device_template_row(employee, device_sn) if device_sn != source_device_sn else source
+    merged = dict(own or source)
+    if own is None:
+        for _f in _DEVICE_LOCAL_USER_FIELDS:
+            merged.pop(_f, None)
+
+    for label, _code, no_f, idx_f, valid_f, major_f, minor_f, _type_f, tmp_f in _BIO_TYPES:
+        has = (
+            source.get(tmp_f) and source.get(valid_f)
+            and _device_supports(source_caps, _MODALITY_CAPABILITY[label])
+        )
+        for field in (tmp_f, valid_f, no_f, idx_f, major_f, minor_f):
+            merged[field] = source.get(field) if has else None
+
+    for field in _SHAREABLE_USER_FIELDS:
+        if source.get(field) not in (None, "", "0"):
+            merged[field] = source.get(field)
+
+    if not any(merged.get(tmp_f) for *_rest, tmp_f in _BIO_TYPES):
+        return None
+    return merged
+
+
+def _get_template_row(employee, device_sn=None, source_device_sn=None):
     """Resolve what to push to ``device_sn``, merged **per credential**.
+
+    ``source_device_sn`` pins the templates to one terminal instead — see
+    ``_get_source_template_row``.
 
     The device's own row wins credential by credential, not wholesale. That
     distinction matters: ``store_biotemplate`` creates a Bio Template row for
@@ -1092,6 +1383,8 @@ def _get_template_row(employee, device_sn=None):
     """
     if not employee:
         return None
+    if source_device_sn:
+        return _get_source_template_row(employee, device_sn, source_device_sn)
 
     rows = frappe.get_all(
         "Bio Template",
