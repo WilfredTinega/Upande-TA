@@ -169,7 +169,7 @@
 				return;
 			}
 
-			show_bulk_dialog(listview, names, command_type, usable, employees, farms);
+			show_bulk_dialog(listview, names, command_type, usable, employees, farms, devices);
 		});
 	}
 
@@ -177,7 +177,7 @@
 	// dialog people already know: pick several devices at once, with Skip and
 	// Privilege per device. The single-Select dropdown this replaces could only
 	// ever send to one device, which meant repeating the whole run per device.
-	function show_bulk_dialog(listview, names, command_type, devices, employees, farms) {
+	function show_bulk_dialog(listview, names, command_type, devices, employees, farms, all_devices) {
 		const show_controls = command_type === "Add User" || command_type === "Update User";
 
 		const title = {
@@ -243,11 +243,13 @@
 						device_sn: $row.data("sn"),
 						privilege: show_controls ? $row.find(".privilege-sel").val() || "0" : "0",
 						skip_name: show_controls && $row.find(".skip-name-check").is(":checked") ? 1 : 0,
-						skip_face: show_controls && d.$wrapper.find("#ta-skip-face").is(":checked") ? 1 : 0,
+						skip_face: show_controls && !d.$wrapper.find("#ta-source-device").val()
+							&& d.$wrapper.find("#ta-skip-face").is(":checked") ? 1 : 0,
 					});
 				});
+				const source_sn = show_controls ? d.$wrapper.find("#ta-source-device").val() || "" : "";
 				d.hide();
-				send_bulk(listview, employees, command_type, per_device);
+				send_bulk(listview, employees, command_type, per_device, source_sn);
 			},
 			secondary_action_label: __("Cancel"),
 			secondary_action() {
@@ -256,10 +258,10 @@
 		});
 
 		d.show();
-		render_device_table(d, command_type, devices);
+		render_device_table(d, command_type, devices, all_devices || devices);
 	}
 
-	function render_device_table(d, command_type, devices) {
+	function render_device_table(d, command_type, devices, all_devices) {
 		const $c = d.$wrapper.find("#ta-bulk-device-table");
 		const show_controls = command_type === "Add User" || command_type === "Update User";
 
@@ -280,14 +282,21 @@
 			.join("");
 
 		$c.html(`
-			<div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
+			<div class="uds-toolbar">
 				<button class="btn btn-xs btn-default" id="ta-select-all">${__("Select All")}</button>
 				<button class="btn btn-xs btn-default" id="ta-deselect-all">${__("Deselect All")}</button>
 				${show_controls ? `<button class="btn btn-xs btn-default" id="ta-skip-all">${__("Skip")}</button>` : ""}
-				${show_controls ? `<label style="display:inline-flex;align-items:center;gap:4px;margin:0;font-size:12px;cursor:pointer">
-					<input type="checkbox" id="ta-skip-face" style="margin:0">${__("Skip Face")}
+				${show_controls ? `<label id="ta-skip-face-label" class="uds-check-label">
+					<input type="checkbox" id="ta-skip-face" style="margin:0" checked>${__("Skip Face")}
 				</label>` : ""}
-				<span style="font-size:12px;color:var(--color-text-secondary)" id="ta-selected-count">0 / ${devices.length}</span>
+				${show_controls ? `<label class="uds-field">
+					<span>${__("Templates from")}</span>
+					<select id="ta-source-device">
+						<option value="">${__("Any device")}</option>
+						${all_devices.map((dev) => `<option value="${frappe.utils.escape_html(dev.device_sn)}" data-sub="${frappe.utils.escape_html(dev.device_sn)}">${frappe.utils.escape_html(dev.device_location || dev.device_sn)}</option>`).join("")}
+					</select>
+				</label>` : ""}
+				<span class="uds-count" id="ta-selected-count">0 / ${devices.length}</span>
 			</div>
 			<div style="max-height:400px;overflow-y:auto;border:1px solid var(--color-border-tertiary);border-radius:8px">
 				<table class="table table-sm sticky-head-table" style="margin:0">
@@ -302,6 +311,14 @@
 					<tbody>${rows}</tbody>
 				</table>
 			</div>`);
+
+		const source_sel = $c.find("#ta-source-device")[0];
+		if (source_sel && upande_ta.device_select && upande_ta.device_select.enhance) upande_ta.device_select.enhance(source_sel);
+		$(source_sel).on("change", function () {
+			const picked = !!$(this).val();
+			if (!picked) $c.find("#ta-skip-face").prop("checked", true);
+			$c.find("#ta-skip-face-label").css("display", picked ? "none" : "inline-flex");
+		});
 
 		function update_count() {
 			const n = $c.find(".device-check:checked").length;
@@ -330,7 +347,7 @@
 		}
 	}
 
-	function send_bulk(listview, rows, command_type, per_device) {
+	function send_bulk(listview, rows, command_type, per_device, source_sn) {
 		// bulk_command identifies people by their device PIN, not by Employee id.
 		// The rows were already read when the devices were filtered by farm, so
 		// this does not fetch them again. An employee with no PIN cannot be sent
@@ -388,7 +405,7 @@
 
 			frappe.call({
 				method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.bulk_command",
-				args: { device_sn: dev.device_sn, users, command_type },
+				args: { device_sn: dev.device_sn, users, command_type, source_device_sn: source_sn || null },
 				callback(res) {
 					const m = (res && res.message) || {};
 					queued += m.queued || 0;
