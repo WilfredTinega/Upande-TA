@@ -1065,17 +1065,71 @@ function render_users_tab(frm) {
 	btn_scope.find("#btn-bulk-update").off("click").on("click", () => open_bulk("Update User"));
 	btn_scope.find("#btn-bulk-delete").off("click").on("click", () => open_bulk("Delete User"));
 	btn_scope.find("#btn-hydrate-templates").off("click").on("click", () => {
-		frappe.call({
-			method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.hydrate_users_from_templates",
-			args: { device_sn: sn },
-			callback: (r) => {
-				if (r.exc || !r.message) return;
-				const m = r.message;
+		open_template_sync_dialog(frm, sn, loc);
+	});
+
+	const call = (method) => new Promise(resolve => frappe.call({
+		method: `upande_ta.upande_ta.doctype.biometric_user.biometric_user.${method}`,
+		args: { device_sn: sn },
+		callback: (r) => resolve(r.message),
+		error: () => resolve(null),
+	}));
+	Promise.all([call("get_device_users"), call("get_user_sync_status")]).then(([users, sync]) => {
+		render_user_list(wrapper, sn, users || [], frm, sync);
+	});
+}
+
+// Sync B from A: pick the device whose templates B should receive. Picking B
+// itself keeps the original roster sync from B's own templates.
+function open_template_sync_dialog(frm, sn, loc) {
+	const esc = frappe.utils.escape_html;
+	const devices = (frm.doc.devices || []).filter(dev => dev.device_sn);
+	const options = [{ device_sn: sn, device_location: loc }]
+		.concat(devices.filter(dev => dev.device_sn !== sn))
+		.map(dev => `<option value="${esc(dev.device_sn)}" data-sub="${esc(dev.device_sn)}">${esc(dev.device_location || dev.device_sn)}</option>`)
+		.join("");
+
+	const d = new frappe.ui.Dialog({
+		title: __("Sync {0}", [loc]),
+		fields: [{
+			fieldname: "source_html",
+			fieldtype: "HTML",
+			options: `<label class="uds-field" style="margin:0">
+				<span>${__("Templates from")}</span>
+				<select id="sync-source-sel">${options}</select>
+			</label>`,
+		}],
+		primary_action_label: __("Sync"),
+		primary_action() {
+			const source_sn = d.$wrapper.find("#sync-source-sel").val() || sn;
+			d.hide();
+			run_template_sync(frm, sn, loc, source_sn);
+		},
+	});
+	d.show();
+	const sel = d.$wrapper.find("#sync-source-sel")[0];
+	if (sel && upande_ta.device_select && upande_ta.device_select.enhance) upande_ta.device_select.enhance(sel);
+}
+
+function run_template_sync(frm, sn, loc, source_sn) {
+	const done = (m) => {
+		let msg = __("{0}: {1} added, {2} updated, {3} command(s) queued", [loc, m.added || 0, m.updated || 0, m.queued || 0]);
+		if (m.failed) msg += __(", {0} failed", [m.failed]);
+		frappe.show_alert({ message: msg, indicator: m.failed ? "orange" : "green" }, 8);
+		render_users_tab(frm);
+	};
+
+	frappe.call({
+		method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.sync_templates_from_device",
+		args: { device_sn: sn, source_device_sn: source_sn },
+		freeze: true,
+		freeze_message: __("Syncing {0}...", [loc]),
+		callback: (r) => {
+			if (r.exc || !r.message) return;
+			const m = r.message;
+			if (source_sn === sn) {
 				if (m.reason) {
-					frappe.show_alert({
-						message: __("No template for this device, select another to sync."),
-						indicator: "orange"
-					}, 5);
+					frappe.show_alert({ message: __("No templates on {0}", [loc]), indicator: "orange" }, 5);
 					return;
 				}
 				frappe.show_alert({
@@ -1083,18 +1137,26 @@ function render_users_tab(frm) {
 					indicator: m.created ? "green" : "blue"
 				}, 5);
 				render_users_tab(frm);
+				return;
 			}
-		});
-	});
-
-	frappe.call({
-		method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.get_device_users",
-		args: { device_sn: sn },
-		callback: (r) => render_user_list(wrapper, sn, r.message || [], frm)
+			if (m.queued_job) {
+				frappe.show_alert({
+					message: __("Syncing {0} user(s) to {1} in the background", [(m.add || 0) + (m.update || 0), loc]),
+					indicator: "blue"
+				}, 6);
+				frappe.realtime.off("upande_ta_template_sync_done");
+				frappe.realtime.on("upande_ta_template_sync_done", (res) => {
+					frappe.realtime.off("upande_ta_template_sync_done");
+					done(res || {});
+				});
+				return;
+			}
+			done(m);
+		}
 	});
 }
 
-function render_user_list(wrapper, device_sn, users, frm) {
+function render_user_list(wrapper, device_sn, users, frm, sync) {
 	const container = wrapper.find("#users-table-container");
 
 	if (!users.length) {
@@ -1104,33 +1166,169 @@ function render_user_list(wrapper, device_sn, users, frm) {
 		return;
 	}
 
-	const rows = users.map(u => `
-		<tr>
-			<td style="font-family:var(--font-mono);font-size:13px">${frappe.utils.escape_html(u.user_id || "")}</td>
-			<td>${frappe.utils.escape_html(u.employee_name || "")}</td>
+	const esc = frappe.utils.escape_html;
+	const SYNC_ON = 1;
+	const CREDS = [[2, "FP"], [4, "Face"], [8, "Palm"], [16, "Card"], [32, "Password"]];
+	sync = sync || { devices: [], status: {}, eligible: {}, farm: {} };
+	sync.farm = sync.farm || {};
+	const devs = sync.devices || [];
+	const here = devs.findIndex(dev => dev.device_sn === device_sn);
+	// Enrolled here although the employee's farm is not one of this device's.
+	const is_anomaly = (pin) => here >= 0 && !(sync.eligible[pin] || []).includes(here);
+
+	// A device counts as holding the user when its roster lists the PIN or it
+	// has delivered any credential for them.
+	const held = (bits) => !!bits;
+	// Every credential, same order on every device: held / not enrolled / not supported.
+	const chips = (bits, caps) => CREDS
+		.map(([bit, label]) => {
+			const state = bits & bit ? "on" : (caps & bit ? "off" : "na");
+			const title = { on: __("Active"), off: __("Not enrolled"), na: __("Not supported on this device") }[state];
+			return `<span class="us-chip ${state}" title="${title}">${label}</span>`;
+		})
+		.join("");
+	const coverage = (pin) => {
+		const st = sync.status[pin] || [];
+		const eligible = sync.eligible[pin] || [];
+		const on = eligible.filter(i => held(st[i])).length;
+		return { on, total: eligible.length, st, eligible };
+	};
+
+	function detail_html(pin) {
+		const { st, eligible } = coverage(pin);
+		const shown = devs.map((dev, i) => i).filter(i => eligible.includes(i));
+		return `<div class="us-detail">${shown.map(i => {
+			const dev = devs[i];
+			const on = held(st[i]);
+			return `<div class="us-dev${on ? "" : " missing"}${i === here ? " here" : ""}">
+				<div class="us-dev-head">
+					<div class="us-dev-name" title="${esc(dev.device_sn)}">${esc(dev.device_location)}</div>
+					${on ? `<button type="button" class="us-dev-del" data-pin="${esc(pin)}" data-i="${i}" title="${__("Delete from {0}", [esc(dev.device_location)])}">${trash}</button>` : ""}
+				</div>
+				<div class="us-dev-chips">${on ? chips(st[i], dev.caps) : `<span class="us-none">${__("Not synced")}</span>`}</div>
+			</div>`;
+		}).join("")}</div>`;
+	}
+
+	const trash = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>`;
+	const regular = users.map((u, n) => n).filter(n => !is_anomaly(users[n].user_id || ""));
+	const anomalies = users.map((u, n) => n).filter(n => is_anomaly(users[n].user_id || ""));
+
+	const anomaly_rows = anomalies.map(n => {
+		const u = users[n];
+		const pin = u.user_id || "";
+		const st = sync.status[pin] || [];
+		return `
+		<tr class="us-anom-row" data-n="${n}">
+			<td style="font-family:var(--font-mono);font-size:13px">${esc(pin)}</td>
+			<td>${esc(u.employee_name || "")}</td>
+			<td>${sync.farm[pin] ? esc(sync.farm[pin]) : `<span class="us-none">${__("No farm")}</span>`}</td>
+			<td><div class="us-dev-chips">${chips(st[here] || 0, devs[here].caps)}</div></td>
+			<td style="text-align:right">
+				<button type="button" class="us-dev-del" data-pin="${esc(pin)}" data-i="${here}" title="${__("Delete from {0}", [esc(devs[here].device_location)])}">${trash}</button>
+			</td>
+		</tr>`;
+	}).join("");
+
+	const rows = regular.map(n => {
+		const u = users[n];
+		const pin = u.user_id || "";
+		const cov = coverage(pin);
+		const full = cov.total && cov.on === cov.total;
+		const this_dev = here >= 0 ? chips(cov.st[here] || 0, devs[here].caps) : "";
+		return `
+		<tr class="us-row" data-n="${n}" data-full="${full ? 1 : 0}">
+			<td style="font-family:var(--font-mono);font-size:13px">${esc(pin)}</td>
+			<td>${esc(u.employee_name || "")}</td>
 			<td>${u.privilege === "14" ? "Admin" : "User"}</td>
 			<td>
 				<span style="font-size:11px;padding:2px 8px;border-radius:4px;
 					background:var(--bg-light-gray);color:var(--text-color)">
-					${frappe.utils.escape_html(u.status || "")}
+					${esc(u.status || "")}
 				</span>
 			</td>
-			<td style="white-space:nowrap">
-				<button class="btn btn-xs btn-primary user-row-delete" data-row="${u.row_name}">Delete</button>
+			<td><div class="us-dev-chips">${this_dev}</div></td>
+			<td>
+				<button type="button" class="us-cov${full ? " full" : ""}" data-n="${n}">
+					${cov.on} / ${cov.total}
+				</button>
 			</td>
-		</tr>
-	`).join("");
+		</tr>`;
+	}).join("");
+
+	const missing_count = regular.map(n => users[n]).filter(u => {
+		const c = coverage(u.user_id || "");
+		return !(c.total && c.on === c.total);
+	}).length;
 
 	container.html(`
-		<div style="border:1px solid var(--border-color);border-radius:8px;overflow:hidden">
+		<style>
+			#users-table-container .us-bar { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+			#users-table-container .us-seg { display:inline-flex; background:var(--control-bg); border-radius:8px; padding:2px; }
+			#users-table-container .us-seg button { border:0; background:transparent; height:24px; padding:0 10px;
+				border-radius:6px; font-size:var(--text-sm,13px); color:var(--text-muted); cursor:pointer; }
+			#users-table-container .us-seg button.active { background:var(--fg-color); color:var(--text-color);
+				box-shadow:var(--shadow-sm, 0 1px 2px rgba(0,0,0,.08)); }
+			#users-table-container .us-chip { display:inline-block; font-size:var(--text-xs,12px); line-height:18px;
+				padding:0 7px; border-radius:9px; color:var(--text-muted);
+				border:1px solid var(--border-color); white-space:nowrap; cursor:default; }
+			#users-table-container .us-chip.na { opacity:.4; border-style:dashed; text-decoration:line-through; }
+			#users-table-container .us-chip.on { border:1px solid transparent;
+				background:var(--green-highlight-color, var(--bg-green, #e4f5e9)); color:var(--green-700, #16794c); }
+			#users-table-container .us-dev-chips { display:flex; flex-wrap:wrap; gap:4px; }
+			#users-table-container .us-cov { border:0; height:22px; padding:0 10px; border-radius:11px; cursor:pointer;
+				font-size:var(--text-sm,13px); font-variant-numeric:tabular-nums; white-space:nowrap;
+				background:var(--bg-orange, #fff1e7); color:var(--orange-700, #b4520e); }
+			#users-table-container .us-cov.full { background:var(--green-highlight-color, var(--bg-green, #e4f5e9)); color:var(--green-700, #16794c); }
+			#users-table-container .us-cov.open { box-shadow:0 0 0 2px var(--border-color); }
+			#users-table-container tr.us-detail-row > td { background:var(--subtle-fg, var(--bg-light-gray)); padding:10px 12px; }
+			#users-table-container .us-detail { display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:8px; }
+			#users-table-container .us-dev { background:var(--fg-color); border:1px solid var(--border-color);
+				border-radius:8px; padding:8px 10px; display:flex; flex-direction:column; gap:6px; }
+			#users-table-container .us-dev.here { border-color:var(--text-muted); }
+			#users-table-container .us-dev.missing .us-dev-name { color:var(--text-muted); }
+			#users-table-container .us-dev-head { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; }
+			#users-table-container .us-dev-del { flex:none; display:inline-flex; align-items:center; justify-content:center;
+				width:24px; height:24px; border:0; border-radius:6px; background:transparent; color:var(--text-muted); cursor:pointer; }
+			#users-table-container .us-dev-del:hover { background:var(--bg-red, #fff0f0); color:var(--red-600, #e03636); }
+			#users-table-container .us-dev-del:disabled { opacity:.4; cursor:wait; }
+			#users-table-container .us-dev-name { font-size:var(--text-sm,13px); font-weight:500; color:var(--text-color);
+				white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+			#users-table-container .us-none { font-size:var(--text-xs,12px); color:var(--orange-700, #b4520e); }
+			#users-table-container .us-seg button.us-anom-tab { color:var(--red-600, #e03636); }
+		</style>
+		<div class="us-bar">
+			<div class="us-seg">
+				<button type="button" data-f="all" class="active">${__("All")} ${regular.length}</button>
+				<button type="button" data-f="missing">${__("Not on all devices")} ${missing_count}</button>
+				<button type="button" data-f="full">${__("On all devices")} ${regular.length - missing_count}</button>
+				${anomalies.length ? `<button type="button" data-f="anomalies" class="us-anom-tab">${__("Anomalies")} ${anomalies.length}</button>` : ""}
+			</div>
+		</div>
+		<div class="us-anom" style="display:none;border:1px solid var(--border-color);border-radius:8px;overflow:hidden">
 			<table class="table table-sm" style="margin:0">
 				<thead style="background:var(--bg-light-gray)">
 					<tr>
-						<th style="width:130px">PIN</th>
+						<th style="width:110px">PIN</th>
 						<th>Name</th>
-						<th style="width:100px">Privilege</th>
-						<th style="width:120px">Status</th>
-						<th style="width:170px">Actions</th>
+						<th style="width:200px">${__("Employee farm")}</th>
+						<th style="width:260px">${__("This device")}</th>
+						<th style="width:60px"></th>
+					</tr>
+				</thead>
+				<tbody>${anomaly_rows}</tbody>
+			</table>
+		</div>
+		<div class="us-main" style="border:1px solid var(--border-color);border-radius:8px;overflow:hidden">
+			<table class="table table-sm" style="margin:0">
+				<thead style="background:var(--bg-light-gray)">
+					<tr>
+						<th style="width:110px">PIN</th>
+						<th>Name</th>
+						<th style="width:90px">Privilege</th>
+						<th style="width:100px">Status</th>
+						<th style="width:260px">${__("This device")}</th>
+						<th style="width:100px">${__("Devices")}</th>
 					</tr>
 				</thead>
 				<tbody>${rows}</tbody>
@@ -1138,44 +1336,92 @@ function render_user_list(wrapper, device_sn, users, frm) {
 		</div>
 	`);
 
-	container.find(".user-row-delete").on("click", function() {
+	container.find(".us-seg").on("click", "button", function() {
+		const f = $(this).data("f");
+		frm._users_tab = f;
+		$(this).addClass("active").siblings().removeClass("active");
+		container.find("tr.us-detail-row").remove();
+		container.find(".us-cov.open").removeClass("open");
+		container.find(".us-anom").toggle(f === "anomalies");
+		container.find(".us-main").toggle(f !== "anomalies");
+		container.find("tr.us-row").each(function() {
+			const full = $(this).attr("data-full") === "1";
+			$(this).toggle(f === "all" || (f === "full" ? full : !full));
+		});
+	});
+
+	const start_tab = !regular.length && anomalies.length ? "anomalies" : frm._users_tab;
+	const $start = container.find(`.us-seg button[data-f="${start_tab}"]`);
+	if ($start.length) $start.trigger("click");
+
+	container.on("click", ".us-cov", function() {
+		const $tr = $(this).closest("tr");
+		const $next = $tr.next("tr.us-detail-row");
+		if ($next.length) {
+			$next.remove();
+			$(this).removeClass("open");
+			return;
+		}
+		container.find("tr.us-detail-row").remove();
+		container.find(".us-cov.open").removeClass("open");
+		const u = users[+$(this).data("n")];
+		$(this).addClass("open");
+		$tr.after(`<tr class="us-detail-row"><td colspan="6">${detail_html(u.user_id || "")}</td></tr>`);
+	});
+
+	container.on("click", ".us-dev-del", function(e) {
+		e.stopPropagation();
 		if (!frm.doc.enable_users) {
 			frappe.msgprint(__("Enable Users"));
 			return;
 		}
-		const row_name = $(this).data("row");
-		const u = users.find(x => x.row_name === row_name);
-		frappe.confirm(`Delete ${u.employee_name} (PIN ${u.user_id}) from device?`, () => {
-			send_single_user_command(device_sn, row_name, "Delete User", users, frm);
-		});
-	});
-}
-
-function send_single_user_command(device_sn, row_name, command_type, users, frm) {
-	const u = users.find(x => x.row_name === row_name);
-	if (!u) return;
-
-	run_with_progress(
-		__(command_type),
-		__("Sending {0} command for {1}...", [command_type, u.employee_name]),
-		{
-			method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.send_device_command",
-			args: {
-				name:         row_name,
-				command_type: command_type,
-				override:     { user_id: u.user_id, employee_name: u.employee_name, privilege: u.privilege }
-			},
-			callback: (r) => {
-				if (!r.exc) {
-					frappe.show_alert({
-						message: `${command_type} sent for ${u.employee_name}`,
-						indicator: command_type === "Delete User" ? "red" : "blue"
-					}, 5);
-					render_users_tab(frm);
-				}
+		const $btn = $(this);
+		const pin = String($btn.data("pin"));
+		const dev = devs[+$btn.data("i")];
+		const u = users.find(x => (x.user_id || "") === pin) || {};
+		frappe.confirm(
+			__("Delete {0} (PIN {1}) from {2}?", [esc(u.employee_name || pin), esc(pin), esc(dev.device_location)]),
+			() => {
+				$btn.prop("disabled", true);
+				frappe.call({
+					method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.bulk_command",
+					args: {
+						device_sn: dev.device_sn,
+						users: [{ user_id: pin, employee_name: u.employee_name || "" }],
+						command_type: "Delete User",
+					},
+					callback: (r) => {
+						const m = r.message || {};
+						if (r.exc || m.failed) {
+							$btn.prop("disabled", false);
+							const reason = ((m.errors || [])[0] || {}).reason;
+							frappe.show_alert({ message: reason || __("Delete failed"), indicator: "red" }, 6);
+							return;
+						}
+						frappe.show_alert({
+							message: __("{0} deleted from {1}", [esc(u.employee_name || pin), esc(dev.device_location)]),
+							indicator: "red",
+						}, 5);
+						if (dev.device_sn === device_sn) {
+							render_users_tab(frm);
+							return;
+						}
+						// another device: update this row in place
+						(sync.status[pin] || [])[+$btn.data("i")] = 0;
+						const cov = coverage(pin);
+						const full = cov.total && cov.on === cov.total;
+						const $row = container.find("tr.us-row").filter(function() {
+							return users[+$(this).data("n")].user_id === pin;
+						});
+						$row.attr("data-full", full ? 1 : 0);
+						$row.find(".us-cov").toggleClass("full", !!full).text(`${cov.on} / ${cov.total}`);
+						$row.next("tr.us-detail-row").find("td").html(detail_html(pin));
+					},
+					error: () => $btn.prop("disabled", false),
+				});
 			}
-		}
-	);
+		);
+	});
 }
 
 function render_biodata_tab(frm) {
@@ -1693,6 +1939,10 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			let label = command_type === "Delete User"
 				? `Delete ${total_picks} user-device pick(s) across ${assignments.length} device(s)?`
 				: `${command_type.split(" ")[0]} ${total_picks} user-device pick(s) across ${assignments.length} device(s)?`;
+			const source_dev = d._source_sn && d._device_by_sn && d._device_by_sn[d._source_sn];
+			if (command_type !== "Delete User" && source_dev) {
+				label += `<br>Templates from ${frappe.utils.escape_html(source_dev.device_location || source_dev.device_sn)}.`;
+			}
 
 			frappe.confirm(label, () => {
 				run_with_progress(
@@ -1702,7 +1952,8 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 						method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.bulk_command_per_device",
 						args: {
 							assignments: JSON.stringify(assignments),
-							command_type: command_type
+							command_type: command_type,
+							source_device_sn: d._source_sn || null
 						},
 						callback(r) {
 							if (!r.exc) {
@@ -1723,7 +1974,8 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 	function build_per_device_assignments() {
 		const m = d._bulk_model;
 		if (!m) return [];
-		const skip_face = d.$wrapper.find("#skip-face-check").is(":checked");
+		// a picked source sends its face as-is; otherwise Skip Face (default on)
+		const skip_face = !d._source_sn && d._skip_face !== false;
 		return (d._selected_sns || [])
 			.filter(sn => m.checked[sn])
 			.map(sn => {
@@ -2168,12 +2420,19 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			return `<tr class="vr" data-idx="${i}"><td class="bulk-col-pin">${esc(u.user_id || "")}</td><td class="bulk-col-name">${esc(u.employee_name || "")}${status_badge}</td>${skip_name_cell}${privilege_cell}${device_cells}</tr>`;
 		}
 
-		const skip_face_on = container.find("#skip-face-check").is(":checked");
+		const skip_face_on = d._skip_face !== false;
 		let skip_names_toggle = show_skip_name ? `
 			<button class="btn btn-xs btn-default" id="skip-names-btn"
 					title="Toggle Skip for all rows">Skip</button>
-			<label style="display:inline-flex;align-items:center;gap:4px;margin:0;font-size:12px;cursor:pointer">
+			<label id="skip-face-label" class="uds-check-label" style="display:${d._source_sn ? "none" : "inline-flex"}">
 				<input type="checkbox" id="skip-face-check" style="margin:0" ${skip_face_on ? "checked" : ""}>${__("Skip Face")}
+			</label>
+			<label class="uds-field">
+				<span>${__("Templates from")}</span>
+				<select id="source-device-sel">
+					<option value="">${__("Any device")}</option>
+					${all_devices.map(dev => `<option value="${esc(dev.device_sn)}" data-sub="${esc(dev.device_sn)}"${d._source_sn === dev.device_sn ? " selected" : ""}>${esc(dev.device_location || dev.device_sn)}</option>`).join("")}
+				</select>
 			</label>` : "";
 
 		container[0].innerHTML = `
@@ -2192,13 +2451,12 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 				#bulk-user-table td.bdc.is-target .bulk-device-cell-check { display:inline-block; }
 				#bulk-user-table td.bdc .bulk-device-cell-check:disabled { opacity:0.6; cursor:not-allowed; }
 			</style>
-			<div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
+			<div class="uds-toolbar">
 				<button class="btn btn-xs btn-default" id="select-all-btn"
 					title="Tick every cell in currently-selected device columns">Select All in Targets</button>
 				<button class="btn btn-xs btn-default" id="deselect-all-btn">Deselect All</button>
 				${skip_names_toggle}
-				<span style="font-size:12px;color:var(--color-text-secondary)"
-					  id="selected-count">0 picks</span>
+				<span class="uds-count" id="selected-count">0 picks</span>
 			</div>
 			<div class="bulk-user-scroller"
 				style="max-height:400px;overflow:auto;
@@ -2217,6 +2475,8 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 				</table>
 			</div>
 		`;
+		const source_sel = container[0].querySelector("#source-device-sel");
+		if (source_sel && upande_ta.device_select && upande_ta.device_select.enhance) upande_ta.device_select.enhance(source_sel);
 		const scroller = container[0].querySelector(".bulk-user-scroller");
 		const tbody = container[0].querySelector("tbody");
 		let row_h = 37;
@@ -2270,6 +2530,17 @@ function open_bulk_user_dialog(command_type, default_sn, default_location, on_su
 			})
 			.on("change.bulk", ".skip-name-check", function() {
 				m.skip[parseInt($(this).attr("data-idx"))] = this.checked ? 1 : 0;
+			})
+			.on("change.bulk", "#source-device-sel", function() {
+				d._source_sn = $(this).val() || "";
+				if (!d._source_sn) {
+					d._skip_face = true;
+					container.find("#skip-face-check").prop("checked", true);
+				}
+				container.find("#skip-face-label").css("display", d._source_sn ? "none" : "inline-flex");
+			})
+			.on("change.bulk", "#skip-face-check", function() {
+				d._skip_face = this.checked;
 			})
 			.on("change.bulk", ".privilege-sel", function() {
 				m.privilege[parseInt($(this).attr("data-idx"))] = $(this).val() || "0";
