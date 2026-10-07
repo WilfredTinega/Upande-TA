@@ -92,6 +92,7 @@
   "show_employee_summary",
   "attendance_active_only",
   "disable_week_off_change",
+  "disable_shift_change",
   "attendance_payroll_periods",
   "attendance_filters_section",
   "attendance_employment_type_filters",
@@ -752,6 +753,13 @@
    "description": "On the Monthly Attendance Sheet"
   },
   {
+   "default": "0",
+   "fieldname": "disable_shift_change",
+   "fieldtype": "Check",
+   "label": "Disable Shift Change",
+   "description": "On the Monthly Attendance Sheet"
+  },
+  {
    "fieldname": "attendance_request_section",
    "fieldtype": "Section Break",
    "label": "Attendance Request Approvers"
@@ -767,7 +775,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-26 18:00:00.000000",
+ "modified": "2026-10-07 21:42:42.998945",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

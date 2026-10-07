@@ -118,6 +118,7 @@ def extend_bootinfo(bootinfo=None):
 	try:
 		bootinfo.upande_ta_attendance_filters = get_extra_filter_config()
 		bootinfo.upande_ta_week_off_change_disabled = week_off_change_disabled()
+		bootinfo.upande_ta_shift_change_disabled = shift_change_disabled()
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Monthly Attendance Sheet filters bootinfo")
 
@@ -322,8 +323,9 @@ def build_shift_resolver(employees, filters):
 
 	The detailed view emits one row per distinct value this returns, so it
 	deliberately resolves to a *single* shift per employee for the whole report
-	period: the shift their assignments cover the most days of, ties going to
-	the later assignment. Anything else -- a mid-period shift change, a day the
+	period: the shift of their latest assignment inside it, so a shift changed
+	from the sheet shows on the row straight away. Anything else -- a mid-period
+	shift change, a day the
 	assignments do not cover, or attendance stamped with a different shift by
 	its source (manual Mark Attendance, Attendance Request, auto-marked Weekly
 	Off, auto leave from Leave Application) -- would otherwise split the
@@ -351,6 +353,7 @@ def build_shift_resolver(employees, filters):
 			ShiftAssignment.shift_type,
 			ShiftAssignment.start_date,
 			ShiftAssignment.end_date,
+			ShiftAssignment.creation,
 		)
 		.where(
 			(ShiftAssignment.docstatus == 1)
@@ -361,21 +364,14 @@ def build_shift_resolver(employees, filters):
 		.orderby(ShiftAssignment.start_date)
 	).run(as_dict=1)
 
-	# employee -> shift -> [days covered inside the period, latest start date]
-	coverage = {}
+	# employee -> (start date, creation, shift) of their latest assignment in the period
+	latest = {}
 	for r in rows:
 		if not r.shift_type:
 			continue
-		assignment_start = getdate(r.start_date) if r.start_date else period_start
-		covered_from = max(assignment_start, period_start)
-		covered_to = min(getdate(r.end_date), period_end) if r.end_date else period_end
-		days = (covered_to - covered_from).days + 1
-		if days <= 0:
-			continue
-		shifts = coverage.setdefault(r.employee, {})
-		tally = shifts.setdefault(r.shift_type, [0, assignment_start])
-		tally[0] += days
-		tally[1] = max(tally[1], assignment_start)
+		key = (getdate(r.start_date) if r.start_date else period_start, r.creation, r.shift_type)
+		if r.employee not in latest or key[:2] > latest[r.employee][:2]:
+			latest[r.employee] = key
 
 	default_shifts = dict(
 		frappe.get_all(
@@ -388,9 +384,8 @@ def build_shift_resolver(employees, filters):
 
 	resolved = {}
 	for employee in employees:
-		shifts = coverage.get(employee)
-		if shifts:
-			resolved[employee] = max(shifts.items(), key=lambda item: (item[1][0], item[1][1]))[0]
+		if employee in latest:
+			resolved[employee] = latest[employee][2]
 		else:
 			resolved[employee] = default_shifts.get(employee) or ""
 
@@ -634,6 +629,12 @@ def week_off_change_disabled() -> bool:
 	"""Whether changing a week off from a day cell is switched off. Off by
 	default, i.e. the change is available."""
 	return _setting_enabled("disable_week_off_change", False)
+
+
+def shift_change_disabled() -> bool:
+	"""Whether changing a shift from a day cell is switched off. Off by
+	default, i.e. the change is available."""
+	return _setting_enabled("disable_shift_change", False)
 
 
 def get_inactive_employee_names(names) -> set:

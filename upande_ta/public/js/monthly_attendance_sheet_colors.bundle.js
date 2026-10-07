@@ -485,6 +485,9 @@ frappe.provide("frappe.views");
 
 	const CHANGE_WEEK_OFF_METHOD = "upande_ta.upande_ta.week_off_change.change_week_off";
 	const REMOVE_WEEK_OFF_METHOD = "upande_ta.upande_ta.week_off_change.remove_week_off";
+	const SHIFT_SCHEDULE_METHOD = "upande_ta.upande_ta.shift_change.get_shift_schedule";
+	const CHANGE_SHIFT_METHOD = "upande_ta.upande_ta.shift_change.change_shift";
+	const SHIFT_SCHEDULE_DAYS = 30;
 
 	const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 	const WEEK_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -503,8 +506,9 @@ frappe.provide("frappe.views");
 			} catch (e) {
 				return;
 			}
-			if (!frappe.model.can_create("Holiday List Assignment")) return;
-			if (frappe.boot && frappe.boot.upande_ta_week_off_change_disabled) return;
+			const weekOff = canChangeWeekOff();
+			const shift = canChangeShift();
+			if (!weekOff && !shift) return;
 
 			const $cell = $(this).closest(".dt-cell");
 			const colIndex = cint($cell.attr("data-col-index"));
@@ -513,15 +517,54 @@ frappe.provide("frappe.views");
 
 			const column = dt.getColumn(colIndex) || {};
 			const fieldname = (column.docfield && column.docfield.fieldname) || column.id || "";
-			if (!DAY_RE.test(fieldname)) return;
-
 			const row = dt.datamanager.getData(cint(rowIndex));
 			if (!row || row._is_summary || !row.employee) return;
+
+			if (fieldname === "shift") {
+				if (shift) showShiftDialog(report, row);
+				return;
+			}
+			if (!weekOff || !DAY_RE.test(fieldname)) return;
 
 			const [day, month, year] = fieldname.split("-");
 			const isWeekOff = String(row[fieldname] || "").replace(/<[^>]*>/g, "").trim() === "WO";
 			showWeekOffDialog(report, row, `${year}-${month}-${day}`, isWeekOff);
 		});
+	}
+
+	function canChangeWeekOff() {
+		return (
+			frappe.model.can_create("Holiday List Assignment") &&
+			!(frappe.boot && frappe.boot.upande_ta_week_off_change_disabled)
+		);
+	}
+
+	function canChangeShift() {
+		return (
+			frappe.model.can_create("Shift Assignment") &&
+			frappe.model.can_submit("Shift Assignment") &&
+			!(frappe.boot && frappe.boot.upande_ta_shift_change_disabled)
+		);
+	}
+
+	function shiftScheduleHtml(schedule) {
+		const ranges = (schedule && schedule.ranges) || [];
+		if (!ranges.length) return "";
+		const day = (d) => frappe.datetime.str_to_user(d);
+		const rows = ranges
+			.map((r) => {
+				const shift = r.shift_type ? frappe.utils.escape_html(r.shift_type) : "—";
+				const link = r.assignment
+					? `<a href="/app/shift-assignment/${encodeURIComponent(r.assignment)}" target="_blank">${frappe.utils.escape_html(r.assignment)}</a>`
+					: `<span class="text-muted">${__("Default")}</span>`;
+				const startDate = r.assignment ? day(r.start_date) : "";
+				const endDate = r.assignment ? (r.end_date ? day(r.end_date) : __("Open")) : "";
+				return `<tr><td>${shift}</td><td>${startDate}</td><td>${endDate}</td><td>${link}</td></tr>`;
+			})
+			.join("");
+		return `<table class="table table-bordered table-sm" style="margin:0">
+			<thead><tr><th>${__("Shift")}</th><th>${__("Start Date")}</th><th>${__("End Date")}</th><th>${__("Assignment")}</th></tr></thead>
+			<tbody>${rows}</tbody></table>`;
 	}
 
 	function showWeekOffDialog(report, row, date, isWeekOff) {
@@ -632,6 +675,299 @@ frappe.provide("frappe.views");
 			});
 		}
 		dialog.show();
+	}
+
+	/** The turns a rotation makes, as the server builds them: calendar weeks
+	 * Monday to Sunday, `weeks` each, the first ending on the Sunday of
+	 * `from`'s week; back-to-back turns of one shift merge. */
+	function rotationBlocks(from, to, shifts, weeks) {
+		const blocks = [];
+		if (!from || !to || to < from || !shifts.length) return blocks;
+		let start = from;
+		for (let turn = 0; start <= to && turn < 500; turn++) {
+			const weekday = (new Date(`${start}T00:00:00`).getDay() + 6) % 7;
+			let end = frappe.datetime.add_days(start, 6 - weekday + 7 * (weeks - 1));
+			if (end > to) end = to;
+			const shift = shifts[turn % shifts.length];
+			const last = blocks[blocks.length - 1];
+			if (last && last.shift === shift) last.to = end;
+			else blocks.push({ from: start, to: end, shift });
+			start = frappe.datetime.add_days(end, 1);
+		}
+		return blocks;
+	}
+
+	/** `after`: what the employee is on from the day after the End Date —
+	 * `{ from, to, shift }`, `to` empty when that assignment is open-ended. */
+	function rotationPreviewHtml(blocks, after) {
+		if (!blocks.length) return "";
+		const day = (d) => frappe.datetime.str_to_user(d);
+		const line = (b, cls = "") =>
+			`<tr class="${cls}"><td>${day(b.from)}</td><td>${b.to ? day(b.to) : __("Open")}</td><td>${frappe.utils.escape_html(b.shift)}</td></tr>`;
+		const rows = blocks.map((b) => line(b)).join("") + (after && after.shift ? line(after, "text-muted") : "");
+		return `<table class="table table-bordered table-sm" style="margin:0">
+			<thead><tr><th>${__("From")}</th><th>${__("To")}</th><th>${__("Shift")}</th></tr></thead>
+			<tbody>${rows}</tbody></table>`;
+	}
+
+	function showShiftDialog(report, row) {
+		const who = frappe.utils.escape_html(row.employee_name || row.employee);
+		const day = (d) => frappe.datetime.str_to_user(d);
+		const dates = (d) => (d || []).map(day).join(", ");
+		let dialog;
+		let current = null;
+		let changed = false;
+		let saving = false;
+		let autoFrom = null;
+		const today = frappe.datetime.get_today();
+
+		const rotationShifts = () =>
+			((dialog && dialog.get_value("rotation")) || []).map((r) => r.shift_type).filter(Boolean);
+
+		const updatePreview = () => {
+			if (!dialog) return;
+			dialog.refresh_dependency();
+			const rotation = rotationShifts();
+			const from_date = dialog.get_value("from_date");
+			// a rotation runs from this week; a single shift from where the last entry ends
+			if (rotation.length && from_date === autoFrom && autoFrom !== today) {
+				autoFrom = today;
+				dialog.set_value("from_date", today);
+				return;
+			}
+			const shift_type = dialog.get_value("shift_type");
+			const to_date = dialog.get_value("to_date");
+			const blocks = rotationBlocks(
+				from_date,
+				to_date,
+				[shift_type, ...rotation].filter(Boolean),
+				rotation.length ? Math.max(cint(dialog.get_value("weeks_per_shift")) || 1, 1) : 9999
+			);
+			const $preview = dialog.get_field("rotation_preview").$wrapper;
+			$preview.html(rotationPreviewHtml(blocks, afterCache[to_date]));
+			if (!blocks.length || to_date in afterCache) return;
+
+			const next = frappe.datetime.add_days(to_date, 1);
+			frappe
+				.call({
+					method: SHIFT_SCHEDULE_METHOD,
+					args: { employee: row.employee, from_date: next, days: 1 },
+				})
+				.then((r) => {
+					const range = ((r && r.message && r.message.ranges) || [])[0] || {};
+					afterCache[to_date] = { from: next, to: range.end_date || "", shift: range.shift_type };
+					if (dialog.get_value("to_date") === to_date) {
+						$preview.html(rotationPreviewHtml(blocks, afterCache[to_date]));
+					}
+				});
+		};
+		// End Date -> what follows it; cleared whenever the schedule is saved
+		let afterCache = {};
+
+		let previewTimer = null;
+		const schedulePreview = () => {
+			clearTimeout(previewTimer);
+			previewTimer = setTimeout(updatePreview, 250);
+		};
+
+		const loadSchedule = () =>
+			frappe
+				.call({
+					method: SHIFT_SCHEDULE_METHOD,
+					args: { employee: row.employee, days: SHIFT_SCHEDULE_DAYS },
+				})
+				.then((r) => {
+					const schedule = (r && r.message) || {};
+					current = schedule.current || null;
+					dialog.get_field("shift_schedule").$wrapper.html(shiftScheduleHtml(schedule));
+					if (schedule.next_from) {
+						autoFrom = schedule.next_from;
+						return dialog.set_value("from_date", schedule.next_from);
+					}
+				});
+
+		const resetEntry = () => {
+			dialog.set_value("shift_type", "");
+			const rotation = dialog.get_field("rotation");
+			rotation.df.data = [];
+			rotation.grid.refresh();
+			schedulePreview();
+		};
+
+		dialog = new frappe.ui.Dialog({
+			title: __("Shift"),
+			size: "large",
+			fields: [
+				{
+					fieldtype: "Data",
+					fieldname: "employee",
+					label: __("Employee"),
+					read_only: 1,
+					default: `${row.employee_name || ""} (${row.employee})`,
+				},
+				{ fieldtype: "Section Break" },
+				{ fieldtype: "HTML", fieldname: "shift_schedule" },
+				{ fieldtype: "Section Break" },
+				{
+					fieldtype: "Link",
+					fieldname: "shift_type",
+					label: __("Shift Type"),
+					options: "Shift Type",
+					// a rotation names its own shifts
+					mandatory_depends_on: "eval:!(doc.rotation || []).some((r) => r.shift_type)",
+					get_query: () => ({
+						filters: current ? { name: ["!=", current.shift_type] } : {},
+					}),
+					change: schedulePreview,
+				},
+				{ fieldtype: "Column Break" },
+				{
+					fieldtype: "Date",
+					fieldname: "from_date",
+					label: __("From Date"),
+					reqd: 1,
+					change: () => {
+						const from_date = dialog && dialog.get_value("from_date");
+						if (from_date) {
+							dialog.set_value("to_date", frappe.datetime.add_days(from_date, SHIFT_SCHEDULE_DAYS - 1));
+						}
+						schedulePreview();
+					},
+				},
+				{
+					fieldtype: "Date",
+					fieldname: "to_date",
+					label: __("End Date"),
+					reqd: 1,
+					change: schedulePreview,
+				},
+				{ fieldtype: "Section Break" },
+				{
+					fieldtype: "Table",
+					fieldname: "rotation",
+					label: __("Rotate With"),
+					in_place_edit: true,
+					data: [],
+					fields: [
+						{
+							fieldtype: "Link",
+							fieldname: "shift_type",
+							label: __("Shift Type"),
+							options: "Shift Type",
+							in_list_view: 1,
+							columns: 10,
+							reqd: 1,
+							// fires once the picked shift is stored on the row
+							onchange: () => schedulePreview(),
+						},
+					],
+				},
+				{
+					fieldtype: "Int",
+					fieldname: "weeks_per_shift",
+					label: __("Weeks per Shift"),
+					default: 1,
+					depends_on: "eval:(doc.rotation || []).some((r) => r.shift_type)",
+					change: schedulePreview,
+				},
+				{ fieldtype: "HTML", fieldname: "rotation_preview" },
+			],
+			primary_action_label: __("Change Shift"),
+			primary_action(values) {
+				if (saving) return;
+				const rotation = (values.rotation || []).map((r) => r.shift_type).filter(Boolean);
+				if (!values.shift_type && !rotation.length) {
+					dialog.get_field("shift_type").$input.focus();
+					return;
+				}
+				if (values.to_date < values.from_date) {
+					frappe.msgprint(__("End Date cannot be before {0}.", [day(values.from_date)]));
+					return;
+				}
+				saving = true;
+				dialog.disable_primary_action();
+				frappe
+					.call({
+						method: CHANGE_SHIFT_METHOD,
+						type: "POST",
+						args: {
+							employee: row.employee,
+							from_date: values.from_date,
+							to_date: values.to_date,
+							shift_type: values.shift_type || "",
+							rotation: JSON.stringify(rotation),
+							weeks_per_shift: values.weeks_per_shift || 1,
+						},
+					})
+					.then((r) => {
+						const result = (r && r.message) || {};
+						changed = true;
+						const lines = [
+							...(result.blocks || []).map((b) =>
+								__("{0}: {1} from {2} to {3}.", [
+									who,
+									frappe.utils.escape_html(b.shift_type),
+									day(b.from_date),
+									day(b.to_date),
+								])
+							),
+							result.restored_to &&
+								__("Back on {0} from {1}.", [
+									frappe.utils.escape_html(result.restored_to),
+									day(frappe.datetime.add_days(values.to_date, 1)),
+								]),
+							(result.absent_removed || []).length &&
+								__("Absent removed on: {0}", [dates(result.absent_removed)]),
+							(result.attendance_on_other_shift || []).length &&
+								__("Still marked under another shift on: {0}", [dates(result.attendance_on_other_shift)]),
+						];
+						frappe.show_alert({ message: lines.filter(Boolean).join("<br>"), indicator: "green" }, 10);
+						afterCache = {};
+						resetEntry();
+						return loadSchedule();
+					})
+					.always(() => {
+						saving = false;
+						dialog.enable_primary_action();
+					});
+			},
+			secondary_action_label: __("Close"),
+			secondary_action() {
+				dialog.hide();
+			},
+			on_hide() {
+				if (!changed) return;
+				changed = false;
+				// after the modal has finished closing: an error thrown inside
+				// Bootstrap's hide event stops the close and leaves it stuck open
+				setTimeout(() => {
+					try {
+						report.refresh();
+					} catch (e) {
+						console.warn("[MAS shift refresh]", e);
+					}
+				}, 300);
+			},
+		});
+		// desk caps a grid's last column at 30px for the row's edit button,
+		// which a dialog grid does not have, so Shift Type would be that column
+		dialog.$wrapper.addClass("ta-shift-dialog");
+		if (!document.getElementById("ta-shift-dialog-style")) {
+			$("<style id='ta-shift-dialog-style'>")
+				.text(
+					`.ta-shift-dialog .form-grid .grid-row > .row .col.grid-static-col[data-fieldname="shift_type"] {
+						max-width: none; min-width: 0; flex: 1 1 auto;
+					}`
+				)
+				.appendTo(document.head);
+		}
+		dialog.show();
+		// rows added, picked or deleted in Rotate With
+		$(dialog.get_field("rotation").grid.wrapper).on(
+			"change input click awesomplete-selectcomplete",
+			schedulePreview
+		);
+		loadSchedule();
 	}
 
 	function patchPrototype() {
