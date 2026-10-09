@@ -669,13 +669,18 @@ def attendance_register():
 				return
 
 			# effective shift per employee/date: a Shift Assignment covering the
-			# date wins over default_shift; the newest assignment wins on overlap
+			# date wins over default_shift; the newest assignment wins on overlap.
+			# An Inactive one still counts when HRMS' daily job retired it after
+			# its end_date passed -- the window is mostly past dates (same rule as
+			# shift_change._in_force_rows).
 			l_sa = {}
 			for sa in frappe.db.sql("""
 				SELECT sa.employee AS emp, sa.shift_type AS sh, sa.start_date AS sd, sa.end_date AS ed
 				FROM `tabShift Assignment` sa
 				JOIN `tabEmployee` e ON e.name = sa.employee
-				WHERE sa.docstatus = 1 AND IFNULL(sa.status, 'Active') <> 'Inactive'
+				WHERE sa.docstatus = 1
+				  AND (IFNULL(sa.status, 'Active') <> 'Inactive'
+				       OR (sa.end_date IS NOT NULL AND sa.end_date < CURDATE()))
 				  AND sa.start_date <= %(l_to)s
 				  AND (sa.end_date IS NULL OR sa.end_date >= %(l_from)s)
 				  AND e.status = 'Active'
@@ -759,15 +764,18 @@ def attendance_register():
 			""" + l_where, l_params, as_dict=True):
 				l_leave.setdefault(str(r["emp"]), []).append(r)
 
+			# Rest days come from the Holiday List Assignment in force on each
+			# date (company assignment filling the gaps), as HRMS resolves them
+			# on v16 -- Employee.holiday_list is no longer read by HRMS and goes
+			# stale when a week off is changed.
+			from upande_ta.upande_ta.api.canteen_analysis import _off_days
+
 			l_off = {}
-			for r in frappe.db.sql("""
-				SELECT e.name AS emp, h.holiday_date AS d
-				FROM `tabEmployee` e
-				JOIN `tabHoliday` h ON h.parent = e.holiday_list
-				WHERE e.status = 'Active'
-				  AND h.holiday_date BETWEEN %(l_from)s AND %(l_to)s
-			""" + l_where, l_params, as_dict=True):
-				l_off[str(r["emp"]) + "|" + str(r["d"])] = 1
+			for o_emp, o_days in _off_days(
+				[frappe._dict(employee=em["emp"], company=em["company"]) for em in l_emps], l_from, l_to
+			).items():
+				for o_d in o_days:
+					l_off[str(o_emp) + "|" + str(o_d)] = 1
 
 			l_dates = []
 			l_i = 0
