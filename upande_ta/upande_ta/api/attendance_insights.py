@@ -93,8 +93,31 @@ def company_where(company, allowed, alias, param_key):
 def excluded_employees():
 	"""The Monthly Attendance Sheet's excluded employees (Biometric Setting ->
 	Attendance Filters), as a tuple. Cached for the request: the register
-	builds its WHERE clause half a dozen times per call."""
-	return tuple(sorted(get_disabled_employee_names()))
+	builds its WHERE clause half a dozen times per call.
+
+	Temporary workers follow Biometric Setting's "Show Temporary Workers on
+	Attendance Insights": ticked, they are shown even when an Employment Type /
+	Employee Category row hides them from the sheet; unticked, they are left out.
+	An employee excluded by name stays excluded either way."""
+	names = set(get_disabled_employee_names())
+	if frappe.db.exists("DocType", "Biometric Setting") and frappe.get_meta("Biometric Setting").has_field(
+		"show_temporary_in_attendance_insights"
+	):
+		temporary = set(
+			frappe.get_all("Employee", filters={"employment_type": TASK_WORKER_EMPLOYMENT_TYPE}, pluck="name")
+		)
+		if frappe.utils.cint(
+			frappe.db.get_single_value("Biometric Setting", "show_temporary_in_attendance_insights")
+		):
+			by_name = {
+				r.employee
+				for r in frappe.get_single("Biometric Setting").get("attendance_employee_filters") or []
+				if r.employee and r.excluded
+			}
+			names = (names - temporary) | (by_name & temporary)
+		else:
+			names |= temporary
+	return tuple(sorted(names))
 
 
 def scope_where(company, allowed, alias, param_key):
