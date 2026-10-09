@@ -22,8 +22,10 @@ signed-in session is required and the caller's own permissions still apply.
 """
 
 import frappe
+from frappe.utils.caching import request_cache
 
 from upande_ta.upande_ta.overrides.attendance import delete_cancelled_absent
+from upande_ta.upande_ta.overrides.monthly_attendance_sheet import get_disabled_employee_names
 
 # Kaitet has no "Task Worker" employment type — the Employment Type master holds
 # Permanent / Temporary / Contract, and task workers are carried as Temporary
@@ -85,6 +87,27 @@ def company_where(company, allowed, alias, param_key):
 	if allowed:
 		return f"{alias}.company IN %({param_key}s)s", {f"{param_key}s": tuple(allowed)}
 	return "", {}
+
+
+@request_cache
+def excluded_employees():
+	"""The Monthly Attendance Sheet's excluded employees (Biometric Setting ->
+	Attendance Filters), as a tuple. Cached for the request: the register
+	builds its WHERE clause half a dozen times per call."""
+	return tuple(sorted(get_disabled_employee_names()))
+
+
+def scope_where(company, allowed, alias, param_key):
+	"""company_where, plus leaving out the employees the Monthly Attendance
+	Sheet excludes, so both screens count the same people. Same contract:
+	(condition without a leading " AND ", params), or ("", {})."""
+	cond, params = company_where(company, allowed, alias, param_key)
+	excluded = excluded_employees()
+	if excluded:
+		ex_cond = f"{alias}.name NOT IN %({param_key}_excluded)s"
+		cond = f"{cond} AND {ex_cond}" if cond else ex_cond
+		params[f"{param_key}_excluded"] = excluded
+	return cond, params
 
 
 def filter_companies(values, allowed):
@@ -157,7 +180,7 @@ def attendance_dashboard_data():
 	econd = ""
 	if farm:
 		econd = econd + " AND e.custom_farm = %(farm)s"
-	_cond, _cparams = company_where(company, allowed_companies, "e", "company")
+	_cond, _cparams = scope_where(company, allowed_companies, "e", "company")
 	if _cond:
 		econd = econd + " AND " + _cond
 		params.update(_cparams)
@@ -218,7 +241,11 @@ def attendance_dashboard_data():
 	company_farm_counts = {}
 	cfc_params = dict(aparams)
 	cfc_params["tw_type"] = TASK_WORKER_EMPLOYMENT_TYPE
-	cfcrows = frappe.db.sql("SELECT e.company AS co, e.custom_farm AS f, SUM(CASE WHEN e.employment_type=%(tw_type)s THEN 1 ELSE 0 END) AS tw, SUM(CASE WHEN COALESCE(e.employment_type,'')<>%(tw_type)s THEN 1 ELSE 0 END) AS rest FROM `tabEmployee` e WHERE e.status='Active' AND IFNULL(e.company,'')<>'' AND IFNULL(e.custom_farm,'')<>''" + acond + " GROUP BY e.company, e.custom_farm", cfc_params, as_dict=1)
+	cfc_cond = acond
+	if excluded_employees():
+		cfc_cond += " AND e.name NOT IN %(cfc_excluded)s"
+		cfc_params["cfc_excluded"] = excluded_employees()
+	cfcrows = frappe.db.sql("SELECT e.company AS co, e.custom_farm AS f, SUM(CASE WHEN e.employment_type=%(tw_type)s THEN 1 ELSE 0 END) AS tw, SUM(CASE WHEN COALESCE(e.employment_type,'')<>%(tw_type)s THEN 1 ELSE 0 END) AS rest FROM `tabEmployee` e WHERE e.status='Active' AND IFNULL(e.company,'')<>'' AND IFNULL(e.custom_farm,'')<>''" + cfc_cond + " GROUP BY e.company, e.custom_farm", cfc_params, as_dict=1)
 	for cr in cfcrows:
 		company_farm_counts.setdefault(cr["co"], {})
 		company_farm_counts[cr["co"]][cr["f"]] = {"tw": int(cr["tw"] or 0), "rest": int(cr["rest"] or 0)}
@@ -525,7 +552,7 @@ def attendance_register():
 			if farm:
 				t_where += " AND TRIM(e.custom_farm) = TRIM(%(farm)s)"
 				t_params["farm"] = farm
-			_cond, _cparams = company_where(company, allowed_companies, "e", "company")
+			_cond, _cparams = scope_where(company, allowed_companies, "e", "company")
 			if _cond:
 				t_where += " AND " + _cond
 				t_params.update(_cparams)
@@ -597,7 +624,7 @@ def attendance_register():
 			if farm:
 				l_where += " AND TRIM(e.custom_farm) = TRIM(%(l_farm)s)"
 				l_params["l_farm"] = farm
-			_cond, _cparams = company_where(company, allowed_companies, "e", "l_company")
+			_cond, _cparams = scope_where(company, allowed_companies, "e", "l_company")
 			if _cond:
 				l_where += " AND " + _cond
 				l_params.update(_cparams)
@@ -1002,7 +1029,7 @@ def attendance_register():
 		if farm:
 			emp_where.append("TRIM(emp.custom_farm) = TRIM(%(farm)s)")
 			emp_params["farm"] = farm
-		_cond, _cparams = company_where(company, allowed_companies, "emp", "company")
+		_cond, _cparams = scope_where(company, allowed_companies, "emp", "company")
 		if _cond:
 			emp_where.append(_cond)
 			emp_params.update(_cparams)
@@ -1028,7 +1055,7 @@ def attendance_register():
 		if farm:
 			sa_extra += " AND TRIM(emp.custom_farm) = TRIM(%(sa_farm)s)"
 			sa_params["sa_farm"] = farm
-		_cond, _cparams = company_where(company, allowed_companies, "emp", "sa_company")
+		_cond, _cparams = scope_where(company, allowed_companies, "emp", "sa_company")
 		if _cond:
 			sa_extra += " AND " + _cond
 			sa_params.update(_cparams)
@@ -1055,7 +1082,7 @@ def attendance_register():
 		if farm:
 			ci_extra += " AND TRIM(emp.custom_farm) = TRIM(%(ci_farm)s)"
 			ci_params["ci_farm"] = farm
-		_cond, _cparams = company_where(company, allowed_companies, "emp", "ci_company")
+		_cond, _cparams = scope_where(company, allowed_companies, "emp", "ci_company")
 		if _cond:
 			ci_extra += " AND " + _cond
 			ci_params.update(_cparams)
@@ -1149,7 +1176,7 @@ def attendance_register():
 		if farm:
 			att_extra += " AND TRIM(emp.custom_farm) = TRIM(%(att_farm)s)"
 			att_params["att_farm"] = farm
-		_cond, _cparams = company_where(company, allowed_companies, "emp", "att_company")
+		_cond, _cparams = scope_where(company, allowed_companies, "emp", "att_company")
 		if _cond:
 			att_extra += " AND " + _cond
 			att_params.update(_cparams)
@@ -1172,7 +1199,7 @@ def attendance_register():
 		if farm:
 			lv_where.append("TRIM(emp.custom_farm) = TRIM(%(lv_farm)s)")
 			lv_params["lv_farm"] = farm
-		_cond, _cparams = company_where(company, allowed_companies, "emp", "lv_company")
+		_cond, _cparams = scope_where(company, allowed_companies, "emp", "lv_company")
 		if _cond:
 			lv_where.append(_cond)
 			lv_params.update(_cparams)
@@ -1457,6 +1484,9 @@ def attendance_register():
 		if allowed_companies:
 			sb_cond = " AND company IN %(sb_companies)s"
 			sb_params["sb_companies"] = tuple(allowed_companies)
+		if excluded_employees():
+			sb_cond += " AND name NOT IN %(sb_excluded)s"
+			sb_params["sb_excluded"] = excluded_employees()
 
 		sbfarms = {}
 		sbcounts = {}
@@ -1486,7 +1516,7 @@ def attendance_register():
 		if farm:
 			le_extra += " AND TRIM(e.custom_farm) = TRIM(%(le_farm)s)"
 			le_params["le_farm"] = farm
-		_cond, _cparams = company_where(company, allowed_companies, "e", "le_company")
+		_cond, _cparams = scope_where(company, allowed_companies, "e", "le_company")
 		if _cond:
 			le_extra += " AND " + _cond
 			le_params.update(_cparams)
@@ -1607,7 +1637,7 @@ def att_rows():
 	econd = ""
 	if farm:
 		econd = econd + " AND e.custom_farm = %(farm)s"
-	_cond, _cparams = company_where(company, allowed_companies, "e", "company")
+	_cond, _cparams = scope_where(company, allowed_companies, "e", "company")
 	if _cond:
 		econd = econd + " AND " + _cond
 		params.update(_cparams)
@@ -1684,6 +1714,9 @@ def attendance_on_leave():
 			order_by="leave_type asc, employee_name asc",
 			limit_page_length=0,
 		)
+
+		excluded = set(excluded_employees())
+		la_rows = [r for r in la_rows if r.get("employee") not in excluded]
 
 		emp_ids = []
 		for r in la_rows:
