@@ -117,6 +117,50 @@ const STATUS_INDICATOR = {
 	"No Attendance": "red",
 };
 
+/** Row fields a company may be allowed to type into, and the mark that keeps
+ * the typed figure (bulk_overtime.MANUAL_MARKS). */
+const MANUAL_MARKS = {
+	working_hours: "manual_working_hours",
+	biometric_hours: "manual_biometric_hours",
+	approved_hours: "manual_override",
+};
+
+/** Applies what Biometric Setting says of this company: the fields it may
+ * type into open and the rest lock, and a company that needs no approval gets
+ * a plain Submit in place of the workflow's actions. */
+function bo_apply_rules(frm, rules) {
+	frm._bo_rules = rules || { editable_fields: [], needs_approval: true };
+	frm._bo_editable = frm._bo_rules.editable_fields || [];
+	const grid = frm.fields_dict.bulk_overtime_entries.grid;
+	Object.keys(MANUAL_MARKS).forEach((field) => {
+		const open = frm.doc.docstatus === 0 && frm._bo_editable.includes(field);
+		grid.update_docfield_property(field, "read_only", open ? 0 : 1);
+	});
+	frm.refresh_field("bulk_overtime_entries");
+
+	if (
+		!frm._bo_rules.needs_approval &&
+		frm.doc.docstatus === 0 &&
+		!frm.is_new() &&
+		!frm.is_dirty() &&
+		frm.perm[0].submit
+	) {
+		frm.page.set_primary_action(__("Submit"), () => frm.savesubmit());
+	}
+}
+
+function bo_load_rules(frm) {
+	if (!frm.doc.company) {
+		bo_apply_rules(frm, null);
+		return;
+	}
+	frappe
+		.xcall("upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime.overtime_rules", {
+			company: frm.doc.company,
+		})
+		.then((rules) => bo_apply_rules(frm, rules));
+}
+
 frappe.ui.form.on("Bulk Overtime", {
 	setup(frm) {
 		frm.set_query("custom_farm", () => ({ filters: { company: frm.doc.company } }));
@@ -125,9 +169,19 @@ frappe.ui.form.on("Bulk Overtime", {
 	},
 
 
+	onload(frm) {
+		// a new document has no onload, so refresh asks the server instead
+		frm._bo_rules = (frm.doc.__onload || {}).overtime_rules;
+	},
+
 	refresh(frm) {
 		// rows only come from the Get Overtime picker
 		frm.set_df_property("bulk_overtime_entries", "cannot_add_rows", 1);
+		if (frm._bo_rules === undefined) {
+			bo_load_rules(frm);
+		} else {
+			bo_apply_rules(frm, frm._bo_rules);
+		}
 		frm.toggle_display("get_from_overtime_request", frm.doc.docstatus === 0);
 
 		// Create > Bulk Overtime on an Hours Budget request lands here, to
@@ -312,6 +366,7 @@ frappe.ui.form.on("Bulk Overtime", {
 	company(frm) {
 		frm.set_value("custom_farm", "");
 		frm.events.clear_entries(frm);
+		bo_load_rules(frm);
 	},
 
 	custom_farm(frm) {
@@ -679,4 +734,21 @@ frappe.ui.form.on("Bulk Overtime", {
 			bo_busy(frm, "get_from_overtime_request", false);
 		});
 	},
+});
+
+/** Typing a figure marks the row, which is what keeps the figure through
+ * every save and re-fetch instead of the attendance's. */
+const bo_mark_typed = (field) =>
+	function (frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		const mark = MANUAL_MARKS[field];
+		if ((frm._bo_editable || []).includes(field) && !row[mark]) {
+			frappe.model.set_value(cdt, cdn, mark, 1);
+		}
+	};
+
+frappe.ui.form.on("Bulk Overtime Entry", {
+	working_hours: bo_mark_typed("working_hours"),
+	biometric_hours: bo_mark_typed("biometric_hours"),
+	approved_hours: bo_mark_typed("approved_hours"),
 });

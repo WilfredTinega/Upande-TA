@@ -343,6 +343,8 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		super().setUp()
 		frappe.db.savepoint(self.SAVEPOINT)
 		self.addCleanup(self._rollback_to_savepoint)
+		# most tests submit a batch directly; approval has its own tests below
+		frappe.db.set_single_value("Biometric Setting", "limit_overtime_approval", 1)
 
 	def _rollback_to_savepoint(self):
 		try:
@@ -1047,6 +1049,110 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		self.assertEqual(row.working_hours, 11.5)
 		self.assertFalse(row.manual_working_hours)
 		self.assertEqual(row.approved_hours, 2)
+
+	# ──────────────────────────────────────────────────────────────────────
+	# Hours typed by hand, where Biometric Setting allows the company
+	# ──────────────────────────────────────────────────────────────────────
+
+	def allow_editing(self, *fields, needs_approval=0):
+		frappe.db.set_single_value("Biometric Setting", "enable_overtime_editing", 1)
+		frappe.get_doc(
+			{
+				"doctype": "Overtime Edit Company",
+				"parenttype": "Biometric Setting",
+				"parent": "Biometric Setting",
+				"parentfield": "overtime_edit_companies",
+				"company": self.company,
+				"needs_approval": needs_approval,
+				**{field: 1 for field in fields},
+			}
+		).db_insert()
+
+	def test_a_company_ticked_for_approval_cannot_submit_directly(self):
+		self.allow_editing(needs_approval=1)
+		self.make_request({self.working_day: 2})
+		doc = self.make_bulk_overtime()
+		doc.insert(ignore_permissions=True)
+		self.assertRaises(frappe.ValidationError, doc.submit)
+
+	def test_a_company_not_ticked_submits_and_shows_no_workflow_actions(self):
+		from upande_ta.upande_ta.overrides.workflow import get_transitions
+
+		self.allow_editing()
+		self.make_request({self.working_day: 2})
+		doc = self.make_bulk_overtime()
+		doc.insert(ignore_permissions=True)
+		if frappe.model.workflow.get_workflow_name("Bulk Overtime"):
+			self.assertEqual(get_transitions(frappe.as_json({"doctype": doc.doctype, "name": doc.name})), [])
+		doc.submit()
+		self.assertEqual(doc.docstatus, 1)
+
+	def test_allowed_biometric_keeps_the_typed_figure(self):
+		self.allow_editing("biometric_hours")
+		self.make_request({self.no_punch_day: 2})
+		doc = self.make_bulk_overtime()
+		row = self.own_rows(doc)[0]
+		row.manual_biometric_hours = 1
+		row.biometric_hours = 1.5
+		doc.refresh_entries()
+
+		row = self.own_rows(doc)[0]
+		self.assertEqual((row.manual_biometric_hours, row.biometric_hours), (1, 1.5))
+		self.assertEqual(row.approved_hours, 1.5, "the typed figure stands in for the missing punch")
+
+	def test_a_field_not_ticked_stays_the_attendance(self):
+		self.allow_editing("biometric_hours")
+		self.make_request({self.no_punch_day: 2})
+		doc = self.make_bulk_overtime()
+		row = self.own_rows(doc)[0]
+		row.manual_override = 1
+		row.approved_hours = 2
+		doc.refresh_entries()
+
+		row = self.own_rows(doc)[0]
+		self.assertEqual((row.manual_override, row.approved_hours), (0, 0))
+
+	def test_allowed_worked_drives_the_biometric(self):
+		self.allow_editing("working_hours")
+		self.make_request({self.working_day: 2})
+		doc = self.make_bulk_overtime()
+		row = self.own_rows(doc)[0]
+		row.manual_working_hours = 1
+		row.working_hours = 10
+		doc.refresh_entries()
+
+		row = self.own_rows(doc)[0]
+		self.assertEqual((row.working_hours, row.biometric_hours), (10, 10 - SHIFT_HOURS))
+		self.assertEqual(row.approved_hours, 1)
+
+	def test_allowed_approved_is_capped_at_the_request_and_needs_a_reason(self):
+		self.allow_editing("approved_hours")
+		self.make_request({self.no_punch_day: 2})
+		doc = self.make_bulk_overtime()
+		row = self.own_rows(doc)[0]
+		row.manual_override = 1
+		row.approved_hours = 3
+		self.assertRaises(frappe.ValidationError, doc.refresh_entries)
+
+		row.approved_hours = 2
+		doc.refresh_entries()
+		self.assertEqual(self.own_rows(doc)[0].approved_hours, 2)
+		doc.override_reason = ""
+		self.assertRaises(frappe.ValidationError, doc.validate_manual_changes)
+		doc.override_reason = "Scanner down"
+		doc.validate_manual_changes()
+
+	def test_a_typed_figure_survives_get_overtime(self):
+		self.allow_editing("biometric_hours")
+		self.make_request({self.no_punch_day: 2})
+		doc = self.make_bulk_overtime()
+		row = self.own_rows(doc)[0]
+		row.manual_biometric_hours = 1
+		row.biometric_hours = 1.25
+		doc.get_overtime()
+
+		row = self.own_rows(doc)[0]
+		self.assertEqual((row.manual_biometric_hours, row.biometric_hours), (1, 1.25))
 
 	def test_untouched_rows_still_come_from_the_biometric(self):
 		self.make_request({self.working_day: 2})

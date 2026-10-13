@@ -1,0 +1,70 @@
+{
+ "actions": [],
+ "creation": "2026-10-13 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "working_hours",
+  "biometric_hours",
+  "approved_hours",
+  "needs_approval"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "default": "0",
+   "fieldname": "working_hours",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Worked"
+  },
+  {
+   "columns": 2,
+   "default": "0",
+   "fieldname": "biometric_hours",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Biometric"
+  },
+  {
+   "columns": 2,
+   "default": "0",
+   "fieldname": "approved_hours",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Approved"
+  },
+  {
+   "columns": 2,
+   "default": "0",
+   "fieldname": "needs_approval",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Needs Approval"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-13 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Overtime Edit Company",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

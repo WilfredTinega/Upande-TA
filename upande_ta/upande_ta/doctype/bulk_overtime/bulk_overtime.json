@@ -110,11 +110,10 @@
    "options": "Bulk Overtime Entry"
   },
   {
-   "depends_on": "eval:doc.override_reason",
+   "depends_on": "eval:doc.override_reason || (doc.bulk_overtime_entries || []).some(r => r.manual_working_hours || r.manual_biometric_hours || r.manual_override)",
    "fieldname": "override_reason",
    "fieldtype": "Small Text",
-   "label": "Reason for Manual Changes",
-   "read_only": 1
+   "label": "Reason for Manual Changes"
   },
   {
    "fieldname": "section_break_totals",
@@ -221,7 +220,7 @@
    "link_fieldname": "custom_bulk_overtime"
   }
  ],
- "modified": "2026-09-29 10:00:00.000000",
+ "modified": "2026-10-13 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime",

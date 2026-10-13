@@ -87,6 +87,10 @@
   "absent_run_now",
   "attendance_request_section",
   "attendance_request_approvers",
+  "overtime_edit_section",
+  "enable_overtime_editing",
+  "limit_overtime_approval",
+  "overtime_edit_companies",
   "attendance_filters_tab",
   "attendance_payroll_section",
   "show_employee_summary",
@@ -776,13 +780,37 @@
    "fieldtype": "Table",
    "label": "Attendance Request Approvers",
    "options": "Attendance Request Approver"
+  },
+  {
+   "fieldname": "overtime_edit_section",
+   "fieldtype": "Section Break",
+   "label": "Bulk Overtime"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_overtime_editing",
+   "fieldtype": "Check",
+   "label": "Allow Editing Overtime Hours"
+  },
+  {
+   "depends_on": "eval:doc.enable_overtime_editing || doc.limit_overtime_approval",
+   "fieldname": "overtime_edit_companies",
+   "fieldtype": "Table",
+   "label": "Companies",
+   "options": "Overtime Edit Company"
+  },
+  {
+   "default": "0",
+   "fieldname": "limit_overtime_approval",
+   "fieldtype": "Check",
+   "label": "Approval Only for Companies Ticked"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-09 22:30:00.000000",
+ "modified": "2026-10-13 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

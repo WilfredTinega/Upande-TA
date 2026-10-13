@@ -16,8 +16,12 @@ requested and what the biometric shows was worked. On a **Week** request the
 hours are the week's total: the days are paid in date order against that total,
 so a short day is made up by a long one (see
 ``upande_ta.upande_ta.overtime_engine``).
-Hours are never typed in: they come from the attendance, and all HR decides is
-who is paid — a row that should not be paid is removed from the table.
+Hours come from the attendance, and all HR decides is who is paid — a row
+that should not be paid is removed from the table. A company listed under
+Bulk Overtime Editing in Biometric Setting may also type Worked, Biometric or
+Approved by hand, whichever are ticked for it; a typed figure is kept through
+every save and re-fetch, and the batch asks for a reason at submit. See
+:func:`editable_fields`.
 
 A request made as an **Hours Budget** names nobody. **Get Overtime** lists
 the employees of the budgeted Department and/or Unit/Division whose
@@ -35,6 +39,9 @@ always clipped to this document's dates.
 
 Approval runs through the **Bulk Overtime Approval** workflow, and approving is
 what submits the batch — so a rejection stays at docstatus 0 and cuts no slips.
+Where Biometric Setting limits approval to the companies ticked for it, any
+other company's batch skips the workflow and is simply submitted, which is
+final. See :func:`needs_approval`.
 
 On submit this document creates one Overtime Slip per employee, one line per
 date, and nothing else. **It computes no money.** The Overtime Slip prices
@@ -53,6 +60,7 @@ import frappe
 from frappe import _
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.model.document import Document
+from frappe.model.workflow import get_workflow, get_workflow_name
 from frappe.utils import add_days, cint, date_diff, flt, get_link_to_form, getdate, today
 
 from upande_ta.upande_ta import overtime_engine as engine
@@ -73,11 +81,23 @@ UNPAYABLE = (engine.NO_ATTENDANCE, engine.NO_CLOCK_OUT, engine.NO_SHIFT)
 #: attendance for them can arrive a little late. Past this, it is done.
 PICK_UP_WINDOW_DAYS = 31
 
+#: Row fields a company may be allowed to type into, each with the mark that
+#: keeps the typed figure. The Overtime Edit Company columns carry the same
+#: names.
+MANUAL_MARKS = {
+	"working_hours": "manual_working_hours",
+	"biometric_hours": "manual_biometric_hours",
+	"approved_hours": "manual_override",
+}
+
 
 class BulkOvertime(Document):
 	# ──────────────────────────────────────────────────────────────────────
 	# Validation
 	# ──────────────────────────────────────────────────────────────────────
+
+	def onload(self):
+		self.set_onload("overtime_rules", overtime_rules(self.company))
 
 	def validate(self):
 		self.validate_dates()
@@ -91,6 +111,8 @@ class BulkOvertime(Document):
 	def before_submit(self):
 		if not any(flt(row.approved_hours) > 0 for row in self.bulk_overtime_entries):
 			self.throw_nothing_to_pay()
+		self.validate_approval()
+		self.validate_manual_changes()
 		self.validate_budget_period_over()
 		self.check_budgets(throw=True)
 		self.check_requested_hours(throw=True)
@@ -108,7 +130,11 @@ class BulkOvertime(Document):
 				row.employee_name or row.employee, frappe.format(row.overtime_date, "Date")
 			)
 			worked, shift = flt(row.working_hours) - flt(row.early_in_hours), flt(row.shift_hours)
-			if row.status in (engine.NO_ATTENDANCE, engine.NO_CLOCK_OUT, engine.NO_SHIFT):
+			if row.manual_override:
+				why = _("Approved set to 0 by hand")
+			elif row.manual_biometric_hours:
+				why = _("Biometric set to 0 by hand")
+			elif row.status in (engine.NO_ATTENDANCE, engine.NO_CLOCK_OUT, engine.NO_SHIFT):
 				why = _(row.status)
 			elif row.day_type == engine.WORKING_DAY and worked <= shift:
 				why = _("{0}h worked on a {1}h shift is no overtime").format(
@@ -123,6 +149,34 @@ class BulkOvertime(Document):
 			_("There are no approved hours to pay:<br>{0}").format("<br>".join(lines)),
 			title=_("Nothing to Pay"),
 		)
+
+	def validate_approval(self):
+		"""A company whose batches need approval cannot submit one directly:
+		only the workflow's approving step moves it to its submitted state,
+		which it has already done by the time this runs."""
+		if not get_workflow_name(self.doctype) or not needs_approval(self.company):
+			return
+		workflow = get_workflow(self.doctype)
+		submitted = {state.state for state in workflow.states if cint(state.doc_status) == 1}
+		if self.get(workflow.workflow_state_field) not in submitted:
+			frappe.throw(
+				_(
+					"Bulk Overtime for {0} is approved through the {1} workflow, not submitted directly."
+				).format(frappe.bold(self.company), frappe.bold(workflow.name)),
+				title=_("Approval Needed"),
+			)
+
+	def validate_manual_changes(self):
+		"""Rows changed by hand are paid on HR's word rather than a punch, so
+		the batch says why — once, on the document, rather than on every row."""
+		changed = [row.idx for row in self.bulk_overtime_entries if _entered_by_hand(row)]
+		if changed and not (self.override_reason or "").strip():
+			frappe.throw(
+				_(
+					"Row(s) {0} were changed by hand. Give the Reason for Manual Changes before submitting."
+				).format(", ".join(str(idx) for idx in changed)),
+				title=_("Reason Needed"),
+			)
 
 	def validate_dates(self, chosen=None):
 		if not (self.from_date and self.to_date):
@@ -219,6 +273,11 @@ class BulkOvertime(Document):
 		claimed = self._claimed_elsewhere(requests)
 		blocked = self._employees_with_overlapping_slips({r.employee for r in requests})
 
+		typed = {
+			(row.employee, str(getdate(row.overtime_date))): row
+			for row in self.bulk_overtime_entries
+			if _entered_by_hand(row)
+		}
 		self.set("bulk_overtime_entries", [])
 		left_out = []
 		for request in requests:
@@ -238,7 +297,7 @@ class BulkOvertime(Document):
 				)
 				continue
 
-			self.append(
+			row = self.append(
 				"bulk_overtime_entries",
 				{
 					"employee": request.employee,
@@ -251,6 +310,13 @@ class BulkOvertime(Document):
 					"budget_scope": request.get("budget_scope"),
 				},
 			)
+			kept = typed.get((request.employee, str(getdate(request.overtime_date))))
+			if kept:
+				# a figure typed by hand survives fetching the batch again
+				for field, mark in MANUAL_MARKS.items():
+					if kept.get(mark):
+						row.set(mark, 1)
+						row.set(field, kept.get(field))
 
 		self.refresh_entries()
 		self.drop_budget_rows_without_overtime()
@@ -1204,8 +1270,14 @@ class BulkOvertime(Document):
 		caps = _daily_caps({row.overtime_type for row in rows if row.overtime_type})
 		day_types = _DayTypes(self.from_date, self.to_date)
 		swaps = self.swapped_rest_days({row.employee for row in rows})
+		allowed = set(editable_fields(self.company))
 
 		for row in rows:
+			for field, mark in MANUAL_MARKS.items():
+				if field not in allowed:
+					# the company may not type this one: back to the attendance
+					row.set(mark, 0)
+
 			date = getdate(row.overtime_date)
 			record = attendance.get((row.employee, date))
 
@@ -1216,15 +1288,14 @@ class BulkOvertime(Document):
 			row.attendance = record.name if record else None
 			row.shift = record.shift if record else None
 
-			# Worked is the attendance's own figure. Hours entered by hand once
-			# lived here; they are the overtime now (below), so a row still
-			# carrying that old mark goes back to the attendance.
-			row.manual_working_hours = 0
+			# Worked is the attendance's own figure, unless typed by hand
 			worked = flt(record.working_hours) if record else 0
 			shift_type = shift_types.get(row.shift)
 			day_punches = punches.get((row.employee, date)) or []
 			first_in = record.in_time if record else None
-			if record and _labels_decide(shift_type) and len(day_punches) >= 2:
+			if row.manual_working_hours:
+				worked = max(flt(row.working_hours), 0)
+			elif record and _labels_decide(shift_type) and len(day_punches) >= 2:
 				# The shift reads IN/OUT labels strictly, and readers mislabel
 				# scans: IN, IN or OUT, OUT leaves HRMS with no hours at all.
 				# The first punch is the arrival and the last the departure,
@@ -1234,35 +1305,57 @@ class BulkOvertime(Document):
 			row.working_hours = worked
 			row.shift_hours = shift_hours.get(row.shift) or default_hours
 
-			# Hours are never typed in: a row once marked as edited by hand
-			# goes back to what the attendance says.
-			row.manual_biometric_hours = row.manual_override = 0
 			row.early_in_hours = 0
-			if record and row.day_type == engine.WORKING_DAY and shift_type and shift_type.start_time is not None:
+			if (
+				record
+				and not row.manual_working_hours
+				and row.day_type == engine.WORKING_DAY
+				and shift_type
+				and shift_type.start_time is not None
+			):
 				row.early_in_hours = min(
 					engine.hours_before_shift(first_in, _at(date, shift_type.start_time)),
 					worked,
 				)
 			cap = caps.get(row.overtime_type) or 0
-			row.biometric_hours = engine.biometric_overtime(
-				worked,
-				row.shift_hours,
-				row.day_type,
-				maximum_hours=cap,
-				early_hours=row.early_in_hours,
-			)
+			if row.manual_biometric_hours:
+				# the scanner failed that day, so HR types the overtime that
+				# was worked; still capped at the day's maximum
+				entered = max(flt(row.biometric_hours), 0)
+				row.biometric_hours = round(min(entered, cap) if cap else entered, 2)
+			else:
+				row.biometric_hours = engine.biometric_overtime(
+					worked,
+					row.shift_hours,
+					row.day_type,
+					maximum_hours=cap,
+					early_hours=row.early_in_hours,
+				)
 			if row.overtime_budget:
 				# nobody named this person, so they ask for what they worked;
 				# the budget, not the row, is what holds the total down
 				row.requested_hours = row.biometric_hours
-			row.approved_hours, row.status = engine.settle(
+			# a typed figure stands in for the punches, attendance or not
+			approved, row.status = engine.settle(
 				row.requested_hours,
 				row.biometric_hours,
-				has_attendance=bool(record),
-				has_hours=worked > 0,
+				has_attendance=bool(record) or bool(row.manual_working_hours or row.manual_biometric_hours),
+				has_hours=worked > 0 or bool(row.manual_biometric_hours),
 				# a rest day pays every hour worked, so it needs no shift length
-				has_shift=bool(row.shift_hours) or row.day_type != engine.WORKING_DAY,
+				has_shift=bool(row.shift_hours)
+				or row.day_type != engine.WORKING_DAY
+				or bool(row.manual_biometric_hours),
 			)
+			if not row.manual_override:
+				row.approved_hours = approved
+			elif flt(row.approved_hours) > flt(row.requested_hours):
+				frappe.throw(
+					_("Row #{0}: {1} cannot be paid more than the {2} hours requested.").format(
+						row.idx, frappe.bold(row.employee_name or row.employee), flt(row.requested_hours)
+					)
+				)
+			else:
+				row.approved_hours = max(flt(row.approved_hours), 0)
 
 		self.settle_weeks()
 
@@ -1284,17 +1377,22 @@ class BulkOvertime(Document):
 		if not weeks:
 			return
 
-		grouped = {}
+		grouped, typed = {}, {}
 		for row in rows:
 			key = (row.overtime_request, row.employee)
-			if key in weeks and row.status not in UNPAYABLE:
+			if key not in weeks:
+				continue
+			if row.manual_override:
+				# Approved typed by hand stays, and comes off the week first
+				typed[key] = typed.get(key, 0.0) + flt(row.approved_hours)
+			elif row.status not in UNPAYABLE:
 				grouped.setdefault(key, []).append(row)
 
 		for key, days in grouped.items():
 			days.sort(key=lambda r: getdate(r.overtime_date))
 			week = weeks[key]
 			settled = engine.settle_week(
-				week.requested - week.elsewhere,
+				max(week.requested - week.elsewhere - typed.get(key, 0.0), 0),
 				[flt(r.requested_hours) for r in days],
 				[flt(r.biometric_hours) for r in days],
 			)
@@ -1537,6 +1635,8 @@ class BulkOvertime(Document):
 				check = "No Punches"
 			elif not last:
 				check = "One Punch"
+			elif _entered_by_hand(row):
+				check = "Entered by Hand"
 			elif abs(beyond - flt(row.biometric_hours)) > 0.1:
 				check = "Differs"
 			else:
@@ -1683,6 +1783,49 @@ def _daily_caps(overtime_types) -> dict:
 		fields=["name", "maximum_overtime_hours_allowed"],
 	)
 	return {row.name: flt(row.maximum_overtime_hours_allowed) for row in rows}
+
+
+def _company_rule(company):
+	if not company or not frappe.db.exists("DocType", "Overtime Edit Company"):
+		return None
+	rows = frappe.get_all(
+		"Overtime Edit Company",
+		filters={"parenttype": "Biometric Setting", "parent": "Biometric Setting", "company": company},
+		fields=[*MANUAL_MARKS, "needs_approval"],
+	)
+	return rows[0] if rows else frappe._dict()
+
+
+@frappe.whitelist()
+def overtime_rules(company: str | None = None) -> dict:
+	"""What the Bulk Overtime form needs to know about ``company``."""
+	return {"editable_fields": editable_fields(company), "needs_approval": needs_approval(company)}
+
+
+def needs_approval(company: str | None) -> bool:
+	"""Whether a batch for ``company`` goes through the approval workflow.
+
+	Every company does, unless Biometric Setting limits approval to the
+	companies ticked for it; any other company's batch is simply submitted.
+	"""
+	if not cint(frappe.db.get_single_value("Biometric Setting", "limit_overtime_approval")):
+		return True
+	rule = _company_rule(company)
+	return bool(rule and cint(rule.get("needs_approval")))
+
+
+def editable_fields(company: str | None = None) -> list:
+	"""The row fields ``company`` may type into by hand on a Bulk Overtime:
+	those ticked against it under Bulk Overtime Editing in Biometric Setting.
+	None while that section is switched off or the company is not listed."""
+	if not cint(frappe.db.get_single_value("Biometric Setting", "enable_overtime_editing")):
+		return []
+	rule = _company_rule(company)
+	return [field for field in MANUAL_MARKS if rule and cint(rule.get(field))]
+
+
+def _entered_by_hand(row) -> bool:
+	return any(cint(row.get(mark)) for mark in MANUAL_MARKS.values())
 
 
 def _worth_listing(row) -> bool:
