@@ -237,6 +237,20 @@ class BiometricSetting(Document):
 	def validate(self):
 		self._block_removing_devices_with_links()
 		self._validate_attendance_request_approvers()
+		self._validate_overtime_edit_companies()
+
+	def _validate_overtime_edit_companies(self):
+		"""One row per company, so what it may edit and whether its batches
+		need approval are read from one place."""
+		seen = set()
+		for row in self.get("overtime_edit_companies") or []:
+			if row.company in seen:
+				frappe.throw(
+					_("Row #{0}: {1} is already listed under Bulk Overtime Editing.").format(
+						row.idx, frappe.bold(row.company)
+					)
+				)
+			seen.add(row.company)
 
 	def _validate_attendance_request_approvers(self):
 		"""One approver per Company and Unit/Division — a blank Unit/Division

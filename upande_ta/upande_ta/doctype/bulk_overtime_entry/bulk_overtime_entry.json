@@ -127,7 +127,7 @@
    "fieldtype": "Check",
    "label": "Manual Override",
    "depends_on": "eval:doc.manual_override",
-   "read_only": 1
+   "read_only_depends_on": "eval:!doc.manual_override"
   },
   {
    "fieldname": "section_break_source",
@@ -170,9 +170,9 @@
    "default": "0",
    "fieldname": "manual_working_hours",
    "fieldtype": "Check",
-   "hidden": 1,
-   "label": "Worked Hours Entered by Hand",
-   "read_only": 1
+   "label": "Worked Entered by Hand",
+   "depends_on": "eval:doc.manual_working_hours",
+   "read_only_depends_on": "eval:!doc.manual_working_hours"
   },
   {
    "columns": 1,
@@ -207,8 +207,8 @@
    "fieldname": "manual_biometric_hours",
    "fieldtype": "Check",
    "label": "Biometric Entered by Hand",
-   "read_only": 1,
-   "depends_on": "eval:doc.manual_biometric_hours"
+   "depends_on": "eval:doc.manual_biometric_hours",
+   "read_only_depends_on": "eval:!doc.manual_biometric_hours"
   },
   {
    "fieldname": "budget_scope",
@@ -228,7 +228,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-09-29 20:26:28.403192",
+ "modified": "2026-10-13 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime Entry",

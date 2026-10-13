@@ -95,6 +95,12 @@ before_uninstall = [
 	"upande_ta.upande_ta.overrides.stock_entry.remove_biometric_stock_entry_fields",
 ]
 
+# A Bulk Overtime whose company needs no approval shows no workflow actions;
+# the form submits it directly.
+override_whitelisted_methods = {
+	"frappe.model.workflow.get_transitions": "upande_ta.upande_ta.overrides.workflow.get_transitions",
+}
+
 override_doctype_class = {
 	# An auto-marked Absent must not block the record that corrects it: a late
 	# check-in, or a supervisor marking someone Present. Stock ERPNext throws
