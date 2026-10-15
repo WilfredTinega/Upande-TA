@@ -1,0 +1,199 @@
+{
+ "actions": [],
+ "creation": "2026-10-15 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "exchange_employee",
+  "employee_name",
+  "payroll_number",
+  "home_instance",
+  "column_break_main",
+  "time",
+  "log_type",
+  "company",
+  "device_section",
+  "device_sn",
+  "device_location",
+  "column_break_device",
+  "source_instance",
+  "arrived_via",
+  "origin_section",
+  "origin_id",
+  "column_break_origin",
+  "employee_origin_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "EXC-.#####",
+   "default": "EXC-.#####",
+   "hidden": 1
+  },
+  {
+   "fieldname": "exchange_employee",
+   "fieldtype": "Link",
+   "label": "Exchange Employee",
+   "options": "Exchange Employee",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "label": "Employee Name",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "payroll_number",
+   "fieldtype": "Data",
+   "label": "Payroll Number",
+   "read_only": 1
+  },
+  {
+   "fieldname": "home_instance",
+   "fieldtype": "Data",
+   "label": "Home Instance",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "time",
+   "fieldtype": "Datetime",
+   "label": "Time",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "log_type",
+   "fieldtype": "Select",
+   "label": "Log Type",
+   "options": "\nIN\nOUT",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "device_section",
+   "fieldtype": "Section Break",
+   "label": "Where"
+  },
+  {
+   "fieldname": "device_sn",
+   "fieldtype": "Data",
+   "label": "Device"
+  },
+  {
+   "fieldname": "device_location",
+   "fieldtype": "Data",
+   "label": "Device Location",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_device",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "source_instance",
+   "fieldtype": "Data",
+   "label": "Source Instance",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "arrived_via",
+   "fieldtype": "Select",
+   "label": "Arrived Via",
+   "options": "Device\nSync",
+   "default": "Device",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "origin_section",
+   "fieldtype": "Section Break",
+   "label": "Origin"
+  },
+  {
+   "fieldname": "origin_id",
+   "fieldtype": "Data",
+   "label": "Origin ID",
+   "read_only": 1,
+   "unique": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "column_break_origin",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "employee_origin_id",
+   "fieldtype": "Data",
+   "label": "Employee Origin ID",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-10-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Exchange Checkin",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "time",
+ "sort_order": "DESC",
+ "states": [],
+ "autoname": "naming_series:",
+ "title_field": "employee_name"
+}

@@ -1,0 +1,196 @@
+{
+ "actions": [],
+ "creation": "2026-10-15 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "this_instance_tab",
+  "enabled",
+  "instance_code",
+  "column_break_identity",
+  "allow_employee_lookup",
+  "payroll_number_field",
+  "api_section",
+  "generate_api_key",
+  "integration_user",
+  "column_break_api",
+  "api_key",
+  "api_key_generated_on",
+  "instances_tab",
+  "instances",
+  "company_map_tab",
+  "company_map",
+  "sending_tab",
+  "sync_status",
+  "retry_section",
+  "retry_minutes",
+  "column_break_sync_1",
+  "batch_size",
+  "column_break_sync_2",
+  "max_attempts"
+ ],
+ "fields": [
+  {
+   "fieldname": "this_instance_tab",
+   "fieldtype": "Tab Break",
+   "label": "This Instance"
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enable Employee Exchange",
+   "default": "0"
+  },
+  {
+   "fieldname": "instance_code",
+   "fieldtype": "Data",
+   "label": "This Instance Code",
+   "mandatory_depends_on": "eval:doc.enabled"
+  },
+  {
+   "fieldname": "column_break_identity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "allow_employee_lookup",
+   "fieldtype": "Check",
+   "label": "Let other instances look up my employees by payroll number",
+   "default": "1"
+  },
+  {
+   "fieldname": "payroll_number_field",
+   "fieldtype": "Data",
+   "label": "Payroll Number Field on Employee",
+   "default": "attendance_device_id"
+  },
+  {
+   "fieldname": "api_section",
+   "fieldtype": "Section Break",
+   "label": "API Access for the Other Instances"
+  },
+  {
+   "fieldname": "generate_api_key",
+   "fieldtype": "Button",
+   "label": "Generate API Key"
+  },
+  {
+   "fieldname": "integration_user",
+   "fieldtype": "Link",
+   "label": "Integration User",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_api",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "api_key",
+   "fieldtype": "Data",
+   "label": "API Key",
+   "read_only": 1
+  },
+  {
+   "fieldname": "api_key_generated_on",
+   "fieldtype": "Datetime",
+   "label": "Generated On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "instances_tab",
+   "fieldtype": "Tab Break",
+   "label": "Instances"
+  },
+  {
+   "fieldname": "instances",
+   "fieldtype": "Table",
+   "label": "Other Instances",
+   "options": "Exchange Instance"
+  },
+  {
+   "fieldname": "company_map_tab",
+   "fieldtype": "Tab Break",
+   "label": "Company Map"
+  },
+  {
+   "fieldname": "company_map",
+   "fieldtype": "Table",
+   "label": "Their Company → Company Here",
+   "options": "Exchange Company Map"
+  },
+  {
+   "fieldname": "sending_tab",
+   "fieldtype": "Tab Break",
+   "label": "Sending"
+  },
+  {
+   "fieldname": "sync_status",
+   "fieldtype": "HTML",
+   "label": "Sync Status"
+  },
+  {
+   "fieldname": "retry_section",
+   "fieldtype": "Section Break",
+   "label": "Retries"
+  },
+  {
+   "fieldname": "retry_minutes",
+   "fieldtype": "Int",
+   "label": "Retry Every (Minutes)",
+   "default": "5"
+  },
+  {
+   "fieldname": "column_break_sync_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "batch_size",
+   "fieldtype": "Int",
+   "label": "Records per Push",
+   "default": "200"
+  },
+  {
+   "fieldname": "column_break_sync_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "max_attempts",
+   "fieldtype": "Int",
+   "label": "Give Up After (Attempts)",
+   "default": "20"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-10-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Exchange Setting",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "issingle": 1
+}

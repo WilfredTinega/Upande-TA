@@ -414,6 +414,11 @@ _SIDEBAR_LAYOUT = (
 	{"type": "Link", "link_type": "DocType", "link_to": "Gate Pass", "label": "Gate Pass", "icon": "unlock"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Meal Checkin", "label": "Meal Checkin", "icon": "utensils"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Biometric Logs", "label": "Biometric Logs", "icon": "list"},
+	# Staff on an exchange program between linked instances: kept apart from
+	# Employee and Employee Checkin, so they sit together after the biometrics.
+	{"type": "Link", "link_type": "Page", "link_to": "exchange-dashboard", "label": "Exchange Dashboard", "icon": "chart-column"},
+	{"type": "Link", "link_type": "DocType", "link_to": "Exchange Employee", "label": "Exchange Employee", "icon": "users"},
+	{"type": "Link", "link_type": "DocType", "link_to": "Exchange Checkin", "label": "Exchange Checkin", "icon": "pointer"},
 
 	{"type": "Link", "link_type": "DocType", "link_to": "Shift Type", "label": "Shift Type", "icon": "clock"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Shift Location", "label": "Shift Location", "icon": "map-pin"},
@@ -428,6 +433,8 @@ _SIDEBAR_LAYOUT = (
 	{"type": "Link", "link_type": "DocType", "link_to": "Biometric Setting", "label": "Biometric Setting", "icon": "settings"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Biometric User", "label": "Biometric User", "icon": "user-check"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Biometric Template", "label": "Biometric Template", "icon": "scan-face"},
+	{"type": "Link", "link_type": "DocType", "link_to": "Exchange Setting", "label": "Exchange Setting", "icon": "settings"},
+	{"type": "Link", "link_type": "DocType", "link_to": "Exchange Sync Log", "label": "Exchange Sync Log", "icon": "list"},
 )
 # fmt: on
 
@@ -441,6 +448,8 @@ _SIDEBAR_DROP = {
 	# app itself put there on an earlier migrate as something to preserve, and
 	# shuffle it to the bottom instead of removing it.
 	("link", "Workspace", _TA_SIDEBAR.lower()),
+	# a child table of Exchange Setting since its first draft; it has no list
+	("link", "DocType", "exchange instance"),
 }
 
 # Everything on a Workspace Sidebar Item that describes the row itself. idx is
@@ -602,7 +611,20 @@ _WORKSPACE_CARD_LINKS = (
 			("DocType", "Biometric Setting"),
 		),
 	),
+	(
+		"Employee Exchange",
+		(
+			("Page", "exchange-dashboard", "Exchange Dashboard"),
+			("DocType", "Exchange Employee"),
+			("DocType", "Exchange Checkin"),
+			("DocType", "Exchange Sync Log"),
+			("DocType", "Exchange Setting"),
+		),
+	),
 )
+
+# Links an earlier version of this app put on the cards, taken off again.
+_DROP_WORKSPACE_LINKS = {("DocType", "Exchange Instance")}
 
 # Everything on a Workspace Link row worth carrying when the list is rebuilt.
 _WORKSPACE_LINK_FIELDS = (
@@ -650,7 +672,7 @@ def compose_shift_attendance_workspace():
 
 	charts = [c for c in workspace.charts if c.chart_name not in _DROP_WORKSPACE_CHARTS]
 
-	links, new_cards = _shift_attendance_card_links(workspace)
+	links, new_cards, relabelled = _shift_attendance_card_links(workspace)
 
 	# A card only shows up if `content` carries a block for it.
 	for card in new_cards:
@@ -660,6 +682,7 @@ def compose_shift_attendance_workspace():
 		len(kept) == len(blocks)
 		and len(charts) == len(workspace.charts)
 		and len(links) == len(workspace.links)
+		and not relabelled
 	):
 		return
 
@@ -688,20 +711,36 @@ def compose_shift_attendance_workspace():
 
 
 def _shift_attendance_card_links(workspace):
-	"""Return (link rows, labels of cards created) with this app's links added.
+	"""Return (link rows, labels of cards created, whether a label changed)
+	with this app's links added.
 
 	Each link is placed at the end of its own card rather than appended to the
 	table, because the rows are a flat list where a "Card Break" opens a card
 	and every row after it belongs to that card until the next break.
 	"""
-	rows = [{f: link.get(f) for f in _WORKSPACE_LINK_FIELDS if link.get(f)} for link in workspace.links]
+	rows = [
+		{f: link.get(f) for f in _WORKSPACE_LINK_FIELDS if link.get(f)}
+		for link in workspace.links
+		if (link.link_type, link.link_to) not in _DROP_WORKSPACE_LINKS
+	]
 	present = {(row.get("link_type"), row.get("link_to")) for row in rows if row.get("type") == "Link"}
 	new_cards = []
+	relabelled = False
+
+	# a row added before its label was given here shows the raw route
+	labels = {
+		(t, to): extra[0] for _card, wanted in _WORKSPACE_CARD_LINKS for t, to, *extra in wanted if extra
+	}
+	for row in rows:
+		label = labels.get((row.get("link_type"), row.get("link_to")))
+		if label and row.get("label") == row.get("link_to"):
+			row["label"] = label
+			relabelled = True
 
 	for card, wanted in _WORKSPACE_CARD_LINKS:
 		missing = [
-			{"type": "Link", "label": link_to, "link_type": link_type, "link_to": link_to}
-			for link_type, link_to in wanted
+			{"type": "Link", "label": (label or [link_to])[0], "link_type": link_type, "link_to": link_to}
+			for link_type, link_to, *label in wanted
 			if (link_type, link_to) not in present
 			and _link_target_exists({"link_type": link_type, "link_to": link_to})
 		]
@@ -725,7 +764,7 @@ def _shift_attendance_card_links(workspace):
 		)
 		rows[end:end] = missing
 
-	return rows, new_cards
+	return rows, new_cards, relabelled
 
 
 def hide_ta_desktop_icon():

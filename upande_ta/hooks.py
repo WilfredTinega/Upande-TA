@@ -159,5 +159,9 @@ scheduler_events = {
 		"* * * * *": [
 			"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.mark_stale_devices_offline_scheduled"
 		],
+		# Employee Exchange: what another instance could not take yet is tried
+		# again, and exchange employees are re-read from home every night.
+		"*/5 * * * *": ["upande_ta.upande_ta.exchange.scheduled_push"],
+		"0 2 * * *": ["upande_ta.upande_ta.exchange.refresh_active_employees"],
 	},
 }

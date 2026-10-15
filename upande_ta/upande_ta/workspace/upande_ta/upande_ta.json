@@ -1,7 +1,7 @@
 {
  "app": "upande_ta",
  "charts": [],
- "content": "[{\"id\":\"hdr-cards\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Masters &amp; Setup</b></span>\",\"col\":12}},{\"id\":\"card-bio\",\"type\":\"card\",\"data\":{\"card_name\":\"Biometrics\",\"col\":3}},{\"id\":\"card-att\",\"type\":\"card\",\"data\":{\"card_name\":\"Attendance\",\"col\":3}},{\"id\":\"card-gp\",\"type\":\"card\",\"data\":{\"card_name\":\"Gate Pass\",\"col\":3}},{\"id\":\"card-reports\",\"type\":\"card\",\"data\":{\"card_name\":\"Reports\",\"col\":3}},{\"id\":\"sp-2\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"hdr-overview\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Checkin Overview</b></span>\",\"col\":12}},{\"id\":\"sc-insights\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Attendance Insights\",\"col\":3}},{\"id\":\"cb-ta-dash\",\"type\":\"custom_block\",\"data\":{\"custom_block_name\":\"T&A Dashboard\",\"col\":12}}]",
+ "content": "[{\"id\": \"hdr-cards\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Masters &amp; Setup</b></span>\", \"col\": 12}}, {\"id\": \"card-bio\", \"type\": \"card\", \"data\": {\"card_name\": \"Biometrics\", \"col\": 3}}, {\"id\": \"card-att\", \"type\": \"card\", \"data\": {\"card_name\": \"Attendance\", \"col\": 3}}, {\"id\": \"card-gp\", \"type\": \"card\", \"data\": {\"card_name\": \"Gate Pass\", \"col\": 3}}, {\"id\": \"card-reports\", \"type\": \"card\", \"data\": {\"card_name\": \"Reports\", \"col\": 3}}, {\"id\": \"card-exchange\", \"type\": \"card\", \"data\": {\"card_name\": \"Employee Exchange\", \"col\": 3}}, {\"id\": \"sp-2\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"hdr-overview\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Checkin Overview</b></span>\", \"col\": 12}}, {\"id\": \"sc-insights\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Attendance Insights\", \"col\": 3}}, {\"id\": \"sc-exchange\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Exchange Dashboard\", \"col\": 3}}, {\"id\": \"cb-ta-dash\", \"type\": \"custom_block\", \"data\": {\"custom_block_name\": \"T&A Dashboard\", \"col\": 12}}]",
  "creation": "2026-05-21 00:00:00",
  "custom_blocks": [
   {
@@ -201,9 +201,62 @@
    "onboard": 0,
    "report_ref_doctype": "Attendance",
    "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "onboard": 0,
+   "type": "Card Break",
+   "label": "Employee Exchange",
+   "link_count": 5
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "onboard": 0,
+   "type": "Link",
+   "label": "Exchange Dashboard",
+   "link_type": "Page",
+   "link_to": "exchange-dashboard"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "onboard": 0,
+   "type": "Link",
+   "label": "Exchange Employee",
+   "link_type": "DocType",
+   "link_to": "Exchange Employee"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "onboard": 0,
+   "type": "Link",
+   "label": "Exchange Checkin",
+   "link_type": "DocType",
+   "link_to": "Exchange Checkin"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "onboard": 0,
+   "type": "Link",
+   "label": "Exchange Sync Log",
+   "link_type": "DocType",
+   "link_to": "Exchange Sync Log"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "onboard": 0,
+   "type": "Link",
+   "label": "Exchange Setting",
+   "link_type": "DocType",
+   "link_to": "Exchange Setting"
   }
  ],
- "modified": "2026-09-22 00:00:00",
+ "modified": "2026-10-15 15:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Upande TA",
@@ -226,6 +279,13 @@
    "label": "Attendance Insights",
    "type": "URL",
    "url": "/attendance-insights"
+  },
+  {
+   "color": "Blue",
+   "doc_view": "",
+   "label": "Exchange Dashboard",
+   "type": "Page",
+   "link_to": "exchange-dashboard"
   }
  ],
  "title": "Upande TA",
