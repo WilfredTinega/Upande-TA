@@ -244,23 +244,6 @@ def store_biotemplate():
             }
             return
 
-    employee_row = frappe.db.get_value(
-        "Employee",
-        {"attendance_device_id": user_id},
-        ["name", "employee_name"],
-        as_dict=True,
-    )
-    if not employee_row:
-        frappe.response["message"] = {
-            "status":    "skipped",
-            "message":   f"No employee found for PIN {user_id}",
-            "user_id":   user_id,
-            "device_sn": device_sn,
-        }
-        return
-    employee_name = employee_row.name
-    employee_full_name = employee_row.employee_name or ""
-
     new_values = {}
 
     if is_user_record:
@@ -289,6 +272,28 @@ def store_biotemplate():
             f"{prefix}_raw_log":   _str(data.get("raw_log")),
             _BIO_TEMPLATE_FIELD[prefix]: _str(data.get("template")),
         })
+
+    employee_row = frappe.db.get_value(
+        "Employee",
+        {"attendance_device_id": user_id},
+        ["name", "employee_name"],
+        as_dict=True,
+    )
+    if not employee_row:
+        # Not an Employee here: it may be someone on the exchange program,
+        # whose templates are kept on their Exchange Employee instead.
+        from upande_ta.upande_ta.exchange import store_device_template
+
+        stored = None if is_photo else store_device_template(user_id, device_sn, new_values)
+        frappe.response["message"] = stored or {
+            "status":    "skipped",
+            "message":   f"No employee found for PIN {user_id}",
+            "user_id":   user_id,
+            "device_sn": device_sn,
+        }
+        return
+    employee_name = employee_row.name
+    employee_full_name = employee_row.employee_name or ""
 
     parent_name = _ensure_biometric_template_parent(device_sn)
 
