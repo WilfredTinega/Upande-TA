@@ -16,6 +16,7 @@
    "description": "Leave blank for the default period used by any company without its own row.",
    "fieldname": "company",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "in_list_view": 1,
    "label": "Company",
    "options": "Company"
@@ -47,7 +48,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-09-19 00:00:00.000000",
+ "modified": "2026-10-15 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Attendance Filter Payroll Period",

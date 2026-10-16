@@ -235,6 +235,33 @@ def _empty_payload(from_date, to_date):
 	}
 
 
+def _current_shift_map(employees, on_date):
+	"""{employee: shift_type} of the Active, submitted Shift Assignment covering
+	`on_date`; the latest-starting one wins where two overlap. Employees with no
+	such assignment are left out, so callers fall back to Employee.default_shift.
+	Inactive assignments never count: HRMS ignores them when marking attendance."""
+	employees = [e for e in employees if e]
+	if not employees:
+		return {}
+	out = {}
+	for r in frappe.db.sql(
+		"""
+		SELECT employee, shift_type
+		FROM `tabShift Assignment`
+		WHERE docstatus = 1
+		  AND status = 'Active'
+		  AND start_date <= %(d)s
+		  AND (end_date IS NULL OR end_date >= %(d)s)
+		  AND employee IN %(emps)s
+		ORDER BY start_date DESC, creation DESC
+		""",
+		{"d": on_date, "emps": tuple(employees)},
+		as_dict=True,
+	):
+		out.setdefault(r.employee, r.shift_type)
+	return out
+
+
 def _overnight_shift_assignments(employees, on_date, overnight_types):
 	"""{employee: (start_time, end_time)} for each employee on an Active, submitted
 	overnight Shift Assignment covering `on_date`. Bulk-fetched to avoid N+1."""
@@ -312,6 +339,13 @@ def get_ta_dashboard_checkins(date=None, company=None, farm=None,
 	overnight_map = _overnight_shift_map()
 	overnight_types = _overnight_shift_types()
 	overnight_emp = _overnight_shift_assignments(list(by_emp.keys()), prev_day, overnight_types)
+	current_shift = _current_shift_map(list(by_emp.keys()), day)
+	meta_shift = dict(
+		frappe.db.sql(
+			"SELECT name, default_shift FROM `tabEmployee` WHERE name IN %(emps)s",
+			{"emps": tuple(by_emp.keys()) or ("",)},
+		)
+	)
 
 	def _fmt(dt):
 		return dt.strftime("%Y-%m-%d %H:%M:%S") if dt else ""
@@ -375,7 +409,10 @@ def get_ta_dashboard_checkins(date=None, company=None, farm=None,
 			"employee": emp,
 			"employee_number": meta.get("attendance_device_id") or "",
 			"employee_name": meta.get("employee_name") or emp,
-			"shift": max(shift_vals) if shift_vals else "",
+			"shift": current_shift.get(emp)
+			or (max(shift_vals) if shift_vals else "")
+			or meta_shift.get(emp)
+			or "",
 			"designation": meta.get("designation") or "",
 			"check_in": _fmt(check_in),
 			"check_out": _fmt(check_out) if show_out else "",
@@ -429,12 +466,14 @@ def get_ta_dashboard_checkins(date=None, company=None, farm=None,
 			)
 		}
 
+	scope_shift = _current_shift_map(list(scope_ids), day)
+
 	def _meta_row(m, status, leave_type=""):
 		return {
 			"employee": m["name"],
 			"employee_number": m.get("attendance_device_id") or "",
 			"employee_name": m.get("employee_name") or m["name"],
-			"shift": leave_type or m.get("default_shift") or "",
+			"shift": leave_type or scope_shift.get(m["name"]) or m.get("default_shift") or "",
 			"designation": m.get("designation") or "",
 			"check_in": "", "check_out": "", "worked_hours": "",
 			"status": status,
@@ -585,7 +624,9 @@ def get_ta_dashboard_employee_grid(employee, from_date=None, to_date=None):
 		"employee_name": emp.employee_name or emp.name,
 		"employee_number": emp.attendance_device_id or "",
 		"designation": emp.designation or "",
-		"shift": emp.default_shift or "",
+		"shift": _current_shift_map([emp.name], min(max(getdate(nowdate()), start), end)).get(emp.name)
+		or emp.default_shift
+		or "",
 		"start": str(start),
 		"end": str(end),
 		"days": [frappe.utils.formatdate(x, "d EEE") for x in days],

@@ -323,20 +323,22 @@ def build_shift_resolver(employees, filters):
 
 	The detailed view emits one row per distinct value this returns, so it
 	deliberately resolves to a *single* shift per employee for the whole report
-	period: the shift of their latest assignment inside it, so a shift changed
-	from the sheet shows on the row straight away. Anything else -- a mid-period
+	period: their current shift -- the assignment covering today, or the last
+	day of the period when that is already past. With nothing covering that day,
+	the latest assignment that has started wins, then any in the period, then
+	Employee.default_shift. Anything else -- a mid-period
 	shift change, a day the
 	assignments do not cover, or attendance stamped with a different shift by
 	its source (manual Mark Attendance, Attendance Request, auto-marked Weekly
 	Off, auto leave from Leave Application) -- would otherwise split the
 	employee across two rows.
 
-	Assignment `status` is deliberately NOT filtered on. HRMS' daily
-	`mark_expired_shift_assignments_as_inactive` job flips every assignment to
-	Inactive once its end_date has passed, so filtering on Active erased the
-	shift for every day before a re-assignment: those days fell through to
-	Employee.default_shift, which is unset for most staff, and the employee
-	gained a second row with a blank Shift cell.
+	Inactive assignments only count once their end_date has passed. HRMS'
+	daily `mark_expired_shift_assignments_as_inactive` job flips every
+	assignment to Inactive after it ends, so filtering on Active alone erased
+	the shift of a past month and left a blank Shift cell. An Inactive one that
+	is open-ended or still running was switched off by hand (or came over that
+	way in a data import); HRMS ignores it, and so does the sheet.
 	"""
 	employees = list(employees)
 	if not employees:
@@ -353,6 +355,7 @@ def build_shift_resolver(employees, filters):
 			ShiftAssignment.shift_type,
 			ShiftAssignment.start_date,
 			ShiftAssignment.end_date,
+			ShiftAssignment.status,
 			ShiftAssignment.creation,
 		)
 		.where(
@@ -364,13 +367,27 @@ def build_shift_resolver(employees, filters):
 		.orderby(ShiftAssignment.start_date)
 	).run(as_dict=1)
 
-	# employee -> (start date, creation, shift) of their latest assignment in the period
+	today = getdate()
+	ref_date = min(max(today, period_start), period_end)
+
+	# employee -> (rank, start date, creation, shift); rank 2 covers ref_date,
+	# 1 started by it, 0 only starts after it. Highest tuple wins.
 	latest = {}
 	for r in rows:
 		if not r.shift_type:
 			continue
-		key = (getdate(r.start_date) if r.start_date else period_start, r.creation, r.shift_type)
-		if r.employee not in latest or key[:2] > latest[r.employee][:2]:
+		end = getdate(r.end_date) if r.end_date else None
+		if r.status != "Active" and not (end and end < today):
+			continue
+		start = getdate(r.start_date) if r.start_date else period_start
+		if start <= ref_date and (end is None or end >= ref_date):
+			rank = 2
+		elif start <= ref_date:
+			rank = 1
+		else:
+			rank = 0
+		key = (rank, start, r.creation, r.shift_type)
+		if r.employee not in latest or key[:3] > latest[r.employee][:3]:
 			latest[r.employee] = key
 
 	default_shifts = dict(
@@ -385,7 +402,7 @@ def build_shift_resolver(employees, filters):
 	resolved = {}
 	for employee in employees:
 		if employee in latest:
-			resolved[employee] = latest[employee][2]
+			resolved[employee] = latest[employee][3]
 		else:
 			resolved[employee] = default_shifts.get(employee) or ""
 
@@ -415,6 +432,58 @@ def get_attendance_map(filters):
 			day_map[d.attendance_date] = d.status
 
 	return attendance_map
+
+
+def get_employees_without_attendance(employee_details, filters, attendance_map) -> list:
+	"""Of `employee_details`, the active employees with no attendance in the period.
+
+	HRMS' detailed view skips any employee missing from attendance_map, so a
+	site that has not marked attendance for someone yet -- no punches processed,
+	auto attendance off -- loses them from the sheet entirely. Only Active
+	employees who had joined by the end of the period come back: the employee
+	query has no status filter, and every leaver the site ever had would
+	otherwise fill the sheet with empty rows.
+	"""
+	missing = [name for name in employee_details if name not in attendance_map]
+	if not missing:
+		return []
+
+	period_start, period_end = _hrms.get_date_range_from_filters(filters)
+	period_start, period_end = getdate(period_start), getdate(period_end)
+
+	rows = frappe.get_all(
+		"Employee",
+		filters={"name": ("in", missing), "status": "Active"},
+		fields=["name", "date_of_joining", "relieving_date"],
+	)
+	return [
+		r.name
+		for r in rows
+		if not (r.date_of_joining and getdate(r.date_of_joining) > period_end)
+		and not (r.relieving_date and getdate(r.relieving_date) < period_start)
+	]
+
+
+def get_rows(employee_details, filters, employee_holiday_map, attendance_map):
+	"""HRMS' rows, plus a row for every active employee with no attendance yet.
+
+	Such an employee gets an empty day map under their resolved shift, so the
+	row still carries the weekly offs and holidays from their holiday list. A
+	copy of attendance_map is passed down: the chart is built from the original
+	afterwards and must not count them.
+	"""
+	if not filters.summarized_view:
+		missing = get_employees_without_attendance(employee_details, filters, attendance_map)
+		if missing:
+			resolve_shift = build_shift_resolver(missing, filters)
+			attendance_map = dict(attendance_map)
+			for name in missing:
+				attendance_map[name] = {resolve_shift(name): {}}
+
+	return _hrms_get_rows(employee_details, filters, employee_holiday_map, attendance_map)
+
+
+get_rows._upande_ta_patched = True
 
 
 def get_attendance_status_for_detailed_view(employee, filters, employee_attendance, holidays):
@@ -873,11 +942,12 @@ execute._upande_ta_patched = True
 _hrms = None
 _hrms_execute = None
 _hrms_get_employee_related_details = None
+_hrms_get_rows = None
 _patched = False
 
 
 def apply_patch(*args, **kwargs):
-	global _hrms, _hrms_execute, _hrms_get_employee_related_details, _patched
+	global _hrms, _hrms_execute, _hrms_get_employee_related_details, _hrms_get_rows, _patched
 
 	from hrms.hr.report.monthly_attendance_sheet import monthly_attendance_sheet as mod
 
@@ -893,11 +963,16 @@ def apply_patch(*args, **kwargs):
 		mod, "_upande_ta_original_get_employee_related_details", None
 	)
 
+	if not getattr(getattr(mod, "get_rows", None), "_upande_ta_patched", False):
+		mod._upande_ta_original_get_rows = mod.get_rows
+	_hrms_get_rows = getattr(mod, "_upande_ta_original_get_rows", None)
+
 	if _patched and getattr(mod.execute, "_upande_ta_patched", False):
 		return
 
 	mod.get_attendance_records = get_attendance_records
 	mod.get_employee_related_details = get_employee_related_details
+	mod.get_rows = get_rows
 	mod.get_attendance_map = get_attendance_map
 	mod.get_attendance_status_for_detailed_view = get_attendance_status_for_detailed_view
 	mod.get_chart_data = get_chart_data
