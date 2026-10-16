@@ -308,14 +308,15 @@ class IntegrationTestShiftChange(_TestCase):
 		self.assertEqual((str(night["start_date"]), str(night["end_date"])), ("2030-03-08", "2030-03-14"))
 		self.assertIsNone(schedule["ranges"][2]["end_date"], "the carry-over is open-ended like the original")
 
-	def test_the_sheet_row_shows_the_new_shift_straight_away(self):
-		"""A change late in the period covers fewer days than the old shift,
-		and the row still moves to it."""
+	def test_the_sheet_row_shows_the_current_shift(self):
+		"""The row shows the shift on the reference day (today, kept inside
+		the period, so the first day of a future one) even when it covers
+		fewer days of the period than the old shift."""
 		from upande_ta.upande_ta.overrides.monthly_attendance_sheet import apply_patch, build_shift_resolver
 
 		apply_patch()
 		filters = frappe._dict(filter_based_on="Date Range", start_date="2030-03-01", end_date="2030-03-31")
-		self._change("2030-03-25", "2030-04-30")
+		self._change("2030-03-01", "2030-03-05")
 
 		self.assertEqual(build_shift_resolver([self.employee], filters)(self.employee), NIGHT)
 
