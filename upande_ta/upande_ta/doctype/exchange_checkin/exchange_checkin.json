@@ -46,19 +46,22 @@
    "fieldtype": "Data",
    "label": "Employee Name",
    "read_only": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "fetch_from": "exchange_employee.full_name"
   },
   {
    "fieldname": "payroll_number",
    "fieldtype": "Data",
    "label": "Payroll Number",
-   "read_only": 1
+   "read_only": 1,
+   "fetch_from": "exchange_employee.payroll_number"
   },
   {
    "fieldname": "home_instance",
    "fieldtype": "Data",
    "label": "Home Instance",
-   "read_only": 1
+   "read_only": 1,
+   "fetch_from": "exchange_employee.home_instance"
   },
   {
    "fieldname": "column_break_main",
@@ -83,7 +86,9 @@
    "fieldtype": "Link",
    "label": "Company",
    "options": "Company",
-   "in_standard_filter": 1
+   "in_standard_filter": 1,
+   "fetch_from": "exchange_employee.host_company",
+   "fetch_if_empty": 1
   },
   {
    "fieldname": "device_section",
@@ -92,14 +97,15 @@
   },
   {
    "fieldname": "device_sn",
-   "fieldtype": "Data",
+   "fieldtype": "Select",
    "label": "Device"
   },
   {
    "fieldname": "device_location",
    "fieldtype": "Data",
    "label": "Device Location",
-   "in_list_view": 1
+   "in_list_view": 1,
+   "read_only": 1
   },
   {
    "fieldname": "column_break_device",
@@ -149,7 +155,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-15 12:00:00.000000",
+ "modified": "2026-10-18 23:30:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Exchange Checkin",

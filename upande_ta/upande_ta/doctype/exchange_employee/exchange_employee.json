@@ -71,7 +71,7 @@
   },
   {
    "fieldname": "home_instance",
-   "fieldtype": "Autocomplete",
+   "fieldtype": "Select",
    "label": "Home Instance",
    "reqd": 1,
    "in_standard_filter": 1
@@ -83,7 +83,7 @@
   {
    "fieldname": "payroll_number",
    "fieldtype": "Data",
-   "label": "Payroll Number at Home",
+   "label": "Payroll Number or Employee ID at Home",
    "reqd": 1,
    "in_standard_filter": 1
   },
@@ -312,7 +312,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-15 12:00:00.000000",
+ "modified": "2026-10-18 23:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Exchange Employee",

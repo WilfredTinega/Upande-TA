@@ -13,6 +13,20 @@ frappe.ui.form.on("Exchange Setting", {
 		frm.set_query("department", "company_map", (doc, cdt, cdn) => ({
 			filters: { company: locals[cdt][cdn].company },
 		}));
+		frm.set_query("farm", "company_map", (doc, cdt, cdn) =>
+			locals[cdt][cdn].company ? { filters: { company: locals[cdt][cdn].company } } : {},
+		);
+		// the Employee field that holds the payroll number other instances send
+		frappe.model.with_doctype("Employee", () => {
+			const fields = frappe.meta
+				.get_docfields("Employee")
+				.filter((df) => ["Data", "Int"].includes(df.fieldtype) && !df.hidden)
+				.map((df) => ({
+					value: df.fieldname,
+					label: `${__(df.label)} (${df.fieldname})`,
+				}));
+			frm.set_df_property("payroll_number_field", "options", fields);
+		});
 	},
 
 	refresh(frm) {
@@ -73,15 +87,62 @@ frappe.ui.form.on("Exchange Instance", {
 });
 
 frappe.ui.form.on("Exchange Company Map", {
-	/** Their company starts as the company chosen on that instance's row. */
+	/** Their company starts as the company chosen on that instance's row,
+	 * and lists the companies on that instance. */
 	instance(frm, cdt, cdn) {
 		const row = locals[cdt][cdn];
 		const inst = (frm.doc.instances || []).find((r) => r.instance_code === row.instance);
 		if (inst && inst.company && !row.home_company) {
 			frappe.model.set_value(cdt, cdn, "home_company", inst.company);
 		}
+		exs_map_companies(frm, cdt, cdn);
+	},
+	form_render(frm, cdt, cdn) {
+		exs_map_companies(frm, cdt, cdn);
+	},
+	home_company(frm, cdt, cdn) {
+		exs_map_companies(frm, cdt, cdn);
+	},
+	company(frm, cdt, cdn) {
+		frappe.model.set_value(cdt, cdn, "farm", "");
+		frappe.model.set_value(cdt, cdn, "department", "");
 	},
 });
+
+/** Their Company on a Company Map row: the companies on that instance. */
+function exs_map_companies(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	const inst = (frm.doc.instances || []).find((r) => r.instance_code === row.instance);
+	if (!inst || !inst.base_url || inst.__islocal) return;
+	const apply = (companies) => {
+		const grid_row = frm.fields_dict.company_map.grid.grid_rows_by_docname[cdn];
+		[
+			grid_row && grid_row.on_grid_fields_dict && grid_row.on_grid_fields_dict.home_company,
+			grid_row && grid_row.grid_form && grid_row.grid_form.fields_dict.home_company,
+		]
+			.filter(Boolean)
+			.forEach((field) => {
+				field.df.options = companies;
+				if (field.set_data) field.set_data(companies);
+			});
+	};
+	const key = "map|" + inst.name;
+	if (exs_company_cache[key]) {
+		apply(exs_company_cache[key]);
+		return;
+	}
+	frappe
+		.xcall(EXS + "remote_companies", {
+			base_url: inst.base_url,
+			row_name: inst.name,
+			instance_code: inst.instance_code,
+			quiet: 1,
+		})
+		.then((companies) => {
+			if ((companies || []).length) exs_company_cache[key] = companies;
+			apply(companies || []);
+		});
+}
 
 /** The Company field of an Instances row lists the companies on that
  * instance, read with the URL and token typed into the row. */
@@ -153,7 +214,11 @@ function exs_row_action(frm, cdt, cdn, method, describe) {
 
 function exs_instance_options(frm) {
 	const codes = (frm.doc.instances || []).map((r) => r.instance_code).filter(Boolean);
-	frm.fields_dict.company_map.grid.update_docfield_property("instance", "options", codes);
+	frm.fields_dict.company_map.grid.update_docfield_property(
+		"instance",
+		"options",
+		[""].concat(codes).join("\n"),
+	);
 }
 
 function exs_render_status(frm) {

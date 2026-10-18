@@ -31,6 +31,16 @@ def get_employee(payroll_number: str, company: str | None = None) -> dict | None
 
 
 @frappe.whitelist(methods=["GET"])
+def get_templates(payroll_number: str, company: str | None = None) -> list:
+	"""The biometric templates kept here for that employee, so the instance
+	hosting them can enroll them on its devices without a new capture."""
+	exchange.require_sync_caller()
+	if not frappe.utils.cint(exchange.settings().allow_employee_lookup):
+		frappe.throw(_("This instance does not share its employees."), frappe.PermissionError)
+	return exchange.templates_for_lookup(payroll_number, company)
+
+
+@frappe.whitelist(methods=["GET"])
 def get_companies() -> list:
 	exchange.require_sync_caller()
 	return frappe.get_all("Company", pluck="name", order_by="name asc")

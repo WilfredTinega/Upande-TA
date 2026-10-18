@@ -63,7 +63,6 @@ class IntegrationTestExchange(_TestCase):
 				"company": "Their Farm Ltd.",
 				"send_employees": 1,
 				"send_checkins": 1,
-				"checkins_as_employee_checkin": 1,
 			},
 		)
 		setting.set("company_map", [])
@@ -140,8 +139,150 @@ class IntegrationTestExchange(_TestCase):
 			(employee.name, "IN", "Device", self.company),
 		)
 		self.assertEqual(exchange.record_device_punch(employee.device_pin, when, log_type="IN"), name)
-		# their home is the other instance, so it also goes there as an Employee Checkin
-		self.assertEqual(sorted(self.logs(checkin)), ["Employee Checkin", "Exchange Checkin"])
+		# their home makes the Employee Checkin itself when the punch arrives
+		self.assertEqual(self.logs(checkin), ["Exchange Checkin"])
+
+	def punch_from_elsewhere(self, payroll, origin="EXC-0100"):
+		return exchange.receive(
+			"Exchange Checkin",
+			{
+				"origin_id": f"{OTHER}:{origin}",
+				"employee_origin_id": f"{ME}:EXE-0100",
+				"source_instance": OTHER,
+				"home_instance": ME,
+				"payroll_number": payroll,
+				"employee_name": "Our Own",
+				"time": "2026-10-15 07:12:00",
+				"log_type": "IN",
+				"device_sn": "DEV-THEIRS",
+			},
+		)
+
+	def test_our_employees_punch_elsewhere_becomes_their_employee_checkin(self):
+		employee = frappe.db.get_value(
+			"Employee",
+			{"status": "Active", "attendance_device_id": ["is", "set"]},
+			["name", "attendance_device_id"],
+			as_dict=True,
+		)
+		if not employee:
+			self.skipTest("no active Employee with a device id")
+		result = self.punch_from_elsewhere(employee.attendance_device_id)
+		self.assertTrue(frappe.db.exists("Exchange Checkin", result["name"]))
+		checkin = frappe.db.get_value(
+			"Employee Checkin", result["employee_checkin"], ["employee", "log_type"], as_dict=True
+		)
+		self.assertEqual((checkin.employee, checkin.log_type), (employee.name, "IN"))
+
+		again = self.punch_from_elsewhere(employee.attendance_device_id)
+		self.assertEqual(again["status"], "exists")
+
+		# sent again under another origin: same employee, time and log type
+		resent = self.punch_from_elsewhere(employee.attendance_device_id, origin="EXC-0200")
+		self.assertEqual(resent["employee_checkin"], result["employee_checkin"])
+		self.assertEqual(
+			frappe.db.count(
+				"Employee Checkin",
+				{"employee": employee.name, "time": "2026-10-15 07:12:00", "log_type": "IN"},
+			),
+			1,
+		)
+
+	def test_a_punch_queues_an_employee_never_sent_there_first(self):
+		employee = self.make_employee()
+		frappe.db.delete("Exchange Sync Log", {"reference_name": employee.name})
+		name = exchange.record_device_punch(employee.device_pin, now_datetime(), log_type="IN")
+		rows = frappe.get_all(
+			"Exchange Sync Log",
+			filters={"reference_name": ["in", [employee.name, name]]},
+			fields=["reference_doctype"],
+			order_by="creation asc",
+		)
+		self.assertEqual([r.reference_doctype for r in rows], ["Exchange Employee", "Exchange Checkin"])
+
+	def test_the_same_time_with_another_log_type_is_a_new_punch(self):
+		employee = self.make_employee()
+		when = now_datetime()
+		first = exchange.record_device_punch(employee.device_pin, when, log_type="IN")
+		self.assertEqual(exchange.record_device_punch(employee.device_pin, when, log_type="IN"), first)
+		other = exchange.record_device_punch(employee.device_pin, when, log_type="OUT")
+		self.assertNotEqual(other, first)
+
+	def test_home_finds_an_employee_by_payroll_number_or_employee_id(self):
+		employee = frappe.db.get_value(
+			"Employee",
+			{"status": "Active", "attendance_device_id": ["is", "set"]},
+			["name", "attendance_device_id", "company"],
+			as_dict=True,
+		)
+		if not employee:
+			self.skipTest("no active Employee with a device id")
+		by_payroll = exchange.employee_for_lookup(employee.attendance_device_id, employee.company)
+		by_id = exchange.employee_for_lookup(employee.name, employee.company)
+		self.assertEqual(by_payroll["home_employee_id"], employee.name)
+		self.assertEqual(by_id["home_employee_id"], employee.name)
+
+	def test_templates_come_from_home_one_row_per_home_device(self):
+		from unittest.mock import patch
+
+		home_rows = [
+			{"source_device_sn": "HOME-DEV-1", "fp_valid": 1, "fingerprint_template": "FP-1", "fp_bio_no": 0},
+			{"source_device_sn": "HOME-DEV-2", "face_valid": 1, "face_template": "FACE-1"},
+		]
+		employee = self.make_employee()
+		with patch.object(exchange, "call_instance", return_value=home_rows) as call:
+			self.assertEqual(exchange.fetch_home_templates(employee), 2)
+			self.assertEqual(call.call_args.args[1], "get_templates")
+			# fetched again unchanged: nothing to update
+			self.assertEqual(exchange.fetch_home_templates(employee), 0)
+		self.assertEqual(
+			sorted(
+				(r.source_device_sn, r.fingerprint_template or r.face_template) for r in employee.templates
+			),
+			[("HOME-DEV-1", "FP-1"), ("HOME-DEV-2", "FACE-1")],
+		)
+
+	def test_only_the_picked_home_devices_are_copied(self):
+		from unittest.mock import patch
+
+		home_rows = [
+			{"source_device_sn": "HOME-DEV-1", "fp_valid": 1, "fingerprint_template": "FP-1"},
+			{"source_device_sn": "HOME-DEV-2", "face_valid": 1, "face_template": "FACE-1"},
+		]
+		employee = self.make_employee()
+		with patch.object(exchange, "call_instance", return_value=home_rows):
+			self.assertEqual(exchange.fetch_home_templates(employee, ["HOME-DEV-2"]), 1)
+		self.assertEqual([r.source_device_sn for r in employee.templates], ["HOME-DEV-2"])
+
+	def test_a_home_without_the_template_endpoint_does_not_stop_a_fetch(self):
+		from unittest.mock import patch
+
+		employee = self.make_employee()
+		with patch.object(exchange, "call_instance", side_effect=exchange.RemoteError("old version")):
+			self.assertEqual(exchange.fetch_home_templates_quietly(employee), 0)
+
+	def test_home_sends_the_templates_it_keeps_for_that_employee(self):
+		row = frappe.db.sql(
+			"""SELECT bt.employee, e.attendance_device_id, e.company
+			FROM `tabBio Template` bt
+			JOIN `tabEmployee` e ON e.name = bt.employee
+			WHERE bt.parenttype = 'Biometric Template' AND bt.deleted = 0
+			  AND (bt.fp_valid = 1 OR bt.face_valid = 1 OR bt.palm_valid = 1)
+			  AND IFNULL(e.attendance_device_id, '') != ''
+			LIMIT 1""",
+			as_dict=True,
+		)
+		if not row:
+			self.skipTest("no Bio Template on this site")
+		rows = exchange.templates_for_lookup(row[0].attendance_device_id, row[0].company)
+		self.assertTrue(rows)
+		self.assertTrue(all(r["source_device_sn"] for r in rows))
+
+	def test_an_unknown_payroll_number_still_keeps_the_punch(self):
+		result = self.punch_from_elsewhere("NO-SUCH-PAYROLL", origin="EXC-0101")
+		self.assertEqual(result["status"], "created")
+		self.assertNotIn("employee_checkin", result)
+		self.assertTrue(result["employee_checkin_error"])
 
 	def test_a_pin_that_is_nobodys_exchange_pin_is_left_alone(self):
 		self.assertIsNone(exchange.record_device_punch("NO-SUCH-PIN", now_datetime()))

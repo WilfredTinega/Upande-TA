@@ -38,7 +38,11 @@ class ExchangeEmployee(Document):
 		self.validate_one_per_payroll_number()
 		if self.needs_fetch():
 			self.fetch_quietly()
-		if not self.device_pin and self.payroll_number:
+		elif self.is_new() and self.link_status == "Linked" and not self.templates:
+			# filled in on the form before saving: their templates come now
+			exchange.fetch_home_templates_quietly(self)
+		if not self.device_pin and self.payroll_number.isdigit():
+			# devices take numeric PINs: an Employee ID (HR-EMP-00003) is no PIN
 			self.device_pin = self.payroll_number
 		self.validate_device_pin()
 		self.validate_program_dates()
@@ -63,7 +67,7 @@ class ExchangeEmployee(Document):
 				_("{0} payroll number {1} is already {2}.").format(
 					self.home_instance,
 					frappe.bold(self.payroll_number),
-					frappe.get_desk_link("Exchange Employee", other),
+					frappe.utils.get_link_to_form("Exchange Employee", other),
 				)
 			)
 
@@ -84,9 +88,7 @@ class ExchangeEmployee(Document):
 		try:
 			if not exchange.fetch_home_record(self):
 				frappe.msgprint(
-					_("{0} has no employee with payroll number {1}.").format(
-						self.home_instance, frappe.bold(self.payroll_number)
-					),
+					exchange.not_found_message(self.home_instance, self.payroll_number),
 					indicator="orange",
 					title=_("Not Found"),
 				)
@@ -134,7 +136,11 @@ class ExchangeEmployee(Document):
 			exchange._throw_remote(e)
 		self.flags.from_refresh = True
 		self.save()
-		return {"found": found}
+		return {
+			"found": found,
+			"templates": self.flags.templates_fetched or 0,
+			"message": None if found else exchange.not_found_message(self.home_instance, self.payroll_number),
+		}
 
 	@frappe.whitelist()
 	def device_choices(self) -> list:
@@ -191,6 +197,69 @@ class ExchangeEmployee(Document):
 			self._mark_device(device_sn, _("Deleted"), on_device=0)
 		self.save()
 		return {"devices": len(devices)}
+
+	@frappe.whitelist()
+	def template_sources(self) -> dict:
+		"""Where this person's templates can come from: the devices at their
+		home instance holding them, and the devices here."""
+		self.check_permission("read")
+		out = {"home": [], "home_error": None, "local": self.device_choices()}
+		if self.home_instance and self.link_status == "Linked":
+			try:
+				rows = exchange.home_templates(self)
+			except exchange.RemoteError as e:
+				out["home_error"] = str(e)
+				rows = []
+			stored = {r.source_device_sn for r in self.templates}
+			out["home"] = [
+				{
+					"device_sn": r.get("source_device_sn"),
+					"device_location": r.get("device_location"),
+					"modalities": [
+						label
+						for prefix, label in (
+							("fp", _("Fingerprint")),
+							("face", _("Face")),
+							("palm", _("Palm")),
+						)
+						if cint(r.get(f"{prefix}_valid"))
+					],
+					"stored": r.get("source_device_sn") in stored,
+				}
+				for r in rows
+			]
+		return out
+
+	@frappe.whitelist()
+	def fetch_templates_from(self, home_devices=None, local_devices=None) -> dict:
+		"""Copy the templates of the picked home devices onto this record, and
+		ask the picked devices here for theirs (they arrive through
+		store_biotemplate)."""
+		self.check_permission("write")
+		home_devices = frappe.parse_json(home_devices) if isinstance(home_devices, str) else home_devices
+		local_devices = self._devices_arg(local_devices) if local_devices else []
+		if not home_devices and not local_devices:
+			frappe.throw(_("Pick at least one device."))
+		copied = 0
+		if home_devices:
+			try:
+				copied = exchange.fetch_home_templates(self, home_devices)
+			except exchange.RemoteError as e:
+				exchange._throw_remote(e)
+		if local_devices:
+			exchange._require_device_commands()
+			if not self.device_pin:
+				frappe.throw(_("Set a Device PIN first."))
+			from upande_ta.upande_ta.doctype.biometric_setting.biometric_setting import (
+				request_biodata_internal,
+			)
+
+			for device_sn in local_devices:
+				request_biodata_internal(device_sn, self.device_pin)
+				self._mark_device(device_sn, _("Templates requested"))
+		self.flags.from_refresh = True
+		self.save()
+		return {"copied": copied, "requested": len(local_devices)}
 
 	@frappe.whitelist()
 	def fetch_templates(self, device_sn: str) -> dict:

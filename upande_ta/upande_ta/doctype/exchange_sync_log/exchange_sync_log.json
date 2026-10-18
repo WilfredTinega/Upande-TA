@@ -42,9 +42,10 @@
   },
   {
    "fieldname": "remote_doctype",
-   "fieldtype": "Data",
+   "fieldtype": "Link",
    "label": "Remote DocType",
-   "read_only": 1
+   "read_only": 1,
+   "options": "DocType"
   },
   {
    "fieldname": "column_break_main",
@@ -88,7 +89,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-15 12:00:00.000000",
+ "modified": "2026-10-18 23:30:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Exchange Sync Log",

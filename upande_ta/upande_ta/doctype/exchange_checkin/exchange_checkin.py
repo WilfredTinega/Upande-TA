@@ -29,6 +29,8 @@ class ExchangeCheckin(Document):
 		self.home_instance = employee.home_instance
 		self.employee_origin_id = employee.origin_id
 		self.company = self.company or employee.host_company
+		if self.device_sn and not self.device_location:
+			self.device_location = exchange.device_location(self.device_sn)
 		if not self.source_instance:
 			self.source_instance = exchange.my_code() or None
 		if not self.origin_id and self.source_instance:
@@ -54,5 +56,9 @@ class ExchangeCheckin(Document):
 			)
 
 	def after_insert(self):
-		if not self.flags.from_sync:
-			exchange.queue_sync(self)
+		if self.flags.from_sync:
+			return
+		if self.home_instance and self.home_instance == exchange.my_code():
+			# one of our own employees: their attendance here counts it too
+			exchange.make_employee_checkin_quietly(self)
+		exchange.queue_sync(self)

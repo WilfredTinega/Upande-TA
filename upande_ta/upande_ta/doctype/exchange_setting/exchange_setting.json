@@ -59,7 +59,7 @@
   },
   {
    "fieldname": "payroll_number_field",
-   "fieldtype": "Data",
+   "fieldtype": "Select",
    "label": "Payroll Number Field on Employee",
    "default": "attendance_device_id"
   },
@@ -162,7 +162,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-15 12:00:00.000000",
+ "modified": "2026-10-18 23:30:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Exchange Setting",
