@@ -373,10 +373,12 @@ def employee_for_lookup(payroll_number: str, company: str | None = None) -> dict
 	]
 	if id_field:
 		fields.append(id_field)
-	filters = {field: str(payroll_number).strip()}
-	if company:
-		filters["company"] = company
-	rows = frappe.get_all("Employee", filters=filters, fields=fields, limit=2)
+	value = str(payroll_number).strip()
+	scope = {"company": company} if company else {}
+	rows = frappe.get_all("Employee", filters={field: value, **scope}, fields=fields, limit=2)
+	if not rows and field != "name":
+		# the Employee ID (HR-EMP-00003) works as well as the payroll number
+		rows = frappe.get_all("Employee", filters={"name": value, **scope}, fields=fields, limit=2)
 	if not rows:
 		return None
 	if len(rows) > 1:
@@ -401,6 +403,92 @@ def employee_for_lookup(payroll_number: str, company: str | None = None) -> dict
 	}
 
 
+def templates_for_lookup(payroll_number: str, company: str | None = None) -> list:
+	"""The home side of a template fetch: the biometric templates kept here
+	(Biometric Template, one per device) for the employee a lookup finds."""
+	found = employee_for_lookup(payroll_number, company)
+	if not found:
+		return []
+	BioTemplate = frappe.qb.DocType("Bio Template")
+	BiometricTemplate = frappe.qb.DocType("Biometric Template")
+	fields = [f for f in TEMPLATE_FIELDS if f not in ("source_device_sn", "received_on")]
+	rows = (
+		frappe.qb.from_(BioTemplate)
+		.join(BiometricTemplate)
+		.on(BioTemplate.parent == BiometricTemplate.name)
+		.select(
+			BiometricTemplate.device_sn,
+			BiometricTemplate.device_location,
+			BioTemplate.modified,
+			*[BioTemplate[f] for f in fields],
+		)
+		.where(BioTemplate.parenttype == "Biometric Template")
+		.where(BioTemplate.employee == found["home_employee_id"])
+		.where(BioTemplate.deleted == 0)
+		.orderby(BioTemplate.modified)
+	).run(as_dict=True)
+	out = []
+	for r in rows:
+		if not any(cint(r.get(f"{p}_valid")) for p in ("fp", "face", "palm")):
+			continue
+		row = {f: _plain(r.get(f)) for f in fields}
+		row["source_device_sn"] = r.device_sn
+		row["device_location"] = r.device_location
+		out.append(row)
+	return out
+
+
+def home_templates(doc) -> list:
+	"""The templates the employee's home instance keeps for them, one per
+	home device (with its location). Raises RemoteError."""
+	try:
+		rows = call_instance(
+			doc.home_instance,
+			"get_templates",
+			params=_lookup_params(doc.home_instance, doc.payroll_number),
+		)
+	except RemoteError as e:
+		if "does not have Employee Exchange" in str(e):
+			# it answers the lookup, so only the template part is missing
+			raise RemoteError(
+				_("{0} does not send templates yet. Update Upande T&A there.").format(doc.home_instance)
+			) from None
+		raise
+	return rows or []
+
+
+def fetch_home_templates(doc, devices: list | None = None) -> int:
+	"""Copy the employee's templates from their home instance onto ``doc``,
+	one row per home device, replacing that device's row; only the home
+	devices in ``devices`` when given. Returns how many rows changed.
+	Raises RemoteError."""
+	rows = home_templates(doc)
+	if devices is not None:
+		rows = [r for r in rows if r.get("source_device_sn") in set(devices)]
+	changed = 0
+	for data in rows:
+		row = next((r for r in doc.templates if r.source_device_sn == data.get("source_device_sn")), None)
+		if not row:
+			row = doc.append("templates", {"source_device_sn": data.get("source_device_sn")})
+		values = {f: data.get(f) for f in TEMPLATE_FIELDS if f not in ("source_device_sn", "received_on")}
+		if any(row.get(f) != v for f, v in values.items()):
+			row.update(values)
+			row.received_on = now_datetime()
+			changed += 1
+	return changed
+
+
+def fetch_home_templates_quietly(doc) -> int:
+	"""fetch_home_templates when the details are fetched: a home on an older
+	version (no template endpoint) or unreachable never stops the fetch."""
+	try:
+		doc.flags.templates_fetched = fetch_home_templates(doc)
+	except RemoteError:
+		# call_instance has put the detail in the Error Log
+		doc.flags.templates_fetched = 0
+	return doc.flags.templates_fetched
+
+
 def fetch_home_record(doc, reset_host: bool = False) -> bool:
 	"""Fill ``doc`` (an Exchange Employee) from its home instance. False when
 	home has nobody with that payroll number. Raises RemoteError."""
@@ -414,7 +502,17 @@ def fetch_home_record(doc, reset_host: bool = False) -> bool:
 	apply_home_record(doc, data)
 	if reset_host or not doc.host_company:
 		apply_company_map(doc, doc.home_instance, data.get("home_company"))
+	fetch_home_templates_quietly(doc)
 	return True
+
+
+def not_found_message(instance: str, payroll_number: str) -> str:
+	company = get_instance(instance).company
+	if company:
+		return _("{0} has no employee with payroll number or Employee ID {1} in {2}.").format(
+			instance, payroll_number, company
+		)
+	return _("{0} has no employee with payroll number or Employee ID {1}.").format(instance, payroll_number)
 
 
 def _lookup_params(instance: str, payroll_number: str) -> dict:
@@ -484,7 +582,7 @@ def lookup_home_employee(home_instance: str, payroll_number: str) -> dict:
 	except RemoteError as e:
 		_throw_remote(e)
 	if not data:
-		return {"found": False}
+		return {"found": False, "message": not_found_message(home_instance, payroll_number)}
 	host = company_here(home_instance, data.get("home_company"))
 	return {"found": True, "employee": data, "host": host}
 
@@ -519,39 +617,58 @@ def refresh_active_employees():
 
 def queue_sync(doc):
 	"""One Sync Log row per destination that takes ``doc``'s doctype. A
-	record already waiting for a destination is not queued twice."""
+	record already waiting for a destination is not queued twice. A punch
+	goes after its employee: one never sent to that instance (added to the
+	Instances tab later, say) is queued first, so the punch arrives linked."""
 	if not is_enabled() or not is_own(doc):
 		return
 	queued = []
 	for instance in instances(enabled_only=True):
 		for remote_doctype in targets(instance, doc):
-			waiting = frappe.db.exists(
-				"Exchange Sync Log",
-				{
-					"reference_doctype": doc.doctype,
-					"reference_name": doc.name,
-					"destination": instance.instance_code,
-					"remote_doctype": remote_doctype,
-					"status": "Queued",
-				},
-			)
-			if waiting:
-				continue
-			log = frappe.get_doc(
-				{
-					"doctype": "Exchange Sync Log",
-					"reference_doctype": doc.doctype,
-					"reference_name": doc.name,
-					"destination": instance.instance_code,
-					"remote_doctype": remote_doctype,
-					"status": "Queued",
-				}
-			).insert(ignore_permissions=True)
-			queued.append(log.name)
+			if doc.doctype == "Exchange Checkin" and doc.exchange_employee:
+				_queue_employee_first(doc.exchange_employee, instance, queued)
+			name = _queue(doc.doctype, doc.name, instance.instance_code, remote_doctype)
+			if name:
+				queued.append(name)
 	if queued and not frappe.flags.in_test:
 		# sent as soon as the save is committed; a failure is retried by
 		# scheduled_push
 		frappe.db.after_commit.add(lambda: _push_logs(queued))
+
+
+def _queue(reference_doctype, reference_name, destination, remote_doctype) -> str | None:
+	filters = {
+		"reference_doctype": reference_doctype,
+		"reference_name": reference_name,
+		"destination": destination,
+		"remote_doctype": remote_doctype,
+	}
+	if frappe.db.exists("Exchange Sync Log", {**filters, "status": "Queued"}):
+		return None
+	return (
+		frappe.get_doc({"doctype": "Exchange Sync Log", **filters, "status": "Queued"})
+		.insert(ignore_permissions=True)
+		.name
+	)
+
+
+def _queue_employee_first(employee, instance, queued):
+	if not cint(instance.send_employees):
+		return
+	sent = frappe.db.exists(
+		"Exchange Sync Log",
+		{
+			"reference_doctype": "Exchange Employee",
+			"reference_name": employee,
+			"destination": instance.instance_code,
+			"status": ["in", ["Sent", "Queued", "Sending"]],
+		},
+	)
+	if sent or not is_own(frappe.get_cached_doc("Exchange Employee", employee)):
+		return
+	name = _queue("Exchange Employee", employee, instance.instance_code, "Exchange Employee")
+	if name:
+		queued.append(name)
 
 
 def _push_logs(log_names: list):
@@ -570,11 +687,9 @@ def targets(instance, doc) -> list:
 		return ["Exchange Employee"] if cint(instance.send_employees) else []
 	if doc.doctype != "Exchange Checkin" or not cint(instance.send_checkins):
 		return []
-	out = ["Exchange Checkin"]
-	if cint(instance.checkins_as_employee_checkin) and doc.get("home_instance") == instance.instance_code:
-		# a real Employee Checkin can only be made where they are employed
-		out.append("Employee Checkin")
-	return out
+	# the employee's home instance makes their Employee Checkin itself when the
+	# punch arrives (receive_checkin)
+	return ["Exchange Checkin"]
 
 
 def push_queued(destination: str | None = None, include_failed: bool = False) -> dict:
@@ -750,6 +865,19 @@ def _free_pin(pin):
 	return pin
 
 
+def same_punch(doctype, employee_field, employee, time, log_type) -> str | None:
+	"""An existing punch of ``employee`` at exactly ``time`` with the same log
+	type (both blank counts as the same); the same punch is never kept twice."""
+	return frappe.db.get_value(
+		doctype,
+		{
+			employee_field: employee,
+			"time": get_datetime(time),
+			"log_type": log_type or ["in", ["", None]],
+		},
+	)
+
+
 def receive_checkin(data) -> dict:
 	existing = frappe.db.get_value("Exchange Checkin", {"origin_id": data.origin_id})
 	if existing:
@@ -760,29 +888,63 @@ def receive_checkin(data) -> dict:
 		["name", "host_company"],
 		as_dict=True,
 	)
-	doc = frappe.new_doc("Exchange Checkin")
-	for field in CHECKIN_FIELDS:
-		doc.set(field, data.get(field))
-	doc.arrived_via = "Sync"
-	if employee:
-		doc.exchange_employee = employee.name
-		doc.company = employee.host_company
-	doc.flags.from_sync = True
-	doc.flags.ignore_links = True
-	doc.insert(ignore_permissions=True)
-	return {"status": "created", "name": doc.name}
+	same = employee and same_punch(
+		"Exchange Checkin", "exchange_employee", employee.name, data.get("time"), data.get("log_type")
+	)
+	if same:
+		result = {"status": "exists", "name": same}
+	else:
+		doc = frappe.new_doc("Exchange Checkin")
+		for field in CHECKIN_FIELDS:
+			doc.set(field, data.get(field))
+		doc.arrived_via = "Sync"
+		if employee:
+			doc.exchange_employee = employee.name
+			doc.company = employee.host_company
+		doc.flags.from_sync = True
+		doc.flags.ignore_links = True
+		doc.insert(ignore_permissions=True)
+		result = {"status": "created", "name": doc.name}
+	if data.get("home_instance") == my_code():
+		# one of our own employees punching on another instance: their
+		# attendance here counts it as a real Employee Checkin
+		result.update(make_employee_checkin_quietly(data))
+	return result
+
+
+def make_employee_checkin_quietly(data) -> dict:
+	"""make_employee_checkin, where a failure (no Employee with that payroll
+	number, an inactive one) never loses the punch: it goes to the Error Log."""
+	try:
+		frappe.db.savepoint("exchange_employee_checkin")
+		return {"employee_checkin": make_employee_checkin(data)["name"]}
+	except Exception as e:
+		frappe.db.rollback(save_point="exchange_employee_checkin")
+		frappe.clear_last_message()
+		frappe.log_error(
+			title=f"Employee Exchange: Employee Checkin for {data.get('payroll_number')}",
+			message=frappe.get_traceback(),
+			defer_insert=True,
+		)
+		return {"employee_checkin_error": str(e)[:300]}
 
 
 def receive_as_employee_checkin(data) -> dict:
-	"""A punch made elsewhere by one of our own employees, kept as a real
-	Employee Checkin here because the mapping asked for that."""
+	"""Sent by instances on an older version, which posted the Employee
+	Checkin separately; it is made on arrival of the punch now."""
 	if data.get("home_instance") != my_code():
 		frappe.throw(_("Employee Checkin is only made on the employee's home instance."))
+	return make_employee_checkin(data)
+
+
+def make_employee_checkin(data) -> dict:
+	"""The Employee Checkin of an employee of this instance for a punch made
+	on another one, once per employee, time and log type."""
 	field = (settings().payroll_number_field or "attendance_device_id").strip()
 	employee = frappe.db.get_value("Employee", {field: data.get("payroll_number")})
 	if not employee:
 		frappe.throw(_("No employee here has payroll number {0}.").format(data.get("payroll_number")))
-	existing = frappe.db.get_value("Employee Checkin", {"employee": employee, "time": data.time})
+	existing = same_punch("Employee Checkin", "employee", employee, data.time, data.get("log_type"))
 	if existing:
 		return {"status": "exists", "name": existing}
 	doc = frappe.get_doc(
@@ -835,9 +997,7 @@ def record_device_punch(pin, time, device_sn=None, log_type=None) -> str | None:
 	log_type = (log_type or "").strip().upper() or None
 	if log_type not in (None, "IN", "OUT"):
 		log_type = None
-	existing = frappe.db.get_value(
-		"Exchange Checkin", {"exchange_employee": employee.name, "time": get_datetime(time)}
-	)
+	existing = same_punch("Exchange Checkin", "exchange_employee", employee.name, time, log_type)
 	if existing:
 		return existing
 	doc = frappe.get_doc(
@@ -877,6 +1037,17 @@ def registered_devices() -> list:
 		fields=["device_sn", "device_location", "status"],
 		order_by="idx asc",
 	)
+
+
+@frappe.whitelist()
+def device_options() -> list:
+	"""The devices on Biometric Setting, for picking one on a form."""
+	if not (
+		frappe.has_permission("Exchange Employee", "read")
+		or frappe.has_permission("Exchange Checkin", "read")
+	):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	return registered_devices()
 
 
 def _require_device_commands():

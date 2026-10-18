@@ -15,8 +15,6 @@
   "send_checkins",
   "token_section",
   "api_token",
-  "checkin_section",
-  "checkins_as_employee_checkin",
   "actions_section",
   "test_connection",
   "column_break_actions_1",
@@ -108,18 +106,6 @@
    "columns": 5
   },
   {
-   "fieldname": "checkin_section",
-   "fieldtype": "Section Break"
-  },
-  {
-   "fieldname": "checkins_as_employee_checkin",
-   "fieldtype": "Check",
-   "label": "Also as Employee Checkin for their own staff",
-   "default": "0",
-   "in_list_view": 1,
-   "columns": 8
-  },
-  {
    "fieldname": "actions_section",
    "fieldtype": "Section Break",
    "label": "Actions"
@@ -172,7 +158,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-15 12:00:00.000000",
+ "modified": "2026-10-18 15:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Exchange Instance",
