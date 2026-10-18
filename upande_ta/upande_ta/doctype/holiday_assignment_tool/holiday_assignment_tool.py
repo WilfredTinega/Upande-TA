@@ -497,6 +497,8 @@ def _cancel_assignments_in_window(employee, from_date, to_date) -> list:
 	for name in names:
 		assignment = frappe.get_doc("Holiday List Assignment", name)
 		assignment.flags.ignore_permissions = True
+		# a Bulk Week Off that made it still links to it; the newest entry wins
+		assignment.flags.ignore_links = True
 		assignment.cancel()
 	return names
 

@@ -117,12 +117,19 @@ doc_events = {
 	"Holiday List Assignment": {
 		"on_submit": "upande_ta.upande_ta.overrides.holiday_list_assignment.cancel_auto_absent_on_week_off",
 	},
+	# the employee list shows the shift they are on from the assignment's start date
+	"Shift Assignment": {
+		"on_submit": "upande_ta.upande_ta.overrides.shift_assignment.on_change",
+		"on_cancel": "upande_ta.upande_ta.overrides.shift_assignment.on_change",
+		"on_update_after_submit": "upande_ta.upande_ta.overrides.shift_assignment.on_change",
+	},
 }
 
 scheduler_events = {
 	"cron": {
 		"0 0 * * *": [
-			"upande_ta.upande_ta.doctype.bulk_week_off.bulk_week_off.submit_due_employee_transfers"
+			"upande_ta.upande_ta.doctype.bulk_week_off.bulk_week_off.submit_due_employee_transfers",
+			"upande_ta.upande_ta.overrides.shift_assignment.sync_default_shifts_daily",
 		],
 		"* * * * *": [
 			"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.mark_stale_devices_offline_scheduled"

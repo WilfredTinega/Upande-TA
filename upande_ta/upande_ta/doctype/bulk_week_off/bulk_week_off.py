@@ -65,6 +65,18 @@ def create_linked_holiday_list_assignment(
                 message=frappe.get_traceback(),
             )
 
+    # The newest entry wins: one already starting that day for this employee
+    # (an earlier Bulk Week Off, the sheet, the Holiday Assignment Tool) is
+    # cancelled so this one takes the day, unless it is already this list.
+    for same_day in frappe.get_all(
+        "Holiday List Assignment",
+        filters={"assigned_to": employee, "from_date": from_date, "docstatus": 1},
+        fields=["name", "holiday_list"],
+    ):
+        if same_day.holiday_list == new_holiday_list:
+            return same_day.name
+        cancel_holiday_list_assignment(same_day.name)
+
     try:
         hla = frappe.get_doc({
             "doctype": "Holiday List Assignment",
@@ -92,6 +104,16 @@ def create_linked_holiday_list_assignment(
             message=frappe.get_traceback(),
         )
         return None
+
+
+def cancel_holiday_list_assignment(name):
+    """Cancel a submitted Holiday List Assignment replaced by a newer entry.
+    The Bulk Week Off that made it still links to it, as the record of what
+    was there, so the link check is skipped."""
+    hla = frappe.get_doc("Holiday List Assignment", name)
+    hla.flags.ignore_links = True
+    hla.flags.ignore_permissions = True
+    hla.cancel()
 
 
 def cancel_absents_on_effective_offdays(employee, since=None):
@@ -247,6 +269,8 @@ class BulkWeekOff(Document):
         self.cancel_employee_transfers()
 
     def create_employee_transfers(self):
+        from upande_ta.upande_ta.holiday_list import get_assigned_holiday_list
+
         created = 0
         submitted = 0
         deferred = []
@@ -260,6 +284,18 @@ class BulkWeekOff(Document):
             current = frappe.db.get_value("Employee", row.employee, "holiday_list") or ""
 
             if row.assigned_off_day == current:
+                # Employee.holiday_list already says so, but an assignment made
+                # since (the sheet, another Bulk Week Off) may put them on
+                # another list from this date: the newest entry still wins.
+                in_force = get_assigned_holiday_list(row.employee, as_on=transfer_date)
+                if in_force and in_force != row.assigned_off_day:
+                    hla_name = create_linked_holiday_list_assignment(
+                        row.employee, in_force, row.assigned_off_day, self.from_date
+                    )
+                    if hla_name:
+                        row.db_set("holiday_list_assignment", hla_name, update_modified=False)
+                        absents_fixed += cancel_absents_on_effective_offdays(row.employee)
+                        continue
                 skipped.append(row.employee)
                 continue
             try:
@@ -370,7 +406,12 @@ class BulkWeekOff(Document):
                 try:
                     transfer = frappe.get_doc("Employee Transfer", name)
                     revert_to = self._transfer_prior_holiday_list(transfer)
+                    applied = self._transfer_new_holiday_list(transfer)
                     was_applied = transfer.docstatus == 1
+                    # read before the cancel: HRMS puts the field back to the
+                    # transfer's old value on cancel, even when a newer entry
+                    # has moved the employee on since
+                    now_on = frappe.db.get_value("Employee", row.employee, "holiday_list") or ""
 
                     if transfer.docstatus == 1:
                         transfer.flags.ignore_links = True
@@ -382,9 +423,12 @@ class BulkWeekOff(Document):
                     row.db_set("employee_transfer", None, update_modified=False)
 
                     if was_applied and revert_to is not None:
+                        # still on this transfer's list: back to the one before
+                        # it; moved on by a newer entry: theirs stays
                         frappe.db.set_value(
                             "Employee", row.employee, "holiday_list",
-                            revert_to or None, update_modified=False,
+                            (revert_to if now_on == applied else now_on) or None,
+                            update_modified=False,
                         )
                 except Exception:
                     skipped.append(name)
@@ -413,6 +457,12 @@ class BulkWeekOff(Document):
         for d in (transfer.transfer_details or []):
             if d.fieldname == "holiday_list":
                 return d.current or ""
+        return None
+
+    def _transfer_new_holiday_list(self, transfer):
+        for d in (transfer.transfer_details or []):
+            if d.fieldname == "holiday_list":
+                return d.new or ""
         return None
 
     def _revert_holiday_list_assignment(self, row, skipped):

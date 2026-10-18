@@ -140,10 +140,71 @@ def build_shift_resolver(employees, filters):
 	return resolve
 
 
+def current_shift_map(employees, filters) -> dict:
+	"""{employee: shift} the row is labelled with: the shift they are on now --
+	the assignment covering today, or the period's last day when that is
+	already past (its first day when the period is still ahead). With nothing
+	covering that day, the latest assignment that has started wins, then any in
+	the period. Employees with no assignment in the period are left out.
+
+	An Inactive assignment counts only once its end date has passed (HRMS'
+	expiry job); one switched off by hand while still running does not.
+	"""
+	employees = list(employees)
+	if not employees:
+		return {}
+	period_start, period_end = (getdate(d) for d in _hrms.get_date_range_from_filters(filters))
+	today = getdate()
+	ref_date = min(max(today, period_start), period_end)
+
+	ShiftAssignment = frappe.qb.DocType("Shift Assignment")
+	rows = (
+		frappe.qb.from_(ShiftAssignment)
+		.select(
+			ShiftAssignment.employee,
+			ShiftAssignment.shift_type,
+			ShiftAssignment.start_date,
+			ShiftAssignment.end_date,
+			ShiftAssignment.status,
+			ShiftAssignment.creation,
+		)
+		.where(
+			(ShiftAssignment.docstatus == 1)
+			& (ShiftAssignment.employee.isin(employees))
+			& (ShiftAssignment.start_date <= period_end)
+			& ((ShiftAssignment.end_date.isnull()) | (ShiftAssignment.end_date >= period_start))
+		)
+	).run(as_dict=True)
+
+	# employee -> (rank, start, creation, shift); rank 2 covers ref_date,
+	# 1 started by it, 0 only starts after it
+	best = {}
+	for r in rows:
+		if not r.shift_type:
+			continue
+		end = getdate(r.end_date) if r.end_date else None
+		if r.status != "Active" and not (end and end < today):
+			continue
+		start = getdate(r.start_date)
+		if start <= ref_date and (end is None or end >= ref_date):
+			rank = 2
+		elif start <= ref_date:
+			rank = 1
+		else:
+			rank = 0
+		key = (rank, start, r.creation, r.shift_type)
+		if r.employee not in best or key[:3] > best[r.employee][:3]:
+			best[r.employee] = key
+	return {employee: key[3] for employee, key in best.items()}
+
+
 def get_attendance_map(filters):
 	attendance_list = get_attendance_records(filters)
 
-	resolve_shift = build_shift_resolver({d.employee for d in attendance_list}, filters)
+	employees = {d.employee for d in attendance_list}
+	resolve_shift = build_shift_resolver(employees, filters)
+	# read by get_attendance_status_for_detailed_view, called per employee
+	frappe.local.upande_ta_current_shift = current_shift_map(employees, filters)
 
 	attendance_map = {}
 
@@ -168,8 +229,9 @@ def get_attendance_status_for_detailed_view(employee, filters, employee_attendan
 	The attendance map buckets an employee's days by resolved shift; here we collapse
 	those buckets into a single per-date status map (each date resolves to exactly one
 	shift, so the merge never collides) and render it as a SINGLE row. The Shift column
-	is labelled with the shift the employee worked the most days in over the period,
-	ties broken by shift name for determinism.
+	is labelled with the shift the employee is on now (current_shift_map), so a shift
+	changed from the sheet shows on the row straight away; without an assignment in
+	the period, the shift they worked the most days in, ties broken by shift name.
 	"""
 	total_days = _hrms.get_dates_in_period(filters)
 
@@ -179,7 +241,7 @@ def get_attendance_status_for_detailed_view(employee, filters, employee_attendan
 	for status_dict in shift_attendance.values():
 		merged.update(status_dict)
 
-	label_shift = max(
+	label_shift = (getattr(frappe.local, "upande_ta_current_shift", None) or {}).get(employee) or max(
 		shift_attendance.items(),
 		key=lambda item: (len(item[1]), item[0] or ""),
 	)[0]
@@ -269,9 +331,7 @@ def get_message():
 		message += chip(color, f"{label} - {abbr}")
 
 	leave_types = frappe.db.get_all("Leave Type", pluck="name")
-	leave_chips = sorted(
-		((get_leave_abbr(lt), lt) for lt in leave_types), key=lambda x: x[0]
-	)
+	leave_chips = sorted(((get_leave_abbr(lt), lt) for lt in leave_types), key=lambda x: x[0])
 	for abbr, label in leave_chips:
 		message += chip("#318AD8", f"{label} - {abbr}")
 
@@ -400,9 +460,7 @@ def execute(filters=None):
 				)
 			data = list(data) + build_summary_rows(data, columns)
 		except Exception:
-			frappe.log_error(
-				frappe.get_traceback(), "Monthly Attendance Sheet summary rows"
-			)
+			frappe.log_error(frappe.get_traceback(), "Monthly Attendance Sheet summary rows")
 
 	return columns, data, message, chart
 
@@ -485,18 +543,14 @@ def get_employee_holiday_map(employee_details, filters):
 	employees = list(employee_details.keys())
 	companies = list({d.company for d in employee_details.values() if d.get("company")})
 
-	assigned = get_assigned_holiday_lists_to_employee_and_company(
-		employees + companies, start_date, end_date
-	)
+	assigned = get_assigned_holiday_lists_to_employee_and_company(employees + companies, start_date, end_date)
 
 	company_default = {}
 
 	def default_for(company):
 		if company not in company_default:
 			company_default[company] = (
-				frappe.get_cached_value("Company", company, "default_holiday_list")
-				if company
-				else None
+				frappe.get_cached_value("Company", company, "default_holiday_list") if company else None
 			)
 		return company_default[company]
 
@@ -640,27 +694,33 @@ def apply_patch(*args, **kwargs):
 
 
 def disable_prepared_report():
-	"""Force ``prepared_report`` off on the Monthly Attendance Sheet.
+	"""Keep the Monthly Attendance Sheet running live, never as a Prepared Report.
 
-	Wired into ``after_migrate`` (which runs on every ``bench migrate`` — and so
-	on every Frappe Cloud deploy): HRMS syncs this Report from its JSON with
-	``prepared_report = 1`` on every migrate, which brings back the cached
-	"generated N minutes ago — click Rebuild" mode. We want the report to always
-	render live (our execute() override already does the per-date resolution), so
-	we clear the flag after the standard sync has run. This is the single, migrate/
-	deploy-time enforcement point — it is deliberately NOT wired into
-	before_request/before_job, so it never runs as a live per-request write.
+	Wired into ``after_migrate`` (every ``bench migrate``, so every Frappe Cloud
+	deploy): HRMS syncs this Report from its JSON with ``prepared_report = 1``,
+	and a Prepared Report serves a snapshot built by a background job -- the
+	grid shows attendance as it stood whenever that job last ran.
 
-	Uses a raw ``db.set_value`` (not ``doc.save``) so it bypasses the "Only
-	Administrator can save a standard report" guard, and clears the document cache
-	so the flag takes effect immediately for the next report load. Must never raise
-	— a failure here should not abort the migrate.
+	Frappe also turns it on by itself: ``Report.execute_script_report`` arms a
+	15-second timer and calls ``enable_prepared_report`` if a run outlasts it,
+	so one slow month latches the report into snapshot mode for everyone.
+	``disable_prepared_report_automation`` is the flag that stops that, so it is
+	set as well; clearing ``prepared_report`` alone only lasts until the next
+	slow run.
+
+	Written with ``db.set_value``: a doc.save() on a standard report is refused
+	outside developer mode. Must never raise -- a failure here should not abort
+	the migrate.
 	"""
 	try:
 		if not frappe.db.exists("Report", "Monthly Attendance Sheet"):
 			return
-		if frappe.db.get_value("Report", "Monthly Attendance Sheet", "prepared_report"):
-			frappe.db.set_value("Report", "Monthly Attendance Sheet", "prepared_report", 0)
+		values = {"prepared_report": 0}
+		if frappe.db.has_column("Report", "disable_prepared_report_automation"):
+			values["disable_prepared_report_automation"] = 1
+		current = frappe.db.get_value("Report", "Monthly Attendance Sheet", list(values), as_dict=True)
+		if current and any(cint(current.get(field)) != value for field, value in values.items()):
+			frappe.db.set_value("Report", "Monthly Attendance Sheet", values)
 			frappe.clear_document_cache("Report", "Monthly Attendance Sheet")
 	except Exception:
 		frappe.log_error(
@@ -700,10 +760,17 @@ def week_off_change_disabled() -> bool:
 	return _setting_enabled("disable_week_off_change", False)
 
 
+def shift_change_disabled() -> bool:
+	"""Whether changing a shift from the Shift column is switched off. Off by
+	default, i.e. the change is available."""
+	return _setting_enabled("disable_shift_change", False)
+
+
 def extend_bootinfo(bootinfo=None):
-	"""Tell the desk whether the week-off change is available, so the sheet
-	knows without a round trip when a day cell is clicked."""
+	"""Tell the desk whether the week-off and shift changes are available, so
+	the sheet knows without a round trip when a cell is clicked."""
 	try:
 		bootinfo.upande_ta_week_off_change_disabled = week_off_change_disabled()
+		bootinfo.upande_ta_shift_change_disabled = shift_change_disabled()
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Monthly Attendance Sheet bootinfo")
