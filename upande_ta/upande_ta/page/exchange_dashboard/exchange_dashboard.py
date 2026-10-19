@@ -41,6 +41,9 @@ def get_data(
 	hq = _hq_section(dict(filters), status, from_date, to_date, now)
 	if status:
 		filters["status"] = status
+	if not frappe.has_permission("Exchange Employee", "read"):
+		# only HQ Employees may be read: nothing of the exchange program shows
+		filters["name"] = ["in", []]
 	employees = frappe.get_all(
 		"Exchange Employee",
 		filters=filters,
@@ -60,13 +63,7 @@ def get_data(
 	)
 
 	days = _worked_days([e.name for e in employees], from_date, to_date)
-	per_employee = defaultdict(lambda: {"days": 0, "hours": 0.0, "last": None})
-	for d in days:
-		agg = per_employee[d["employee"]]
-		agg["days"] += 1
-		agg["hours"] += d["hours"]
-		last = get_datetime(d["last_out"] or d["first_in"])
-		agg["last"] = max(agg["last"], last) if agg["last"] else last
+	per_employee = _per_person(days)
 
 	rows = []
 	for e in employees:
@@ -88,10 +85,7 @@ def get_data(
 				"remaining": remaining,
 				"progress": progress,
 				"flag": _flag(e.status, start, end, now),
-				"days_worked": agg["days"],
-				"hours": round(agg["hours"], 2),
-				"avg_hours": round(agg["hours"] / agg["days"], 2) if agg["days"] else 0,
-				"last_punch": agg["last"],
+				**_worked(agg),
 			}
 		)
 
@@ -157,23 +151,8 @@ def _hq_section(filters, status, from_date, to_date, now) -> dict:
 		order_by="full_name asc",
 	)
 	days = _worked_days([p.name for p in people], from_date, to_date)
-	agg = defaultdict(lambda: {"days": 0, "hours": 0.0, "last": None})
-	for d in days:
-		a = agg[d["employee"]]
-		a["days"] += 1
-		a["hours"] += d["hours"]
-		last = get_datetime(d["last_out"] or d["first_in"])
-		a["last"] = max(a["last"], last) if a["last"] else last
-	rows = [
-		{
-			**p,
-			"days_worked": agg[p.name]["days"],
-			"hours": round(agg[p.name]["hours"], 2),
-			"avg_hours": round(agg[p.name]["hours"] / agg[p.name]["days"], 2) if agg[p.name]["days"] else 0,
-			"last_punch": agg[p.name]["last"],
-		}
-		for p in people
-	]
+	agg = _per_person(days)
+	rows = [{**p, **_worked(agg[p.name])} for p in people]
 	companies = defaultdict(lambda: {"employees": 0, "active": 0, "hours": 0.0, "days": 0})
 	for r in rows:
 		c = companies[r["host_company"] or _("Not Set")]
@@ -200,6 +179,27 @@ def _hq_section(filters, status, from_date, to_date, now) -> dict:
 		],
 		"employees": rows,
 		"daily": sorted(days, key=lambda d: (d["date"], d["full_name"] or ""), reverse=True)[:1000],
+	}
+
+
+def _per_person(days) -> dict:
+	"""{employee: {days, hours, last}} from _worked_days rows."""
+	agg = defaultdict(lambda: {"days": 0, "hours": 0.0, "last": None})
+	for d in days:
+		a = agg[d["employee"]]
+		a["days"] += 1
+		a["hours"] += d["hours"]
+		last = get_datetime(d["last_out"] or d["first_in"])
+		a["last"] = max(a["last"], last) if a["last"] else last
+	return agg
+
+
+def _worked(a) -> dict:
+	return {
+		"days_worked": a["days"],
+		"hours": round(a["hours"], 2),
+		"avg_hours": round(a["hours"] / a["days"], 2) if a["days"] else 0,
+		"last_punch": a["last"],
 	}
 
 

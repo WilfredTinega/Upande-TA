@@ -392,6 +392,42 @@ class IntegrationTestExchange(_TestCase):
 		self.assertEqual(result["from_home"], 1)
 		self.assertEqual(sent, [("HQ-DEV", "FP-1")])
 
+	def test_a_send_switched_off_for_now_keeps_the_punch_waiting(self):
+		employee = self.make_employee()
+		name = exchange.record_device_punch(employee.device_pin, now_datetime(), log_type="IN")
+		log = frappe.get_all(
+			"Exchange Sync Log",
+			filters={"reference_name": name},
+			pluck="name",
+		)[0]
+		setting = frappe.get_single("Exchange Setting")
+		setting.instances[0].send_checkins = 0
+		setting.save(ignore_permissions=True)
+		frappe.clear_document_cache("Exchange Setting", "Exchange Setting")
+		from unittest.mock import patch
+
+		with patch.object(exchange, "_claim", return_value=True):
+			self.assertIsNone(exchange.push_one(log))
+		self.assertEqual(frappe.db.get_value("Exchange Sync Log", log, "status"), "Queued")
+
+	def test_a_checkin_for_the_wrong_type_is_a_clear_error(self):
+		hq = self.make_hq_employee()
+		# Employee Type left at Exchange Employee for an HQ Employee
+		with self.assertRaises(frappe.ValidationError):
+			frappe.get_doc(
+				{"doctype": "Exchange Checkin", "exchange_employee": hq.name, "time": now_datetime()}
+			).insert(ignore_permissions=True)
+		checkin = frappe.get_doc(
+			{
+				"doctype": "Exchange Checkin",
+				"person_doctype": "HQ Employee",
+				"exchange_employee": hq.name,
+				"time": now_datetime(),
+				"log_type": "IN",
+			}
+		).insert(ignore_permissions=True)
+		self.assertEqual(checkin.employee_name, "Test HQ Staff")
+
 	def test_a_home_without_the_template_endpoint_does_not_stop_a_fetch(self):
 		from unittest.mock import patch
 
@@ -413,7 +449,13 @@ class IntegrationTestExchange(_TestCase):
 		)
 		parent.append(
 			"bio_templates",
-			{"user_id": employee.attendance_device_id, "face_template": "FACE-X", "face_valid": 0},
+			{
+				"user_id": employee.attendance_device_id,
+				"face_template": "FACE-X",
+				"face_valid": 1,
+				"fingerprint_template": "FP-BAD",
+				"fp_valid": 0,
+			},
 		)
 		parent.flags.ignore_mandatory = True
 		frappe.flags.allow_biometric_parent_insert = True
@@ -427,6 +469,8 @@ class IntegrationTestExchange(_TestCase):
 			if r["source_device_sn"] == "TEST-HOME-DEV"
 		]
 		self.assertEqual([(r["face_template"], r["face_valid"]) for r in rows], [("FACE-X", 1)])
+		# the fingerprint the device marked invalid is not sent
+		self.assertEqual([(r["fingerprint_template"], r["fp_valid"]) for r in rows], [(None, 0)])
 
 	def test_home_sends_the_templates_it_keeps_for_that_employee(self):
 		row = frappe.db.sql(
