@@ -53,6 +53,8 @@ before_job = [
 # the client patch can render them without an extra round trip.
 extend_bootinfo = [
 	"upande_ta.upande_ta.overrides.monthly_attendance_sheet.extend_bootinfo",
+	# HRMS is "HR" on the Apps screen as well (see overrides/apps_screen.py)
+	"upande_ta.upande_ta.overrides.apps_screen.extend_bootinfo",
 ]
 
 
@@ -99,6 +101,7 @@ before_uninstall = [
 # the form submits it directly.
 override_whitelisted_methods = {
 	"frappe.model.workflow.get_transitions": "upande_ta.upande_ta.overrides.workflow.get_transitions",
+	"frappe.apps.get_apps": "upande_ta.upande_ta.overrides.apps_screen.get_apps",
 }
 
 override_doctype_class = {
@@ -110,6 +113,10 @@ override_doctype_class = {
 }
 
 doc_events = {
+	# HRMS' "Frappe HR" icon imported between migrates is renamed "HR"
+	"Desktop Icon": {
+		"after_insert": "upande_ta.upande_ta.overrides.apps_screen.on_desktop_icon_insert",
+	},
 	"Employee Checkin": {"validate": "upande_ta.upande_ta.overrides.employee_checkin.prevent_duplicate"},
 	"Employee": {
 		"before_save": "upande_ta.upande_ta.overrides.employee.set_attendance_device_id",

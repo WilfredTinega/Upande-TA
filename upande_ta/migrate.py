@@ -418,6 +418,7 @@ _SIDEBAR_LAYOUT = (
 	# Employee and Employee Checkin, so they sit together after the biometrics.
 	{"type": "Link", "link_type": "Page", "link_to": "exchange-dashboard", "label": "Exchange Dashboard", "icon": "chart-column"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Exchange Employee", "label": "Exchange Employee", "icon": "users"},
+	{"type": "Link", "link_type": "DocType", "link_to": "HQ Employee", "label": "HQ Employee", "icon": "building"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Exchange Checkin", "label": "Exchange Checkin", "icon": "pointer"},
 
 	{"type": "Link", "link_type": "DocType", "link_to": "Shift Type", "label": "Shift Type", "icon": "clock"},
@@ -616,6 +617,7 @@ _WORKSPACE_CARD_LINKS = (
 		(
 			("Page", "exchange-dashboard", "Exchange Dashboard"),
 			("DocType", "Exchange Employee"),
+			("DocType", "HQ Employee"),
 			("DocType", "Exchange Checkin"),
 			("DocType", "Exchange Sync Log"),
 			("DocType", "Exchange Setting"),

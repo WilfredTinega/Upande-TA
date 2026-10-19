@@ -31,6 +31,9 @@ class ExchangeDashboard {
 		this.page.add_inner_button(__("Exchange Employees"), () =>
 			frappe.set_route("List", "Exchange Employee"),
 		);
+		this.page.add_inner_button(__("HQ Employees"), () =>
+			frappe.set_route("List", "HQ Employee"),
+		);
 		this.page.add_inner_button(__("Exchange Checkins"), () =>
 			frappe.set_route("List", "Exchange Checkin"),
 		);
@@ -133,6 +136,7 @@ class ExchangeDashboard {
 				<div class="exd-title">${__("Check-in and Check-out")}</div>
 				${this.daily_table(d.daily)}
 			</div>
+			${this.hq_section(d.hq || {}, range)}
 		`);
 		this.charts(d);
 		this.$body.find("[data-company]").on("click", (e) => {
@@ -140,12 +144,81 @@ class ExchangeDashboard {
 			this.filters.company.set_value(c === __("Not Set") ? "" : c);
 		});
 		this.$body.find("[data-employee]").on("click", (e) => {
+			const $row = $(e.currentTarget);
 			frappe.set_route(
 				"Form",
-				"Exchange Employee",
-				$(e.currentTarget).attr("data-employee"),
+				$row.attr("data-doctype") || "Exchange Employee",
+				$row.attr("data-employee"),
 			);
 		});
+	}
+
+	hq_section(hq, range) {
+		const s = hq.summary || {};
+		if (!s.total) return "";
+		const e = frappe.utils.escape_html;
+		const people = this.table(
+			[
+				[__("Employee")],
+				[__("Payroll No.")],
+				[__("Home")],
+				[__("Host Company")],
+				[__("Status")],
+				[__("Days Worked"), "text-right"],
+				[__("Hours Worked"), "text-right"],
+				[__("Avg Hours / Day"), "text-right"],
+				[__("Last Punch")],
+			],
+			(hq.employees || []).map(
+				(
+					r,
+				) => `<tr class="exd-click" data-doctype="HQ Employee" data-employee="${e(r.name)}">
+				<td><b>${e(r.full_name || r.name)}</b></td>
+				<td>${e(r.payroll_number || "")}</td>
+				<td>${e(r.home_instance || "")}</td>
+				<td>${e(r.host_company || "")}</td>
+				<td><span class="indicator-pill ${r.status === "Active" ? "green" : "gray"}">${__(r.status)}</span></td>
+				<td class="text-right">${r.days_worked}</td>
+				<td class="text-right">${format_number(r.hours, null, 2)}</td>
+				<td class="text-right">${format_number(r.avg_hours, null, 2)}</td>
+				<td>${r.last_punch ? frappe.datetime.str_to_user(r.last_punch) : ""}</td>
+			</tr>`,
+			),
+		);
+		const companies = this.table(
+			[
+				[__("Host Company")],
+				[__("Employees"), "text-right"],
+				[__("Active"), "text-right"],
+				[__("Days Worked"), "text-right"],
+				[__("Hours Worked"), "text-right"],
+				[__("Avg Hours / Day"), "text-right"],
+			],
+			(hq.companies || []).map(
+				(c) => `<tr><td><b>${e(c.company)}</b></td>
+				<td class="text-right">${c.employees}</td>
+				<td class="text-right">${c.active}</td>
+				<td class="text-right">${c.days}</td>
+				<td class="text-right">${format_number(c.hours, null, 2)}</td>
+				<td class="text-right">${format_number(c.avg_hours, null, 2)}</td></tr>`,
+			),
+		);
+		const daily = this.daily_table(hq.daily || []).replace(
+			/data-employee=/g,
+			'data-doctype="HQ Employee" data-employee=',
+		);
+		return `
+			<div class="exd-section-title">${__("HQ Employees")}</div>
+			<div class="exd-cards">
+				${this.card(__("HQ Employees"), s.total)}
+				${this.card(__("Active"), s.active, "green")}
+				${this.card(__("Present Today"), s.present_today, "green")}
+				${this.card(__("Hours Worked"), format_number(s.hours, null, 1), "blue", range)}
+				${this.card(__("Days Worked"), s.days_worked, "blue", range)}
+			</div>
+			<div class="exd-panel"><div class="exd-title">${__("Per Company")}</div>${companies}</div>
+			<div class="exd-panel"><div class="exd-title">${__("HQ Employees")}</div>${people}</div>
+			<div class="exd-panel"><div class="exd-title">${__("Check-in and Check-out")}</div>${daily}</div>`;
 	}
 
 	card(label, value, color, sub) {
@@ -348,6 +421,7 @@ class ExchangeDashboard {
 			.exd-card-sub { color: var(--text-muted); font-size: var(--text-xs); }
 			.exd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
 			.exd-panel { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--border-radius-md); padding: 14px 16px; margin-bottom: 12px; min-width: 0; }
+			.exd-section-title { font-size: 1.1rem; font-weight: 600; margin: 24px 0 12px; color: var(--text-color); }
 			.exd-title { font-weight: 600; margin-bottom: 8px; color: var(--text-color); }
 			.exd-empty { color: var(--text-muted); padding: 32px 0; text-align: center; }
 			.exd-table-wrap { overflow-x: auto; max-height: 520px; overflow-y: auto; }
