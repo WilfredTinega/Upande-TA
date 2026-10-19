@@ -22,7 +22,9 @@ def get_data(
 	home_instance: str | None = None,
 	status: str | None = None,
 ) -> dict:
-	if not frappe.has_permission("Exchange Employee", "read"):
+	if not (
+		frappe.has_permission("Exchange Employee", "read") or frappe.has_permission("HQ Employee", "read")
+	):
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
 	to_date = getdate(to_date or today())
@@ -36,6 +38,7 @@ def get_data(
 		filters["host_company"] = company
 	if home_instance:
 		filters["home_instance"] = home_instance
+	hq = _hq_section(dict(filters), status, from_date, to_date, now)
 	if status:
 		filters["status"] = status
 	employees = frappe.get_all(
@@ -135,6 +138,68 @@ def get_data(
 		"employees": rows,
 		"daily": sorted(days, key=lambda d: (d["date"], d["full_name"] or ""), reverse=True)[:1000],
 		"ending": _ending_by_month(active),
+		"hq": hq,
+	}
+
+
+def _hq_section(filters, status, from_date, to_date, now) -> dict:
+	"""HQ Employees: people from another instance working from here, with no
+	program dates. Counts, per company and per person, from their punches."""
+	if not frappe.has_permission("HQ Employee", "read"):
+		return {"summary": {}, "companies": [], "employees": []}
+	if status:
+		# the dashboard filter says Ended; an HQ Employee is Inactive
+		filters["status"] = "Active" if status == "Active" else "Inactive"
+	people = frappe.get_all(
+		"HQ Employee",
+		filters=filters,
+		fields=["name", "full_name", "payroll_number", "home_instance", "host_company", "status"],
+		order_by="full_name asc",
+	)
+	days = _worked_days([p.name for p in people], from_date, to_date)
+	agg = defaultdict(lambda: {"days": 0, "hours": 0.0, "last": None})
+	for d in days:
+		a = agg[d["employee"]]
+		a["days"] += 1
+		a["hours"] += d["hours"]
+		last = get_datetime(d["last_out"] or d["first_in"])
+		a["last"] = max(a["last"], last) if a["last"] else last
+	rows = [
+		{
+			**p,
+			"days_worked": agg[p.name]["days"],
+			"hours": round(agg[p.name]["hours"], 2),
+			"avg_hours": round(agg[p.name]["hours"] / agg[p.name]["days"], 2) if agg[p.name]["days"] else 0,
+			"last_punch": agg[p.name]["last"],
+		}
+		for p in people
+	]
+	companies = defaultdict(lambda: {"employees": 0, "active": 0, "hours": 0.0, "days": 0})
+	for r in rows:
+		c = companies[r["host_company"] or _("Not Set")]
+		c["employees"] += 1
+		c["active"] += 1 if r["status"] == "Active" else 0
+		c["hours"] += r["hours"]
+		c["days"] += r["days_worked"]
+	return {
+		"summary": {
+			"total": len(rows),
+			"active": sum(1 for r in rows if r["status"] == "Active"),
+			"present_today": len({d["employee"] for d in days if d["date"] == now}),
+			"hours": round(sum(r["hours"] for r in rows), 2),
+			"days_worked": len(days),
+		},
+		"companies": [
+			{
+				"company": k,
+				**v,
+				"hours": round(v["hours"], 2),
+				"avg_hours": round(v["hours"] / v["days"], 2) if v["days"] else 0,
+			}
+			for k, v in sorted(companies.items(), key=lambda kv: -kv[1]["employees"])
+		],
+		"employees": rows,
+		"daily": sorted(days, key=lambda d: (d["date"], d["full_name"] or ""), reverse=True)[:1000],
 	}
 
 

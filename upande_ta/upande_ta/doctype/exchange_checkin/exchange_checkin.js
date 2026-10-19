@@ -14,6 +14,28 @@ frappe.ui.form.on("Exchange Checkin", {
 		exc_device_options(frm);
 	},
 
+	person_doctype(frm) {
+		frm.set_value("exchange_employee", "");
+	},
+
+	exchange_employee(frm) {
+		if (!frm.doc.exchange_employee || !frm.doc.person_doctype) return;
+		frappe.db
+			.get_value(frm.doc.person_doctype, frm.doc.exchange_employee, [
+				"full_name",
+				"payroll_number",
+				"home_instance",
+				"host_company",
+			])
+			.then(({ message: e }) => {
+				if (!e) return;
+				frm.set_value("employee_name", e.full_name);
+				frm.set_value("payroll_number", e.payroll_number);
+				frm.set_value("home_instance", e.home_instance);
+				if (!frm.doc.company) frm.set_value("company", e.host_company);
+			});
+	},
+
 	device_sn(frm) {
 		const device = (frm.exc_devices || []).find((d) => d.device_sn === frm.doc.device_sn);
 		frm.set_value("device_location", (device && device.device_location) || "");

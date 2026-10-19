@@ -1,0 +1,356 @@
+{
+ "actions": [],
+ "creation": "2026-10-19 11:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "details_tab",
+  "link_section",
+  "naming_series",
+  "home_instance",
+  "column_break_link_1",
+  "payroll_number",
+  "column_break_link_2",
+  "fetch_from_home",
+  "get_home_templates",
+  "host_section",
+  "host_company",
+  "custom_farm",
+  "column_break_host_1",
+  "department",
+  "designation",
+  "local_section",
+  "device_pin",
+  "column_break_local",
+  "status",
+  "home_section",
+  "full_name",
+  "home_employee_id",
+  "id_number",
+  "column_break_home_1",
+  "phone",
+  "gender",
+  "date_of_joining",
+  "column_break_home_2",
+  "home_company",
+  "home_department",
+  "home_designation",
+  "image",
+  "biometric_tab",
+  "devices_section",
+  "devices",
+  "templates_section",
+  "templates",
+  "sync_tab",
+  "link_status",
+  "last_fetched_on",
+  "source_instance",
+  "column_break_sync",
+  "origin_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "details_tab",
+   "fieldtype": "Tab Break",
+   "label": "Details"
+  },
+  {
+   "fieldname": "link_section",
+   "fieldtype": "Section Break",
+   "label": "Employee"
+  },
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "HQE-.####",
+   "default": "HQE-.####",
+   "hidden": 1
+  },
+  {
+   "fieldname": "home_instance",
+   "fieldtype": "Select",
+   "label": "Home Instance",
+   "reqd": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "column_break_link_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "payroll_number",
+   "fieldtype": "Data",
+   "label": "Payroll No. or Employee ID",
+   "reqd": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "column_break_link_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "fetch_from_home",
+   "fieldtype": "Button",
+   "label": "Fetch from Home"
+  },
+  {
+   "fieldname": "get_home_templates",
+   "fieldtype": "Button",
+   "label": "Fetch Templates",
+   "depends_on": "eval:doc.home_instance && doc.payroll_number"
+  },
+  {
+   "fieldname": "host_section",
+   "fieldtype": "Section Break",
+   "label": "Working From"
+  },
+  {
+   "fieldname": "host_company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "custom_farm",
+   "fieldtype": "Link",
+   "label": "Unit/Division",
+   "options": "Farm"
+  },
+  {
+   "fieldname": "column_break_host_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Link",
+   "label": "Department",
+   "options": "Department"
+  },
+  {
+   "fieldname": "designation",
+   "fieldtype": "Link",
+   "label": "Designation",
+   "options": "Designation"
+  },
+  {
+   "fieldname": "local_section",
+   "fieldtype": "Section Break",
+   "label": "Device"
+  },
+  {
+   "fieldname": "device_pin",
+   "fieldtype": "Data",
+   "label": "Device PIN",
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_local",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Active\nInactive",
+   "default": "Active",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "home_section",
+   "fieldtype": "Section Break",
+   "label": "Details from Home",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "full_name",
+   "fieldtype": "Data",
+   "label": "Full Name",
+   "read_only": 1,
+   "in_list_view": 1,
+   "bold": 1
+  },
+  {
+   "fieldname": "home_employee_id",
+   "fieldtype": "Data",
+   "label": "Home Employee ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "id_number",
+   "fieldtype": "Data",
+   "label": "ID / Passport No.",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_home_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "phone",
+   "fieldtype": "Data",
+   "label": "Phone",
+   "read_only": 1
+  },
+  {
+   "fieldname": "gender",
+   "fieldtype": "Data",
+   "label": "Gender",
+   "read_only": 1
+  },
+  {
+   "fieldname": "date_of_joining",
+   "fieldtype": "Date",
+   "label": "Date of Joining",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_home_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "home_company",
+   "fieldtype": "Data",
+   "label": "Home Company",
+   "read_only": 1
+  },
+  {
+   "fieldname": "home_department",
+   "fieldtype": "Data",
+   "label": "Home Department",
+   "read_only": 1
+  },
+  {
+   "fieldname": "home_designation",
+   "fieldtype": "Data",
+   "label": "Home Designation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "image",
+   "fieldtype": "Attach Image",
+   "label": "Photo",
+   "hidden": 1
+  },
+  {
+   "fieldname": "biometric_tab",
+   "fieldtype": "Tab Break",
+   "label": "Biometric"
+  },
+  {
+   "fieldname": "devices_section",
+   "fieldtype": "Section Break",
+   "label": "Devices"
+  },
+  {
+   "fieldname": "devices",
+   "fieldtype": "Table",
+   "label": "Devices",
+   "options": "Exchange Employee Device"
+  },
+  {
+   "fieldname": "templates_section",
+   "fieldtype": "Section Break",
+   "label": "Templates"
+  },
+  {
+   "fieldname": "templates",
+   "fieldtype": "Table",
+   "label": "Templates",
+   "options": "Exchange Employee Template"
+  },
+  {
+   "fieldname": "sync_tab",
+   "fieldtype": "Tab Break",
+   "label": "Sync"
+  },
+  {
+   "fieldname": "link_status",
+   "fieldtype": "Select",
+   "label": "Link Status",
+   "options": "Not Linked\nLinked\nNot Found",
+   "default": "Not Linked",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "last_fetched_on",
+   "fieldtype": "Datetime",
+   "label": "Last Fetched",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_instance",
+   "fieldtype": "Data",
+   "label": "Created On Instance",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_sync",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "origin_id",
+   "fieldtype": "Data",
+   "label": "Origin ID",
+   "read_only": 1,
+   "unique": 1,
+   "no_copy": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-10-19 13:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "HQ Employee",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "autoname": "naming_series:",
+ "title_field": "full_name",
+ "show_title_field_in_link": 1,
+ "search_fields": "full_name,payroll_number,device_pin",
+ "image_field": "image"
+}

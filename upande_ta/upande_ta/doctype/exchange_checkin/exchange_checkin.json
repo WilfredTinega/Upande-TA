@@ -5,6 +5,7 @@
  "engine": "InnoDB",
  "field_order": [
   "naming_series",
+  "person_doctype",
   "exchange_employee",
   "employee_name",
   "payroll_number",
@@ -13,6 +14,10 @@
   "time",
   "log_type",
   "company",
+  "home_record_section",
+  "employee",
+  "column_break_home_record",
+  "employee_checkin",
   "device_section",
   "device_sn",
   "device_location",
@@ -34,10 +39,19 @@
    "hidden": 1
   },
   {
+   "fieldname": "person_doctype",
+   "fieldtype": "Select",
+   "label": "Employee Type",
+   "options": "Exchange Employee\nHQ Employee",
+   "default": "Exchange Employee",
+   "reqd": 1,
+   "in_standard_filter": 1
+  },
+  {
    "fieldname": "exchange_employee",
-   "fieldtype": "Link",
-   "label": "Exchange Employee",
-   "options": "Exchange Employee",
+   "fieldtype": "Dynamic Link",
+   "label": "Exchange / HQ Employee",
+   "options": "person_doctype",
    "in_list_view": 1,
    "in_standard_filter": 1
   },
@@ -46,22 +60,19 @@
    "fieldtype": "Data",
    "label": "Employee Name",
    "read_only": 1,
-   "in_list_view": 1,
-   "fetch_from": "exchange_employee.full_name"
+   "in_list_view": 1
   },
   {
    "fieldname": "payroll_number",
    "fieldtype": "Data",
    "label": "Payroll Number",
-   "read_only": 1,
-   "fetch_from": "exchange_employee.payroll_number"
+   "read_only": 1
   },
   {
    "fieldname": "home_instance",
    "fieldtype": "Data",
    "label": "Home Instance",
-   "read_only": 1,
-   "fetch_from": "exchange_employee.home_instance"
+   "read_only": 1
   },
   {
    "fieldname": "column_break_main",
@@ -86,9 +97,30 @@
    "fieldtype": "Link",
    "label": "Company",
    "options": "Company",
-   "in_standard_filter": 1,
-   "fetch_from": "exchange_employee.host_company",
-   "fetch_if_empty": 1
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "home_record_section",
+   "fieldtype": "Section Break",
+   "label": "At Home"
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "label": "Employee",
+   "options": "Employee",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_home_record",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "employee_checkin",
+   "fieldtype": "Link",
+   "label": "Employee Checkin",
+   "options": "Employee Checkin",
+   "read_only": 1
   },
   {
    "fieldname": "device_section",
@@ -155,7 +187,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-18 23:30:00.000000",
+ "modified": "2026-10-19 21:30:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Exchange Checkin",

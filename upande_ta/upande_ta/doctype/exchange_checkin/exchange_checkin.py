@@ -16,10 +16,13 @@ class ExchangeCheckin(Document):
 	def validate(self):
 		if self.flags.from_sync:
 			return
+		self.person_doctype = self.person_doctype or "Exchange Employee"
+		if self.person_doctype not in exchange.PERSON_DOCTYPES:
+			frappe.throw(_("Employee Type must be one of {0}.").format(", ".join(exchange.PERSON_DOCTYPES)))
 		if not self.exchange_employee:
-			frappe.throw(_("Pick the Exchange Employee."))
+			frappe.throw(_("Pick the Employee."))
 		employee = frappe.db.get_value(
-			"Exchange Employee",
+			self.person_doctype,
 			self.exchange_employee,
 			["full_name", "payroll_number", "home_instance", "host_company", "origin_id"],
 			as_dict=True,
@@ -60,5 +63,5 @@ class ExchangeCheckin(Document):
 			return
 		if self.home_instance and self.home_instance == exchange.my_code():
 			# one of our own employees: their attendance here counts it too
-			exchange.make_employee_checkin_quietly(self)
+			exchange.link_employee_checkin(self.name, exchange.make_employee_checkin_quietly(self))
 		exchange.queue_sync(self)

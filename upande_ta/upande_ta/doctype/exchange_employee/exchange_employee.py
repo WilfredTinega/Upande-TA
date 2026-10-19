@@ -38,12 +38,13 @@ class ExchangeEmployee(Document):
 		self.validate_one_per_payroll_number()
 		if self.needs_fetch():
 			self.fetch_quietly()
-		elif self.is_new() and self.link_status == "Linked" and not self.templates:
-			# filled in on the form before saving: their templates come now
+		elif self.link_status == "Linked" and not self.templates and not self.flags.from_refresh:
+			# no templates yet: their home instance's are used, so they need no
+			# new capture on the devices here
 			exchange.fetch_home_templates_quietly(self)
 		if not self.device_pin and self.payroll_number.isdigit():
 			# devices take numeric PINs: an Employee ID (HR-EMP-00003) is no PIN
-			self.device_pin = self.payroll_number
+			self.device_pin = exchange._free_pin(self.payroll_number, self)
 		self.validate_device_pin()
 		self.validate_program_dates()
 
@@ -54,22 +55,25 @@ class ExchangeEmployee(Document):
 	# ──────────────────────────────────────────────────────────────────
 
 	def validate_one_per_payroll_number(self):
-		other = frappe.db.get_value(
-			"Exchange Employee",
-			{
-				"home_instance": self.home_instance,
-				"payroll_number": self.payroll_number,
-				"name": ["!=", self.name],
-			},
-		)
-		if other:
-			frappe.throw(
-				_("{0} payroll number {1} is already {2}.").format(
-					self.home_instance,
-					frappe.bold(self.payroll_number),
-					frappe.utils.get_link_to_form("Exchange Employee", other),
-				)
+		"""One record per home and payroll number, whether they are on the
+		exchange program or work from HQ."""
+		for doctype in exchange.PERSON_DOCTYPES:
+			other = frappe.db.get_value(
+				doctype,
+				{
+					"home_instance": self.home_instance,
+					"payroll_number": self.payroll_number,
+					"name": ["!=", self.name],
+				},
 			)
+			if other:
+				frappe.throw(
+					_("{0} payroll number {1} is already {2}.").format(
+						self.home_instance,
+						frappe.bold(self.payroll_number),
+						frappe.utils.get_link_to_form(doctype, other),
+					)
+				)
 
 	def needs_fetch(self) -> bool:
 		if self.flags.from_refresh or not (self.home_instance and self.payroll_number):
@@ -105,6 +109,18 @@ class ExchangeEmployee(Document):
 	def validate_device_pin(self):
 		if not self.device_pin:
 			return
+		for doctype in exchange.PERSON_DOCTYPES:
+			other = frappe.db.get_value(
+				doctype, {"device_pin": self.device_pin, "name": ["!=", self.name]}, "name"
+			)
+			if other:
+				frappe.throw(
+					_("Device PIN {0} already belongs to {1}. Give {2} another PIN.").format(
+						frappe.bold(self.device_pin),
+						frappe.utils.get_link_to_form(doctype, other),
+						self.full_name or _("this person"),
+					)
+				)
 		employee = frappe.db.get_value("Employee", {"attendance_device_id": self.device_pin}, "name")
 		if employee:
 			frappe.throw(
@@ -116,6 +132,8 @@ class ExchangeEmployee(Document):
 			)
 
 	def validate_program_dates(self):
+		if not self.meta.has_field("program_end"):
+			return
 		if (
 			self.program_start
 			and self.program_end
@@ -162,12 +180,14 @@ class ExchangeEmployee(Document):
 		devices = self._devices_arg(devices)
 		if not self.device_pin:
 			frappe.throw(_("Set a Device PIN first."))
+		from_home = self.templates_from_home()
 		templates = 0
 		for device_sn in devices:
 			templates += exchange.push_to_device(self, device_sn)
 			self._mark_device(device_sn, _("Enrolled"), on_device=1)
+		self.flags.from_refresh = True
 		self.save()
-		return {"devices": len(devices), "templates": templates}
+		return {"devices": len(devices), "templates": templates, "from_home": from_home}
 
 	@frappe.whitelist()
 	def update_on_devices(self) -> dict:
@@ -176,12 +196,31 @@ class ExchangeEmployee(Document):
 		devices = [d.device_sn for d in self.devices if cint(d.on_device)]
 		if not devices:
 			frappe.throw(_("{0} is not on any device yet. Use Enroll on Devices.").format(self.full_name))
+		from_home = self.templates_from_home()
 		templates = 0
 		for device_sn in devices:
 			templates += exchange.push_to_device(self, device_sn)
 			self._mark_device(device_sn, _("Updated"), on_device=1)
+		self.flags.from_refresh = True
 		self.save()
-		return {"devices": len(devices), "templates": templates}
+		return {"devices": len(devices), "templates": templates, "from_home": from_home}
+
+	def templates_from_home(self) -> int:
+		"""Before putting them on devices here: their templates at home, so
+		they are not captured again. Returns how many rows changed. With no
+		template at home or here, the devices get the user only."""
+		changed = 0
+		if self.home_instance and self.link_status == "Linked":
+			changed = exchange.fetch_home_templates_quietly(self)
+		if not any(r.get(f"{t}_template") for r in self.templates for t in ("fingerprint", "face", "palm")):
+			frappe.msgprint(
+				_("{0} has no templates at {1} or here: capture them on a device.").format(
+					self.full_name or self.name, self.home_instance
+				),
+				indicator="orange",
+				title=_("No Templates"),
+			)
+		return changed
 
 	@frappe.whitelist()
 	def delete_from_devices(self, devices=None) -> dict:

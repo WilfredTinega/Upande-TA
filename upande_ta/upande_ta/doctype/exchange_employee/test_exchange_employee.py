@@ -24,6 +24,7 @@ IGNORE_TEST_RECORD_DEPENDENCIES = [
 	"Employee",
 	"Exchange Checkin",
 	"Exchange Employee",
+	"HQ Employee",
 	"Farm",
 	"Gender",
 	"User",
@@ -109,6 +110,92 @@ class IntegrationTestExchange(_TestCase):
 		self.assertEqual((doc.source_instance, doc.origin_id), (ME, f"{ME}:{doc.name}"))
 		self.assertEqual(self.logs(doc), ["Exchange Employee"])
 
+	def test_records_go_only_to_the_employees_home_instance(self):
+		setting = frappe.get_single("Exchange Setting")
+		setting.append(
+			"instances",
+			{
+				"instance_code": "TESTXX",
+				"base_url": "http://third.invalid",
+				"enabled": 1,
+				"company": "Third Ltd.",
+				"send_employees": 1,
+				"send_checkins": 1,
+			},
+		)
+		setting.save(ignore_permissions=True)
+		frappe.clear_document_cache("Exchange Setting", "Exchange Setting")
+		employee = self.make_employee()
+		checkin = exchange.record_device_punch(employee.device_pin, now_datetime(), log_type="IN")
+		destinations = frappe.get_all(
+			"Exchange Sync Log",
+			filters={"reference_name": ["in", [employee.name, checkin]]},
+			pluck="destination",
+		)
+		self.assertEqual(set(destinations), {OTHER})
+
+	def make_hq_employee(self, pin="HQ-PIN-1", **extra):
+		doc = frappe.get_doc(
+			{
+				"doctype": "HQ Employee",
+				"home_instance": OTHER,
+				"payroll_number": "EXT-90500",
+				"full_name": "Test HQ Staff",
+				"link_status": "Linked",
+				"device_pin": pin,
+				"host_company": self.company,
+				**extra,
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		return doc
+
+	def test_an_hq_employee_is_kept_and_sent_like_an_exchange_employee(self):
+		doc = self.make_hq_employee()
+		self.assertEqual((doc.source_instance, doc.origin_id), (ME, f"{ME}:{doc.name}"))
+		self.assertEqual(self.logs(doc), ["HQ Employee"])
+		name = exchange.record_device_punch(doc.device_pin, now_datetime(), log_type="IN")
+		checkin = frappe.get_doc("Exchange Checkin", name)
+		self.assertEqual((checkin.person_doctype, checkin.exchange_employee), ("HQ Employee", doc.name))
+		self.assertEqual(checkin.employee_name, "Test HQ Staff")
+
+	def test_a_person_is_either_on_the_program_or_at_hq(self):
+		self.make_employee()
+		with self.assertRaises(frappe.ValidationError):
+			self.make_hq_employee(payroll_number=PAYROLL)
+		with self.assertRaises(frappe.ValidationError):
+			self.make_hq_employee(pin="EXT-PIN-1")
+
+	def test_a_received_hq_employee_and_their_punch_are_linked(self):
+		received = exchange.receive(
+			"HQ Employee",
+			{
+				"origin_id": f"{OTHER}:HQE-0009",
+				"source_instance": OTHER,
+				"home_instance": OTHER,
+				"payroll_number": "EXT-90509",
+				"full_name": "Sent HQ Staff",
+				"home_company": "Their Farm Ltd.",
+				"status": "Active",
+			},
+		)
+		self.assertTrue(frappe.db.exists("HQ Employee", received["name"]))
+		punch = exchange.receive(
+			"Exchange Checkin",
+			{
+				"origin_id": f"{OTHER}:EXC-0909",
+				"employee_origin_id": f"{OTHER}:HQE-0009",
+				"source_instance": OTHER,
+				"home_instance": OTHER,
+				"time": "2026-10-15 08:00:00",
+				"log_type": "IN",
+			},
+		)
+		self.assertEqual(
+			frappe.db.get_value("Exchange Checkin", punch["name"], ["person_doctype", "exchange_employee"]),
+			("HQ Employee", received["name"]),
+		)
+
 	def test_one_record_per_home_payroll_number(self):
 		self.make_employee()
 		with self.assertRaises(frappe.ValidationError):
@@ -173,6 +260,10 @@ class IntegrationTestExchange(_TestCase):
 			"Employee Checkin", result["employee_checkin"], ["employee", "log_type"], as_dict=True
 		)
 		self.assertEqual((checkin.employee, checkin.log_type), (employee.name, "IN"))
+		self.assertEqual(
+			frappe.db.get_value("Exchange Checkin", result["name"], ["employee", "employee_checkin"]),
+			(employee.name, result["employee_checkin"]),
+		)
 
 		again = self.punch_from_elsewhere(employee.attendance_device_id)
 		self.assertEqual(again["status"], "exists")
@@ -207,6 +298,31 @@ class IntegrationTestExchange(_TestCase):
 		self.assertEqual(exchange.record_device_punch(employee.device_pin, when, log_type="IN"), first)
 		other = exchange.record_device_punch(employee.device_pin, when, log_type="OUT")
 		self.assertNotEqual(other, first)
+
+	def test_the_device_pin_comes_from_home(self):
+		employee = self.make_employee(pin=None)
+		employee.device_pin = None
+		exchange.apply_home_record(employee, {"full_name": "Test Visitor", "device_pin": "77123"})
+		self.assertEqual(employee.device_pin, "77123")
+		employee.save(ignore_permissions=True)
+
+		# an Employee ID is no PIN, and a PIN taken here is not reused
+		other = self.make_hq_employee(pin="77124", payroll_number="HR-EMP-09999")
+		other.device_pin = None
+		exchange.apply_home_record(other, {"device_pin": "77123"})
+		self.assertIsNone(other.device_pin)
+
+	def test_home_sends_the_device_pin(self):
+		employee = frappe.db.get_value(
+			"Employee",
+			{"status": "Active", "attendance_device_id": ["is", "set"]},
+			["name", "attendance_device_id", "company"],
+			as_dict=True,
+		)
+		if not employee:
+			self.skipTest("no active Employee with a device id")
+		found = exchange.employee_for_lookup(employee.name, employee.company)
+		self.assertEqual(found["device_pin"], employee.attendance_device_id)
 
 	def test_home_finds_an_employee_by_payroll_number_or_employee_id(self):
 		employee = frappe.db.get_value(
@@ -254,12 +370,63 @@ class IntegrationTestExchange(_TestCase):
 			self.assertEqual(exchange.fetch_home_templates(employee, ["HOME-DEV-2"]), 1)
 		self.assertEqual([r.source_device_sn for r in employee.templates], ["HOME-DEV-2"])
 
+	def test_enrolling_uses_their_home_templates_first(self):
+		from unittest.mock import patch
+
+		employee = self.make_employee()
+		home_rows = [{"source_device_sn": "HOME-DEV-1", "fp_valid": 1, "fingerprint_template": "FP-1"}]
+		sent = []
+		with (
+			patch.object(exchange, "call_instance", return_value=home_rows),
+			patch.object(exchange, "_require_device_commands"),
+			patch.object(exchange, "registered_devices", return_value=[frappe._dict(device_sn="HQ-DEV")]),
+			patch.object(
+				exchange,
+				"push_to_device",
+				side_effect=lambda doc, sn: (
+					sent.append((sn, exchange.best_template(doc, sn).fingerprint_template)) or 1
+				),
+			),
+		):
+			result = employee.enroll_on_devices(["HQ-DEV"])
+		self.assertEqual(result["from_home"], 1)
+		self.assertEqual(sent, [("HQ-DEV", "FP-1")])
+
 	def test_a_home_without_the_template_endpoint_does_not_stop_a_fetch(self):
 		from unittest.mock import patch
 
 		employee = self.make_employee()
 		with patch.object(exchange, "call_instance", side_effect=exchange.RemoteError("old version")):
 			self.assertEqual(exchange.fetch_home_templates_quietly(employee), 0)
+
+	def test_home_sends_templates_saved_under_the_device_pin_too(self):
+		employee = frappe.db.get_value(
+			"Employee",
+			{"status": "Active", "attendance_device_id": ["is", "set"]},
+			["name", "attendance_device_id", "company"],
+			as_dict=True,
+		)
+		if not employee:
+			self.skipTest("no active Employee with a device id")
+		parent = frappe.get_doc(
+			{"doctype": "Biometric Template", "device_sn": "TEST-HOME-DEV", "device_location": None}
+		)
+		parent.append(
+			"bio_templates",
+			{"user_id": employee.attendance_device_id, "face_template": "FACE-X", "face_valid": 0},
+		)
+		parent.flags.ignore_mandatory = True
+		frappe.flags.allow_biometric_parent_insert = True
+		try:
+			parent.insert(ignore_permissions=True)
+		finally:
+			frappe.flags.allow_biometric_parent_insert = False
+		rows = [
+			r
+			for r in exchange.templates_for_lookup(employee.attendance_device_id, employee.company)
+			if r["source_device_sn"] == "TEST-HOME-DEV"
+		]
+		self.assertEqual([(r["face_template"], r["face_valid"]) for r in rows], [("FACE-X", 1)])
 
 	def test_home_sends_the_templates_it_keeps_for_that_employee(self):
 		row = frappe.db.sql(
