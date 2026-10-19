@@ -38,9 +38,9 @@ class ExchangeEmployee(Document):
 		self.validate_one_per_payroll_number()
 		if self.needs_fetch():
 			self.fetch_quietly()
-		elif self.link_status == "Linked" and not self.templates and not self.flags.from_refresh:
-			# no templates yet: their home instance's are used, so they need no
-			# new capture on the devices here
+		elif self.is_new() and self.link_status == "Linked" and not self.templates:
+			# filled in on the form before saving: their home instance's
+			# templates come now, so they need no new capture here
 			exchange.fetch_home_templates_quietly(self)
 		if not self.device_pin and self.payroll_number.isdigit():
 			# devices take numeric PINs: an Employee ID (HR-EMP-00003) is no PIN
@@ -185,7 +185,6 @@ class ExchangeEmployee(Document):
 		for device_sn in devices:
 			templates += exchange.push_to_device(self, device_sn)
 			self._mark_device(device_sn, _("Enrolled"), on_device=1)
-		self.flags.from_refresh = True
 		self.save()
 		return {"devices": len(devices), "templates": templates, "from_home": from_home}
 
@@ -201,7 +200,6 @@ class ExchangeEmployee(Document):
 		for device_sn in devices:
 			templates += exchange.push_to_device(self, device_sn)
 			self._mark_device(device_sn, _("Updated"), on_device=1)
-		self.flags.from_refresh = True
 		self.save()
 		return {"devices": len(devices), "templates": templates, "from_home": from_home}
 

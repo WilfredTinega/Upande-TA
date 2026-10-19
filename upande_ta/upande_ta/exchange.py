@@ -411,14 +411,17 @@ def employee_for_lookup(payroll_number: str, company: str | None = None) -> dict
 
 
 def templates_for_lookup(payroll_number: str, company: str | None = None) -> list:
-	"""The home side of a template fetch: the biometric templates kept here
-	(Biometric Template, one per device) for the employee a lookup finds,
-	by Employee, or by their device PIN on rows saved without one."""
+	"""The home side of a template fetch: the valid biometric templates kept
+	here (Biometric Template, one per device) for the employee a lookup
+	finds. Rows saved without an employee are matched by their device PIN,
+	but only while no other Employee has ever had that PIN."""
 	found = employee_for_lookup(payroll_number, company)
 	if not found:
 		return []
 	employee = found["home_employee_id"]
 	pin = frappe.db.get_value("Employee", employee, "attendance_device_id")
+	if pin and frappe.db.count("Employee", {"attendance_device_id": pin}) > 1:
+		pin = None
 	BioTemplate = frappe.qb.DocType("Bio Template")
 	BiometricTemplate = frappe.qb.DocType("Biometric Template")
 	fields = [f for f in TEMPLATE_FIELDS if f not in ("source_device_sn", "received_on")]
@@ -429,14 +432,12 @@ def templates_for_lookup(payroll_number: str, company: str | None = None) -> lis
 		)
 	rows = (
 		frappe.qb.from_(BioTemplate)
-		.left_join(BiometricTemplate)
+		.join(BiometricTemplate)
 		.on(BioTemplate.parent == BiometricTemplate.name)
 		.select(
-			BioTemplate.parent,
-			BiometricTemplate.device_sn,
-			BiometricTemplate.device_location,
-			*[BioTemplate[f] for f in fields],
+			BiometricTemplate.device_sn, BiometricTemplate.device_location, *[BioTemplate[f] for f in fields]
 		)
+		.where(BioTemplate.parenttype == "Biometric Template")
 		.where(match)
 		.where((BioTemplate.deleted == 0) | (BioTemplate.deleted.isnull()))
 		.orderby(BioTemplate.modified)
@@ -444,17 +445,20 @@ def templates_for_lookup(payroll_number: str, company: str | None = None) -> lis
 	out = []
 	for r in rows:
 		row = {f: _plain(r.get(f)) for f in fields}
-		# a stored template is the template, whatever its valid flag says
 		held = False
 		for prefix, template in (("fp", "fingerprint"), ("face", "face"), ("palm", "palm")):
-			if r.get(f"{template}_template"):
-				row[f"{prefix}_valid"] = 1
-				held = True
-		if not held:
-			continue
-		row["source_device_sn"] = r.device_sn or r.parent
-		row["device_location"] = r.device_location
-		out.append(row)
+			valid = r.get(f"{prefix}_valid")
+			if not r.get(f"{template}_template") or (valid is not None and not cint(valid)):
+				# none stored, or the device marked it invalid: not sent
+				row[f"{template}_template"] = None
+				row[f"{prefix}_valid"] = 0
+				continue
+			row[f"{prefix}_valid"] = 1
+			held = True
+		if held and r.device_sn:
+			row["source_device_sn"] = r.device_sn
+			row["device_location"] = r.device_location
+			out.append(row)
 	return out
 
 
@@ -694,7 +698,9 @@ def _queue_employee_first(doctype, employee, instance, queued):
 			"reference_doctype": doctype,
 			"reference_name": employee,
 			"destination": instance.instance_code,
-			"status": ["in", ["Sent", "Queued", "Sending"]],
+			# a Failed one is retried by scheduled_push: queueing another for
+			# every punch only piles up failures (a home on an older version)
+			"status": ["in", ["Sent", "Queued", "Sending", "Failed"]],
 		},
 	)
 	if sent or not is_own(frappe.get_cached_doc(doctype, employee)):
@@ -792,9 +798,14 @@ def push_one(log_name: str) -> bool | None:
 		log.db_set(values)
 		return False
 	doc = frappe.get_doc(log.reference_doctype, log.reference_name)
-	if log.remote_doctype not in targets(instance, doc):
+	if instance.instance_code != doc.get("home_instance"):
 		# queued before records went only to the employee's home instance
 		log.delete(ignore_permissions=True)
+		return None
+	if log.remote_doctype not in targets(instance, doc):
+		# Send Employees / Send Checkins is off for now: it waits, unsent,
+		# until the tick is back
+		log.db_set("status", "Queued", update_modified=False)
 		return None
 	try:
 		result = call_instance(

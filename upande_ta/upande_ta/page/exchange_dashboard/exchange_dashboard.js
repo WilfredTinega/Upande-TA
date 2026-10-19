@@ -203,10 +203,7 @@ class ExchangeDashboard {
 				<td class="text-right">${format_number(c.avg_hours, null, 2)}</td></tr>`,
 			),
 		);
-		const daily = this.daily_table(hq.daily || []).replace(
-			/data-employee=/g,
-			'data-doctype="HQ Employee" data-employee=',
-		);
+		const daily = this.daily_table(hq.daily || [], "HQ Employee");
 		return `
 			<div class="exd-section-title">${__("HQ Employees")}</div>
 			<div class="exd-cards">
@@ -378,7 +375,7 @@ class ExchangeDashboard {
 		);
 	}
 
-	daily_table(days) {
+	daily_table(days, doctype = "Exchange Employee") {
 		const e = frappe.utils.escape_html;
 		const time = (v) => (v ? moment(v).format("HH:mm") : "");
 		return this.table(
@@ -392,7 +389,9 @@ class ExchangeDashboard {
 				[__("Hours"), "text-right"],
 			],
 			days.map(
-				(r) => `<tr class="exd-click" data-employee="${e(r.employee)}">
+				(
+					r,
+				) => `<tr class="exd-click" data-doctype="${e(doctype)}" data-employee="${e(r.employee)}">
 				<td>${frappe.datetime.str_to_user(r.date)}</td>
 				<td>${e(r.full_name || r.employee)}</td>
 				<td>${e(r.company || "")}</td>

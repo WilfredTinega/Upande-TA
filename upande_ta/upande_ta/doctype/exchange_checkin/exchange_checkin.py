@@ -21,12 +21,17 @@ class ExchangeCheckin(Document):
 			frappe.throw(_("Employee Type must be one of {0}.").format(", ".join(exchange.PERSON_DOCTYPES)))
 		if not self.exchange_employee:
 			frappe.throw(_("Pick the Employee."))
-		employee = frappe.db.get_value(
-			self.person_doctype,
-			self.exchange_employee,
-			["full_name", "payroll_number", "home_instance", "host_company", "origin_id"],
-			as_dict=True,
-		)
+		fields = ["full_name", "payroll_number", "home_instance", "host_company", "origin_id"]
+		employee = frappe.db.get_value(self.person_doctype, self.exchange_employee, fields, as_dict=True)
+		if not employee:
+			# the Employee Type was left at its default for the other kind
+			for doctype in exchange.PERSON_DOCTYPES:
+				employee = frappe.db.get_value(doctype, self.exchange_employee, fields, as_dict=True)
+				if employee:
+					self.person_doctype = doctype
+					break
+		if not employee:
+			frappe.throw(_("{0} {1} not found.").format(self.person_doctype, self.exchange_employee))
 		self.employee_name = employee.full_name
 		self.payroll_number = employee.payroll_number
 		self.home_instance = employee.home_instance
