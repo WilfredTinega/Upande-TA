@@ -548,7 +548,6 @@ body::before{display:none!important}
 /* farm stays sidebar-only; company is also shown top-right in the topbar
    (moved there and given margin-left:auto in the HTML) so it doesn't require
    opening the sidebar just to switch company. Kept in DOM either way for state. */
-#r-farm{display:none!important}
 
 /* Company reads as a bold plain label, not a form control: native caret,
    border, background and the shared focus ring are all stripped. It is
@@ -2299,3 +2298,136 @@ button.bt-freq-chip:hover{background:var(--accent-light)}
 #bt-card .tile-inline-tbl td,#bt-card .tile-inline-tbl thead th{padding:7px 10px!important}
 #bt-card .tile-inline-tbl tr.bt-empty-row td{width:auto!important;text-align:center!important;padding:28px 12px!important;color:var(--text-3)}
 #bt-card .tile-inline-tbl tr.bt-empty-row:hover{background:transparent}
+
+/* Get Checkins window: narrow, solid, and its date pickers full width */
+#poll-modal .att-modal{width:min(560px,96vw)!important;background:var(--panel,#fff)!important}
+#poll-modal .att-modal-body{overflow:visible!important}
+#poll-modal .fdate,#poll-modal .fdate .frappe-control,#poll-modal .fdate input{width:100%!important}
+
+/* Inside the desk page: the desk title bar replaces the sidebar's own head */
+.att-framed .att-sb-brand,.att-framed #att-sb-home,.att-framed #wm-account{display:none!important}
+@media(min-width:901px){.att-framed .att-sb-head{display:none!important}}
+
+/* the Get Checkins column takes only the button's width */
+
+/* employee table skeleton while filters reload */
+.sk-row td{padding-top:12px!important;padding-bottom:12px!important}
+.sk-cell{height:12px;min-width:18px}
+.sk-row:hover td{background:transparent!important}
+
+/* Workforce Audit */
+
+#aud-card .tile-inline-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+#aud-card .tile-inline-head h3{margin:0}
+#aud-card .card-body{padding:0}
+#aud-card #aud-status{padding:12px 16px 0}
+#aud-tbl td.num,#aud-tbl th.num{text-align:right;white-space:nowrap}
+
+/* Devices table: six columns that fit the card (name takes what is left) */
+#panel-devices #dev-tbl th:nth-child(2),#panel-devices #dev-tbl td:nth-child(2){width:150px!important}
+#panel-devices #dev-tbl th:nth-child(3),#panel-devices #dev-tbl td:nth-child(3),
+#panel-devices #dev-tbl th:nth-child(4),#panel-devices #dev-tbl td:nth-child(4){width:170px!important;white-space:nowrap!important;overflow:visible!important;text-overflow:clip!important}
+#panel-devices #dev-tbl th:nth-child(5),#panel-devices #dev-tbl td:nth-child(5){width:92px!important;white-space:nowrap!important}
+#panel-devices #dev-tbl th:nth-child(6),#panel-devices #dev-tbl td:nth-child(6){width:128px!important;white-space:nowrap!important;text-align:right}
+#panel-devices #dev-tbl td:nth-child(6) .btn{font-size:11.5px!important;padding:0 8px!important}
+#devices-card .tile-inline-wrap{overflow-x:auto!important}
+/* one Biometrics tab: Devices and Templates switch from the card head */
+#sb-templates{display:none!important}
+.bio-tabs{margin-right:auto}
+#bt-title{display:none!important}
+
+/* Tables never cut data short with "…": columns size to their content and a
+   table wider than its card scrolls sideways inside the card instead. */
+.tile-inline-tbl,.tbl,#dev-tbl,#aud-tbl{table-layout:auto!important}
+.tile-inline-tbl td,.tile-inline-tbl th,.tbl td,.tbl th{text-overflow:clip!important;overflow:visible!important}
+.tile-inline-wrap,.tbl-wrap,#r-tile-inline .tile-inline-wrap{overflow-x:auto!important}
+
+/* the device list depends on neither the date nor the employment type */
+body:has(#panel-devices.active) #r-emptype-btns,
+body:has(#panel-devices.active) .r-date-lbl,
+body:has(#panel-devices.active) #r-date{display:none!important}
+body.dev-mode .topbar .filt{display:none!important}
+#devices-card .r-company-wrap.dev-company,#bt-card .r-company-wrap.dev-company{margin:0 0 0 8px!important}
+
+#aud-card .r-company-wrap.dev-company{margin:0 0 0 8px!important}
+
+/* Tiles: one row on any normal desktop width. Zooming in narrows the page in
+   CSS pixels, so the breakpoints below still fold them into rows then. */
+@media(min-width:1101px){
+  .kpi-strip{grid-auto-flow:column!important;grid-auto-columns:minmax(0,1fr)!important;grid-template-columns:none!important;gap:8px!important}
+  .kpi-strip .kpi{padding:10px 12px!important;min-width:0!important}
+  .kpi-strip .kpi-lbl{font-size:11px!important;letter-spacing:.05em!important;line-height:1.25!important;white-space:normal!important}
+}
+@media(min-width:721px) and (max-width:1100px){
+  .kpi-strip{grid-template-columns:repeat(5,minmax(0,1fr))!important}
+}
+
+/* No sidebar: its views are the topbar tabs, its units the Unit/Division picker.
+   Every offset on the page is calc(var(--att-sb-w) + 32px), so -16px puts the
+   topbar, tiles and body at the same 16px gutter as the right edge. */
+:root{--att-sb-w:-16px!important}
+.att-sidebar,.att-sb-toggle{display:none!important}
+.ins-views{display:flex;justify-content:center;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.ins-views .ins-tab{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-sm,6px);background:var(--panel);color:var(--text-2);font-size:12px;font-weight:600;letter-spacing:.05em;cursor:pointer;white-space:nowrap}
+.ins-views .ins-tab:hover{color:var(--text)}
+.ins-views .ins-tab.active{background:var(--accent,#111);border-color:var(--accent,#111);color:#fff}
+.ins-views #sb-templates{display:none!important}
+.ins-views .sb-dev-count{font-size:11px;padding:1px 6px;border-radius:999px;background:var(--accent-light);color:var(--text-2)}
+.ins-views .ins-tab.active .sb-dev-count{background:rgba(255,255,255,.18);color:#fff}
+.ins-views .sb-dev-head{width:auto!important;justify-content:center!important;margin:0!important}
+
+/* the view tabs: compact pills, centred, ruled off from the filters below */
+.ins-views .ins-tab{flex:1 1 0!important;width:auto!important;min-width:0!important;justify-content:center}
+.topbar .ins-views{padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid var(--border)}
+body.dev-mode .topbar .ins-views{padding-bottom:0;margin-bottom:0;border-bottom:none}
+.topbar{box-shadow:0 6px 18px -10px rgba(10,10,10,.25)!important}
+.topbar .filt{width:100%!important}
+.topbar .ins-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.ins-views{align-items:center}
+.ins-views .ins-co{flex:0 0 auto;margin-left:12px;display:flex;align-items:center}
+
+/* sticky table headers stay above every scrolled row, pills included */
+.tile-inline-tbl thead th,.tbl thead th{position:sticky!important;top:0!important;z-index:20!important}
+.tile-inline-tbl thead th:last-child,.tbl thead th:last-child{position:sticky!important;top:0!important;z-index:21!important}
+.tile-inline-tbl tbody td{position:static!important}
+/* the Total Lost bar is drawn inside its own cell */
+.tile-inline-tbl tbody td.lost-total{position:relative!important}
+.tile-inline-tbl tbody .pill,.tbl tbody .pill{position:relative;z-index:0}
+#r-unit-btns.in-card{margin-left:auto}
+
+/* Workforce Audit head: views and Excel on the first row; employment type,
+   dates and units on the second */
+#aud-card .card-head>h3{order:1}
+#aud-card #aud-views{order:2}
+#aud-card .aud-break{order:4;flex-basis:100%;height:0}
+#aud-card #r-emptype-btns{order:5}
+#aud-card .lost-dates{order:6}
+#aud-card #r-unit-btns{order:7}
+#aud-card .aud-tbl-bar{display:flex;justify-content:flex-end;padding:8px 16px}
+/* the audit tiles share the full width */
+#aud-status .lost-sum,#lost-status .lost-sum{grid-template-columns:none!important;grid-auto-flow:column!important;grid-auto-columns:minmax(0,1fr)!important}
+@media(max-width:900px){#aud-status .lost-sum,#lost-status .lost-sum{grid-auto-flow:row!important;grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+/* Workforce Audit second row on one line: compact dates between the type and unit buttons */
+#aud-card .lost-dates{flex:0 0 auto!important;width:auto!important}
+#aud-card .lost-dates .fdate,#aud-card .lost-dates .fdate .frappe-control{width:118px!important;min-width:0!important;flex:0 0 auto!important}
+#aud-card .lost-dates .fdate input{width:118px!important;min-width:0!important}
+#aud-card #r-unit-btns{flex-wrap:nowrap!important}
+#aud-card #r-emptype-btns{flex-wrap:nowrap!important}
+#aud-tbody tr.aud-row{cursor:pointer}
+#aud-tbody tr.aud-row:hover td{background:var(--accent-light)}
+#aud-overlay .tile-inline-tbl td.num{text-align:right}
+
+/* Workforce Audit drawer: wider, tiles on top, the list filling the rest */
+#aud-overlay .emp-drawer{width:min(1180px,96vw)!important}
+#aud-dr-body{display:flex;flex-direction:column;min-height:0;padding:14px 18px 18px;gap:12px}
+#aud-dr-body .aud-dr-sum{display:grid!important;grid-auto-flow:column!important;grid-auto-columns:minmax(0,1fr)!important;grid-template-columns:none!important;gap:12px!important}
+#aud-dr-body .aud-dr-wrap{flex:1 1 auto!important;min-height:0!important;max-height:none!important;height:auto!important;overflow:auto!important}
+#aud-dr-body .tile-inline-tbl td,#aud-dr-body .tile-inline-tbl th{white-space:nowrap!important}
+.lost-sum-i--leave{--tc:#318ad8}
+.lost-sum-i--sick{--tc:#0f766e}
+/* drawer tiles: one row, each a label line and a value line */
+#aud-dr-body .aud-dr-sum{grid-auto-flow:column!important;grid-auto-columns:minmax(0,1fr)!important;grid-template-columns:none!important;gap:8px!important}
+#aud-dr-body .aud-dr-sum .lost-sum-i{padding:10px 12px!important;gap:4px!important;min-width:0!important}
+#aud-dr-body .aud-dr-sum .lost-sum-i small{font-size:10.5px!important;letter-spacing:.05em!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:clip!important}
+#aud-dr-body .aud-dr-sum .lost-sum-i b{font-size:18px!important;line-height:1.2!important;white-space:nowrap!important}
+@media(max-width:900px){#aud-dr-body .aud-dr-sum{grid-auto-flow:row!important;grid-template-columns:repeat(3,minmax(0,1fr))!important}}

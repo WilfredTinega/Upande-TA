@@ -2,9 +2,8 @@
 
 {% block title %}{{ _("Canteen Analysis") }}{% endblock %}
 
-{# Same shell as /attendance-insights: floating sidebar (brand + refresh, Home,
-   company/unit tree, views, signed-in user), a topbar with the company picker
-   on the left, and the tiles/tables below. Styles and script live in the
+{# No sidebar: the unit, date, meal and view pickers and the company picker
+   all sit in the topbar, with the tiles/tables below. Styles and script live in the
    colocated canteen-analysis.css / canteen-analysis.js. #}
 {% block page_content %}
 {% raw %}
@@ -23,9 +22,6 @@
   </div>
   <div class="att-sb-body" id="att-sb-body"></div>
   <div class="att-sb-foot">
-    <button type="button" class="sb-view-btn active" data-view="forecast">LUNCH FORECAST</button>
-    <button type="button" class="sb-view-btn" data-view="meals">MEAL CHECKINS</button>
-    <button type="button" class="sb-view-btn" data-view="period">PAYROLL PERIOD</button>
     <div class="wm-account" id="wm-account">
       <div class="wm-avatar" id="wm-avatar"><span class="wm-ini" id="wm-ini">&middot;</span><span class="wm-who"><span class="wm-name" id="wm-name"></span><span class="wm-uid" id="wm-uid"></span></span></div>
       <a href="/login" id="wm-account-login" class="wm-login" style="display:none">Log in</a>
@@ -34,9 +30,12 @@
 </aside>
 
 <div class="topbar">
+  <div class="seg cn-views" id="r-views" role="group" aria-label="View">
+    <button type="button" class="btn q sb-view-btn active" data-view="forecast">Lunch Forecast</button>
+    <button type="button" class="btn q sb-view-btn" data-view="meals">Meal Checkins</button>
+    <button type="button" class="btn q sb-view-btn" data-view="period">Payroll Period</button>
+  </div>
   <div class="filt">
-    <select id="r-farm" data-native><option value="">All Units</option></select>
-    <span class="filt-sep"></span>
     <label>Date</label>
     <div id="r-date" class="filt-date"></div>
     <div class="seg" id="r-quick" role="group" aria-label="Quick date">
@@ -46,9 +45,12 @@
     </div>
     <select id="r-meal" aria-label="Meal" style="width:130px"></select>
     <span class="r-unit" id="r-unit"></span>
-    <div class="r-company-wrap" style="margin-left:auto">
-      <select id="r-company" style="width:auto;min-width:180px;max-width:320px"></select>
-      <span id="r-company-label" class="r-company-label"></span>
+    <div class="cn-right">
+      <select id="r-farm" aria-label="Unit/Division" style="width:auto;min-width:150px"><option value="">All Units</option></select>
+      <div class="r-company-wrap">
+        <select id="r-company" style="width:auto;min-width:180px;max-width:320px"></select>
+        <span id="r-company-label" class="r-company-label"></span>
+      </div>
     </div>
   </div>
 </div>

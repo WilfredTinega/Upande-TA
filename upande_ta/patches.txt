@@ -20,3 +20,4 @@ upande_ta.patches.v1.move_overtime_reason_to_parent
 upande_ta.patches.v1.index_employee_checkin_for_insights
 upande_ta.patches.v1.set_exchange_checkin_person_doctype
 upande_ta.patches.v1.link_exchange_checkin_employee_checkin
+upande_ta.patches.v1.index_employee_checkin_device_time

@@ -102,14 +102,14 @@ frappe.provide("frappe.views");
 				txt === "P" || txt === "WFH"
 					? "green"
 					: txt === "A"
-					? "red"
-					: txt === "HD/P"
-					? "#914EE3"
-					: txt === "HD/A"
-					? "orange"
-					: txt === "WO"
-					? WEEK_OFF_COLOR
-					: "#878787"; // H
+						? "red"
+						: txt === "HD/P"
+							? "#914EE3"
+							: txt === "HD/A"
+								? "orange"
+								: txt === "WO"
+									? WEEK_OFF_COLOR
+									: "#878787"; // H
 		} else {
 			color = "#318AD8"; // a leave-type abbreviation -> blue
 		}
@@ -313,7 +313,7 @@ frappe.provide("frappe.views");
 							filters: {
 								company: qr.get_filter_value("company"),
 								include_company_descendants: qr.get_filter_value(
-									"include_company_descendants"
+									"include_company_descendants",
 								),
 							},
 						};
@@ -383,6 +383,30 @@ frappe.provide("frappe.views");
 		} catch (e) {
 			console.warn("[MAS payroll]", e);
 		}
+	}
+
+	// A user who sees a single company has it filled in for them (their user
+	// permission is the default), so no Company change ever fires and the sheet
+	// opened on Month instead of the payroll period. On open, once the Company
+	// is there, start from its payroll period unless the sheet is already on a
+	// date range.
+	function applyPayrollOnOpen(report) {
+		if (report.__ta_payroll_opened) return;
+		report.__ta_payroll_opened = true;
+		let tries = 0;
+		const check = () => {
+			try {
+				if (!report.get_filter_value("company")) {
+					if (++tries < 15) setTimeout(check, 200);
+					return;
+				}
+				if (report.get_filter_value("filter_based_on") === "Date Range") return;
+				applyPayrollDefaults(report);
+			} catch (e) {
+				console.warn("[MAS payroll open]", e);
+			}
+		};
+		setTimeout(check, 200);
 	}
 
 	// HRMS fills Year from get_attendance_years in its own onload. When the
@@ -474,7 +498,7 @@ frappe.provide("frappe.views");
 			if (!missing.length) return;
 
 			let at = settings.filters.findIndex(
-				(df) => df && df.fieldname === EXTRA_FILTER_ANCHOR
+				(df) => df && df.fieldname === EXTRA_FILTER_ANCHOR,
 			);
 			at = at === -1 ? settings.filters.length : at + 1;
 			settings.filters.splice(at, 0, ...missing);
@@ -489,8 +513,24 @@ frappe.provide("frappe.views");
 	const CHANGE_SHIFT_METHOD = "upande_ta.upande_ta.shift_change.change_shift";
 	const SHIFT_SCHEDULE_DAYS = 30;
 
-	const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-	const WEEK_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+	const WEEKDAYS = [
+		"Sunday",
+		"Monday",
+		"Tuesday",
+		"Wednesday",
+		"Thursday",
+		"Friday",
+		"Saturday",
+	];
+	const WEEK_ORDER = [
+		"Monday",
+		"Tuesday",
+		"Wednesday",
+		"Thursday",
+		"Friday",
+		"Saturday",
+		"Sunday",
+	];
 
 	/** Clicking an employee's day cell changes their week off from that day:
 	 * the weekday clicked becomes their only week off until the End Date. On a
@@ -527,7 +567,10 @@ frappe.provide("frappe.views");
 			if (!weekOff || !DAY_RE.test(fieldname)) return;
 
 			const [day, month, year] = fieldname.split("-");
-			const isWeekOff = String(row[fieldname] || "").replace(/<[^>]*>/g, "").trim() === "WO";
+			const isWeekOff =
+				String(row[fieldname] || "")
+					.replace(/<[^>]*>/g, "")
+					.trim() === "WO";
 			showWeekOffDialog(report, row, `${year}-${month}-${day}`, isWeekOff);
 		});
 	}
@@ -577,14 +620,19 @@ frappe.provide("frappe.views");
 				return;
 			}
 			if (values.to_date < date) {
-				frappe.msgprint(__("End Date cannot be before {0}.", [frappe.datetime.str_to_user(date)]));
+				frappe.msgprint(
+					__("End Date cannot be before {0}.", [frappe.datetime.str_to_user(date)]),
+				);
 				return;
 			}
 			frappe
 				.call({
 					method,
 					type: "POST",
-					args: Object.assign({ employee: row.employee, from_date: date, to_date: values.to_date }, args),
+					args: Object.assign(
+						{ employee: row.employee, from_date: date, to_date: values.to_date },
+						args,
+					),
 					freeze: true,
 				})
 				.then((r) => {
@@ -595,32 +643,44 @@ frappe.provide("frappe.views");
 						lines.push(
 							__("Back on {0} from {1}.", [
 								frappe.utils.escape_html(result.restored_to),
-								frappe.datetime.str_to_user(frappe.datetime.add_days(values.to_date, 1)),
-							])
+								frappe.datetime.str_to_user(
+									frappe.datetime.add_days(values.to_date, 1),
+								),
+							]),
 						);
 					}
 					if ((result.created || []).length) lines.push(result.created.join(", "));
 					if ((result.absent_removed || []).length) {
 						lines.push(
 							__("Absent removed on: {0}", [
-								result.absent_removed.map((d) => frappe.datetime.str_to_user(d)).join(", "),
-							])
+								result.absent_removed
+									.map((d) => frappe.datetime.str_to_user(d))
+									.join(", "),
+							]),
 						);
 					}
 					if ((result.absent_on_week_off || []).length) {
 						lines.push(
 							__("Still marked Absent on: {0}", [
-								result.absent_on_week_off.map((d) => frappe.datetime.str_to_user(d)).join(", "),
-							])
+								result.absent_on_week_off
+									.map((d) => frappe.datetime.str_to_user(d))
+									.join(", "),
+							]),
 						);
 					}
-					frappe.msgprint({ title: __("Week Off Updated"), indicator: "green", message: lines.join("<br>") });
+					frappe.msgprint({
+						title: __("Week Off Updated"),
+						indicator: "green",
+						message: lines.join("<br>"),
+					});
 					report.refresh();
 				});
 		};
 
-		const span = (values) =>
-			[frappe.datetime.str_to_user(date), frappe.datetime.str_to_user(values.to_date)];
+		const span = (values) => [
+			frappe.datetime.str_to_user(date),
+			frappe.datetime.str_to_user(values.to_date),
+		];
 
 		const dialog = new frappe.ui.Dialog({
 			title: __("Week Off"),
@@ -633,7 +693,13 @@ frappe.provide("frappe.views");
 					default: `${row.employee_name || ""} (${row.employee})`,
 				},
 				{ fieldtype: "Column Break" },
-				{ fieldtype: "Date", fieldname: "from_date", label: __("From Date"), read_only: 1, default: date },
+				{
+					fieldtype: "Date",
+					fieldname: "from_date",
+					label: __("From Date"),
+					read_only: 1,
+					default: date,
+				},
 				{ fieldtype: "Date", fieldname: "to_date", label: __("End Date"), reqd: 1 },
 				{ fieldtype: "Section Break" },
 				{
@@ -641,7 +707,11 @@ frappe.provide("frappe.views");
 					fieldname: "week_off_days",
 					label: __("Week Off Days"),
 					columns: 4,
-					options: WEEK_ORDER.map((day) => ({ label: __(day), value: day, checked: day === weekday })),
+					options: WEEK_ORDER.map((day) => ({
+						label: __(day),
+						value: day,
+						checked: day === weekday,
+					})),
 				},
 			],
 			primary_action_label: __("Change Week Off"),
@@ -661,7 +731,7 @@ frappe.provide("frappe.views");
 							ordered.map((day) => __(day)).join(" & "),
 							...span(v),
 						]),
-					{ weekdays: JSON.stringify(ordered) }
+					{ weekdays: JSON.stringify(ordered) },
 				);
 			},
 		});
@@ -670,7 +740,7 @@ frappe.provide("frappe.views");
 			dialog.set_secondary_action_label(__("Remove Week Off"));
 			dialog.set_secondary_action(() => {
 				run(REMOVE_WEEK_OFF_METHOD, dialog.get_values(true), (v) =>
-					__("{0}: no {1} week off from {2} to {3}.", [who, __(weekday), ...span(v)])
+					__("{0}: no {1} week off from {2} to {3}.", [who, __(weekday), ...span(v)]),
 				);
 			});
 		}
@@ -704,7 +774,9 @@ frappe.provide("frappe.views");
 		const day = (d) => frappe.datetime.str_to_user(d);
 		const line = (b, cls = "") =>
 			`<tr class="${cls}"><td>${day(b.from)}</td><td>${b.to ? day(b.to) : __("Open")}</td><td>${frappe.utils.escape_html(b.shift)}</td></tr>`;
-		const rows = blocks.map((b) => line(b)).join("") + (after && after.shift ? line(after, "text-muted") : "");
+		const rows =
+			blocks.map((b) => line(b)).join("") +
+			(after && after.shift ? line(after, "text-muted") : "");
 		return `<table class="table table-bordered table-sm" style="margin:0">
 			<thead><tr><th>${__("From")}</th><th>${__("To")}</th><th>${__("Shift")}</th></tr></thead>
 			<tbody>${rows}</tbody></table>`;
@@ -722,7 +794,9 @@ frappe.provide("frappe.views");
 		const today = frappe.datetime.get_today();
 
 		const rotationShifts = () =>
-			((dialog && dialog.get_value("rotation")) || []).map((r) => r.shift_type).filter(Boolean);
+			((dialog && dialog.get_value("rotation")) || [])
+				.map((r) => r.shift_type)
+				.filter(Boolean);
 
 		const updatePreview = () => {
 			if (!dialog) return;
@@ -741,7 +815,9 @@ frappe.provide("frappe.views");
 				from_date,
 				to_date,
 				[shift_type, ...rotation].filter(Boolean),
-				rotation.length ? Math.max(cint(dialog.get_value("weeks_per_shift")) || 1, 1) : 9999
+				rotation.length
+					? Math.max(cint(dialog.get_value("weeks_per_shift")) || 1, 1)
+					: 9999,
 			);
 			const $preview = dialog.get_field("rotation_preview").$wrapper;
 			$preview.html(rotationPreviewHtml(blocks, afterCache[to_date]));
@@ -755,7 +831,11 @@ frappe.provide("frappe.views");
 				})
 				.then((r) => {
 					const range = ((r && r.message && r.message.ranges) || [])[0] || {};
-					afterCache[to_date] = { from: next, to: range.end_date || "", shift: range.shift_type };
+					afterCache[to_date] = {
+						from: next,
+						to: range.end_date || "",
+						shift: range.shift_type,
+					};
 					if (dialog.get_value("to_date") === to_date) {
 						$preview.html(rotationPreviewHtml(blocks, afterCache[to_date]));
 					}
@@ -829,7 +909,10 @@ frappe.provide("frappe.views");
 					change: () => {
 						const from_date = dialog && dialog.get_value("from_date");
 						if (from_date) {
-							dialog.set_value("to_date", frappe.datetime.add_days(from_date, SHIFT_SCHEDULE_DAYS - 1));
+							dialog.set_value(
+								"to_date",
+								frappe.datetime.add_days(from_date, SHIFT_SCHEDULE_DAYS - 1),
+							);
 						}
 						schedulePreview();
 					},
@@ -909,7 +992,7 @@ frappe.provide("frappe.views");
 									frappe.utils.escape_html(b.shift_type),
 									day(b.from_date),
 									day(b.to_date),
-								])
+								]),
 							),
 							result.restored_to &&
 								__("Back on {0} from {1}.", [
@@ -919,9 +1002,14 @@ frappe.provide("frappe.views");
 							(result.absent_removed || []).length &&
 								__("Absent removed on: {0}", [dates(result.absent_removed)]),
 							(result.attendance_on_other_shift || []).length &&
-								__("Still marked under another shift on: {0}", [dates(result.attendance_on_other_shift)]),
+								__("Still marked under another shift on: {0}", [
+									dates(result.attendance_on_other_shift),
+								]),
 						];
-						frappe.show_alert({ message: lines.filter(Boolean).join("<br>"), indicator: "green" }, 10);
+						frappe.show_alert(
+							{ message: lines.filter(Boolean).join("<br>"), indicator: "green" },
+							10,
+						);
 						afterCache = {};
 						resetEntry();
 						return loadSchedule();
@@ -957,7 +1045,7 @@ frappe.provide("frappe.views");
 				.text(
 					`.ta-shift-dialog .form-grid .grid-row > .row .col.grid-static-col[data-fieldname="shift_type"] {
 						max-width: none; min-width: 0; flex: 1 1 auto;
-					}`
+					}`,
 				)
 				.appendTo(document.head);
 		}
@@ -965,7 +1053,7 @@ frappe.provide("frappe.views");
 		// rows added, picked or deleted in Rotate With
 		$(dialog.get_field("rotation").grid.wrapper).on(
 			"change input click awesomplete-selectcomplete",
-			schedulePreview
+			schedulePreview,
 		);
 		loadSchedule();
 	}
@@ -1007,11 +1095,33 @@ frappe.provide("frappe.views");
 			if (this.report_name === REPORT) {
 				clearUnitOnCompanyChange(this);
 				applyPayrollOnCompanyChange(this);
+				applyPayrollOnOpen(this);
 				ensureYearOnModeChange(this);
 				ensureYear(this);
 				refreshStalePayrollPeriod(this);
 			}
 			return out;
+		};
+
+		// The first run of the sheet is the safest moment to switch a
+		// single-company user onto their payroll period: every onload and
+		// remembered filter has been applied by then.
+		const origRefresh = QR.prototype.refresh;
+		QR.prototype.refresh = function () {
+			if (this.report_name === REPORT && !this.__ta_payroll_checked) {
+				this.__ta_payroll_checked = true;
+				try {
+					if (
+						this.get_filter_value("company") &&
+						this.get_filter_value("filter_based_on") !== "Date Range"
+					) {
+						applyPayrollDefaults(this);
+					}
+				} catch (e) {
+					console.warn("[MAS payroll first run]", e);
+				}
+			}
+			return origRefresh.apply(this, arguments);
 		};
 
 		const origRender = QR.prototype.render_datatable;
