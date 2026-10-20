@@ -243,7 +243,8 @@ class BiometricSetting(Document):
 	def _default_device_companies(self):
 		"""A device with no Company takes the one company its farms belong to,
 		so Attendance Insights can show each company its own devices."""
-		if not frappe.db.has_column("Farm", "company"):
+		# Farm comes from another app; a site without it has no farms to read
+		if not frappe.db.table_exists("Farm") or not frappe.db.has_column("Farm", "company"):
 			return
 		for row in self.get("devices") or []:
 			if row.get("company") or not row.get("farms"):
