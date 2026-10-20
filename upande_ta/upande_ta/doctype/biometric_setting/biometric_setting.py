@@ -235,9 +235,25 @@ def capability_profile_for_serial(device_sn):
 
 class BiometricSetting(Document):
 	def validate(self):
+		self._default_device_companies()
 		self._block_removing_devices_with_links()
 		self._validate_attendance_request_approvers()
 		self._validate_overtime_edit_companies()
+
+	def _default_device_companies(self):
+		"""A device with no Company takes the one company its farms belong to,
+		so Attendance Insights can show each company its own devices."""
+		if not frappe.db.has_column("Farm", "company"):
+			return
+		for row in self.get("devices") or []:
+			if row.get("company") or not row.get("farms"):
+				continue
+			farms = [f.strip() for f in str(row.farms).split(",") if f.strip()]
+			companies = set(
+				frappe.get_all("Farm", filters={"name": ["in", farms]}, pluck="company")
+			) - {None, ""}
+			if len(companies) == 1:
+				row.company = companies.pop()
 
 	def _validate_overtime_edit_companies(self):
 		"""One row per company, so what it may edit and whether its batches

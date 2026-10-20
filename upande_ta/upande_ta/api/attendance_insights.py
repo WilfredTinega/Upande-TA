@@ -1479,20 +1479,37 @@ def attendance_register():
 				off.append(r)
 
 		# ── biometric device status (child table of the Biometric Setting single) ──
-		bio_devs = frappe.db.sql("""
-			SELECT device_sn, device_location, status, last_seen
-			FROM `tabBiometric Device`
-			WHERE parenttype = 'Biometric Setting'
-			ORDER BY (CASE WHEN status = 'Online' THEN 1 ELSE 0 END), device_location
-		""", as_dict=True)
+		# a device tagged with a company shows under that company only; an
+		# untagged one is shown to everyone until it is tagged
+		dev_cond, dev_params = "", {}
+		if frappe.db.has_column("Biometric Device", "company"):
+			dc, dev_params = company_where(company, allowed_companies, "d", "devco")
+			if dc:
+				dev_cond = f" AND ({dc} OR IFNULL(d.company, '') = '')"
+		bio_devs = frappe.db.sql(f"""
+			SELECT d.device_sn, d.device_location, d.status, d.last_seen
+			FROM `tabBiometric Device` d
+			WHERE d.parenttype = 'Biometric Setting'{dev_cond}
+			ORDER BY (CASE WHEN d.status = 'Online' THEN 1 ELSE 0 END), d.device_location
+		""", dev_params, as_dict=True)
+		# when each device last sent a punch (index checkin_device_time)
+		last_checkin = {}
+		sns = [dv["device_sn"] for dv in bio_devs if dv["device_sn"]]
+		if sns:
+			last_checkin = dict(frappe.db.sql("""
+				SELECT device_id, MAX(`time`) FROM `tabEmployee Checkin`
+				WHERE device_id IN %(sns)s GROUP BY device_id
+			""", {"sns": tuple(sns)}))
 		dev_list = []
 		dev_online = 0
 		for dv in bio_devs:
 			st = dv["status"] or "Unknown"
 			if st == "Online":
 				dev_online = dev_online + 1
+			lc = last_checkin.get(dv["device_sn"])
 			dev_list.append({"sn": dv["device_sn"], "location": dv["device_location"],
-							 "status": st, "last_seen": str(dv["last_seen"]) if dv["last_seen"] else None})
+							 "status": st, "last_seen": str(dv["last_seen"]) if dv["last_seen"] else None,
+							 "last_checkin": str(lc) if lc else None})
 
 		# ── payroll period from Biometric Setting's per-company Payroll Dates
 		# table (day-of-month boundaries, e.g. 21 -> 20). Company-specific when
@@ -2776,3 +2793,231 @@ def ensure_attendance_insights_fields():
 	from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 	create_custom_fields(fields, update=True)
+
+
+#: The longest window one poll may ask a device for.
+POLL_MAX_DAYS = 62
+
+
+@frappe.whitelist(methods=["POST"])
+def poll_device_checkins(devices, start_date, end_date):
+	"""Ask devices for the punches they hold between two dates (the devices
+	panel's Poll Checkins). Each is sent the same DATA QUERY ATTLOG command as
+	Biometric Setting → Poll Devices; the punches come back through Node-RED
+	as Biometric Logs and Employee Checkins."""
+	from frappe.utils import date_diff, get_datetime, getdate
+
+	from upande_ta.upande_ta.doctype.biometric_setting.biometric_setting import _poll_attendance
+
+	frappe.has_permission("Employee Checkin", "create", throw=True)
+	if not frappe.utils.cint(frappe.db.get_single_value("Biometric Setting", "enable_checkin")):
+		frappe.throw(frappe._("Turn on Enable Checkin in Biometric Setting first."))
+
+	devices = frappe.parse_json(devices) if isinstance(devices, str) else (devices or [])
+	if not devices:
+		frappe.throw(frappe._("Pick at least one device."))
+	allowed = get_allowed_companies()
+	has_company = frappe.db.has_column("Biometric Device", "company")
+	known = {
+		d.device_sn
+		for d in frappe.get_all(
+			"Biometric Device",
+			filters={"parenttype": "Biometric Setting"},
+			fields=["device_sn", "company"] if has_company else ["device_sn"],
+		)
+		# a restricted user polls their companies' devices and untagged ones
+		if not (allowed and has_company and d.get("company") and d.company not in allowed)
+	}
+	unknown = [d for d in devices if d not in known]
+	if unknown:
+		frappe.throw(frappe._("Not a device in Biometric Setting: {0}").format(", ".join(unknown)))
+
+	start, end = getdate(start_date), getdate(end_date)
+	if end < start:
+		frappe.throw(frappe._("End Date cannot be before Start Date."))
+	if date_diff(end, start) >= POLL_MAX_DAYS:
+		frappe.throw(frappe._("Poll at most {0} days at a time.").format(POLL_MAX_DAYS))
+
+	queued, failed = _poll_attendance(
+		get_datetime(f"{start} 00:00:00"), get_datetime(f"{end} 23:59:59"), devices
+	)
+	return {"queued": len(queued), "failed": failed}
+
+
+@frappe.whitelist()
+def employee_payroll_window(employee, date=None):
+	"""The payroll period of the employee's own company covering `date`
+	(today by default), for the employee drawer's default range: the
+	register's period is the Company filter's, which may be another
+	company's or the site default."""
+	from frappe.utils import getdate, today
+
+	from upande_ta.upande_ta.doctype.biometric_setting.biometric_setting import payroll_window_for
+
+	frappe.has_permission("Employee", doc=employee, throw=True)
+	company = frappe.db.get_value("Employee", employee, "company")
+	enforce_company_access(company)
+	start, end = payroll_window_for(company or None, getdate(date or today()))
+	return {"company": company, "from": str(start) if start else None, "to": str(end) if end else None}
+
+
+@frappe.whitelist()
+def workforce_audit(from_date, to_date, company=None, farm=None, employment_type=None):
+	"""Headcount by department and designation, split female / male, for an
+	audit of who was employed between two dates, with who joined and who left
+	in them. Employed = joined by `to_date` and not relieved before
+	`from_date` (a Left employee with no relieving date counts as gone)."""
+	from frappe.utils import getdate
+
+	start, end = getdate(from_date), getdate(to_date)
+	if end < start:
+		frappe.throw(frappe._("To Date cannot be before From Date."))
+	enforce_company_access(company)
+	cond, params = company_where(company, get_allowed_companies(), "e", "aud")
+	where = [cond] if cond else []
+	params.update({"from": start, "to": end})
+	if farm and frappe.get_meta("Employee").has_field("custom_farm"):
+		where.append("e.custom_farm = %(farm)s")
+		params["farm"] = farm
+	if employment_type:
+		where.append("e.employment_type = %(emptype)s")
+		params["emptype"] = employment_type
+	where.append("(e.date_of_joining IS NULL OR e.date_of_joining <= %(to)s)")
+	where.append(
+		"(e.relieving_date >= %(from)s OR (e.relieving_date IS NULL AND e.status != 'Left'))"
+	)
+	farm_col = ", e.custom_farm AS farm" if frappe.get_meta("Employee").has_field("custom_farm") else ""
+	rows = frappe.db.sql(
+		f"""
+		SELECT e.name, e.employee_name, e.gender, e.department, e.designation, e.status,
+			e.employment_type, e.date_of_joining, e.relieving_date{farm_col}
+		FROM `tabEmployee` e
+		WHERE {" AND ".join(where)}
+		""",
+		params,
+		as_dict=True,
+	)
+
+	def sex(g):
+		g = (g or "").strip().lower()
+		return "female" if g == "female" else ("male" if g == "male" else "other")
+
+	# attendance in the range, per employee: what absenteeism is measured on
+	att = {}
+	if rows:
+		for a in frappe.db.sql(
+			"""
+			SELECT employee, status,
+				SUM(CASE WHEN status = 'On Leave' AND LOWER(IFNULL(leave_type, '')) LIKE '%%sick%%'
+					THEN 1 ELSE 0 END) AS sick,
+				COUNT(*) AS n
+			FROM `tabAttendance`
+			WHERE docstatus = 1 AND attendance_date BETWEEN %(from)s AND %(to)s
+			  AND employee IN %(emps)s
+			GROUP BY employee, status
+			""",
+			{"from": start, "to": end, "emps": tuple(r.name for r in rows)},
+			as_dict=True,
+		):
+			e = att.setdefault(a.employee, {})
+			e[a.status] = a.n
+			if a.sick:
+				# sick off is a leave whose type is a sick leave
+				e["Sick"] = int(a.sick)
+
+	groups = {}
+	totals = {"female": 0, "male": 0, "other": 0, "total": 0, "joined": 0, "left": 0,
+		"present_days": 0, "absent_days": 0, "leave_days": 0, "half_days": 0, "absent_employees": 0}
+	for r in rows:
+		key = (r.department or "", r.designation or "")
+		g = groups.setdefault(
+			key,
+			{
+				"department": key[0],
+				"designation": key[1],
+				"female": 0,
+				"male": 0,
+				"other": 0,
+				"total": 0,
+				"joined_female": 0,
+				"joined_male": 0,
+				"joined": 0,
+				"left_female": 0,
+				"left_male": 0,
+				"left": 0,
+				"present_days": 0,
+				"absent_days": 0,
+				"absent_female": 0,
+				"absent_male": 0,
+				"leave_days": 0,
+				"sick_days": 0,
+				"half_days": 0,
+				"absent_employees": 0,
+			},
+		)
+		s = sex(r.gender)
+		g[s] += 1
+		g["total"] += 1
+		totals[s] += 1
+		totals["total"] += 1
+		if r.date_of_joining and start <= getdate(r.date_of_joining) <= end:
+			g["joined"] += 1
+			totals["joined"] += 1
+			if s != "other":
+				g[f"joined_{s}"] += 1
+		a = att.get(r.name) or {}
+		absent = a.get("Absent", 0)
+		for field, status in (
+			("present_days", "Present"),
+			("absent_days", "Absent"),
+			("leave_days", "On Leave"),
+			("half_days", "Half Day"),
+		):
+			g[field] += a.get(status, 0)
+			totals[field] += a.get(status, 0)
+		# sick off is counted on its own, not as leave
+		g["leave_days"] -= a.get("Sick", 0)
+		totals["leave_days"] -= a.get("Sick", 0)
+		g["sick_days"] += a.get("Sick", 0)
+		totals["sick_days"] = totals.get("sick_days", 0) + a.get("Sick", 0)
+		if absent:
+			g["absent_employees"] += 1
+			totals["absent_employees"] += 1
+			if s != "other":
+				g[f"absent_{s}"] += absent
+		if r.relieving_date and start <= getdate(r.relieving_date) <= end:
+			g["left"] += 1
+			totals["left"] += 1
+			if s != "other":
+				g[f"left_{s}"] += 1
+	# the people behind each group, for the row drawer
+	people = []
+	for r in rows:
+		a = att.get(r.name) or {}
+		people.append(
+			{
+				"employee": r.name,
+				"employee_name": (r.employee_name or "").strip(),
+				"gender": r.gender or "",
+				"department": r.department or "",
+				"designation": r.designation or "",
+				"farm": r.get("farm") or "",
+				"employment_type": r.employment_type or "",
+				"date_of_joining": str(r.date_of_joining) if r.date_of_joining else "",
+				"relieving_date": str(r.relieving_date) if r.relieving_date else "",
+				"status": r.status,
+				"present_days": a.get("Present", 0),
+				"absent_days": a.get("Absent", 0),
+				"leave_days": a.get("On Leave", 0) - a.get("Sick", 0),
+				"sick_days": a.get("Sick", 0),
+				"half_days": a.get("Half Day", 0),
+				"wfh_days": a.get("Work From Home", 0),
+			}
+		)
+	return {
+		"from": str(start),
+		"to": str(end),
+		"totals": totals,
+		"rows": sorted(groups.values(), key=lambda g: (g["department"], g["designation"])),
+		"employees": sorted(people, key=lambda p: (p["employee_name"] or "").lower()),
+	}

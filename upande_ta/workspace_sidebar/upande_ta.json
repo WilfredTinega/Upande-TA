@@ -73,11 +73,11 @@
    "indent": 0,
    "keep_closed": 0,
    "label": "Canteen Analysis",
-   "link_type": "URL",
-   "open_in_new_tab": 1,
+   "link_to": "canteen-analysis",
+   "link_type": "Page",
+   "open_in_new_tab": 0,
    "show_arrow": 0,
-   "type": "Link",
-   "url": "/canteen-analysis"
+   "type": "Link"
   },
   {
    "child": 0,
@@ -309,7 +309,7 @@
    "icon": "",
    "indent": 0,
    "keep_closed": 0,
-   "label": "Monthly Attendance Sheet",
+   "label": "Attendance Sheet",
    "link_to": "Monthly Attendance Sheet",
    "link_type": "Report",
    "show_arrow": 0,
@@ -322,11 +322,11 @@
    "indent": 0,
    "keep_closed": 0,
    "label": "Attendance Insights",
-   "link_type": "URL",
-   "open_in_new_tab": 1,
+   "link_type": "Page",
+   "open_in_new_tab": 0,
    "show_arrow": 0,
    "type": "Link",
-   "url": "/attendance-insights"
+   "link_to": "attendance-insights"
   },
   {
    "child": 0,
@@ -341,7 +341,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-19 11:00:00",
+ "modified": "2026-10-20 13:00:00",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "module_onboarding": "Upande TA Onboarding",

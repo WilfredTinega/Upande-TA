@@ -51,6 +51,7 @@
     if(view!=='forecast')q.set('view',view);
     var s=q.toString();
     try{history.replaceState(null,'',location.pathname+(s?'?'+s:''))}catch(e){}
+    try{window.dispatchEvent(new CustomEvent('ca-url',{detail:s?'?'+s:''}))}catch(e){}
   }
 
   // ── Frappe date control (same build as attendance-insights.js) ──
@@ -730,6 +731,7 @@
       $('r-farm').value=''; fillFarms(); buildSidebar(); load();
     });
     $('r-meal').addEventListener('change',load);
+    $('r-farm').addEventListener('change',function(){ syncSidebarActive(); unitLabel(); load(); });
     $('r-quick').addEventListener('click',function(e){var b=e.target.closest('.btn');if(b)setDate(addDays(today(),+b.dataset.off))});
     $('att-sb-body').addEventListener('click',function(e){
       var farm=e.target.closest('.att-sb-farm'), head=e.target.closest('.att-sb-co-head');
@@ -1011,4 +1013,27 @@
   else enhanceAll();
   // cards that start hidden (the other action tabs) are enhanced when they appear
   document.addEventListener('click', function(){ setTimeout(enhanceAll, 0); });
+})();
+
+
+// Inside the desk page (/app/canteen-analysis): the desk title bar names the
+// page and has Refresh, so the sidebar's logo, title, home button and user
+// card would only repeat it. Desk links open in the desk, and the desk URL
+// follows the company / unit / meal / view picked here.
+(function () {
+  var framed = false;
+  try { framed = window.self !== window.top && window.top.location.origin === window.location.origin; } catch (e) {}
+  if (!framed) return;
+  document.documentElement.classList.add('att-framed');
+  document.addEventListener('click', function (ev) {
+    var a = ev.target && ev.target.closest && ev.target.closest('a[href^="/app"]');
+    if (a) { ev.preventDefault(); window.top.frappe ? window.top.frappe.set_route(a.getAttribute('href')) : (window.top.location.href = a.href); }
+  });
+  window.addEventListener('ca-url', function (ev) {
+    try {
+      var t = window.top, r = t.frappe && t.frappe.get_route && t.frappe.get_route();
+      if (!r || r[0] !== 'canteen-analysis' || t.location.search === ev.detail) return;
+      t.history.replaceState(t.history.state, '', t.location.pathname + ev.detail);
+    } catch (e) {}
+  });
 })();

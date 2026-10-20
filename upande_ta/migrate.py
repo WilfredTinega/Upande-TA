@@ -74,6 +74,8 @@ def _steps():
 		# 6. Fold this app's nav into HRMS' Shift & Attendance rather than
 		#    standing beside it as its own tile.
 		("compose_shift_attendance_sidebar", compose_shift_attendance_sidebar),
+		# the Upande TA sidebar then shows the very same list
+		("mirror_ta_sidebar", mirror_ta_sidebar),
 		("compose_shift_attendance_workspace", compose_shift_attendance_workspace),
 		("hide_ta_desktop_icon", hide_ta_desktop_icon),
 		# Last of all: Frappe's own duplicate-icon sweep has already run by now,
@@ -375,24 +377,20 @@ _SIDEBAR_LAYOUT = (
 	# The two things people open this sidebar for, in the slot the Attendance
 	# dashboard used to hold.
 	{"type": "Link", "link_type": "Report", "link_to": "Monthly Attendance Sheet",
-	 "label": "Monthly Attendance Sheet", "icon": "table"},
-	{"type": "Link", "link_type": "URL", "url": "/attendance-insights",
-	 "label": "Attendance Insights", "icon": "chart-line", "open_in_new_tab": 1},
-	{"type": "Link", "link_type": "URL", "url": "/canteen-analysis",
-	 "label": "Canteen Analysis", "icon": "utensils", "open_in_new_tab": 1},
+	 "label": "Attendance Sheet", "icon": "table"},
+	{"type": "Link", "link_type": "Page", "link_to": "attendance-insights",
+	 "label": "Attendance Insights", "icon": "chart-line"},
+	{"type": "Link", "link_type": "Page", "link_to": "canteen-analysis",
+	 "label": "Canteen Analysis", "icon": "utensils"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Daily Meal Cost", "label": "Daily Meal Cost", "icon": "receipt"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Employee Attendance Tool", "label": "Employee Attendance Tool"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Employee Checkin", "label": "Employee Checkin", "icon": "pointer"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Shift Request", "label": "Shift Request"},
 	{"type": "Link", "link_type": "DocType", "link_to": "Attendance Request", "label": "Attendance Request"},
-	# Asked for at the top level rather than inside a group: it is run often
-	# enough that it should never be a click away behind a collapsed section.
-	{"type": "Link", "link_type": "DocType", "link_to": "Bulk Week Off", "label": "Bulk Week Off", "icon": "calendar-clock"},
-	# Directly under Bulk Week Off because it is the same job from the other
-	# end: Bulk Week Off moves a group onto a list permanently, this one moves
-	# them onto one for a date range and puts them back afterwards.
+	# Moves a group onto a holiday list for a date range and puts them back
+	# afterwards. (Bulk Week Off, the permanent move, is off the sidebars.)
 	{"type": "Link", "link_type": "DocType", "link_to": "Holiday Assignment Tool", "label": "Holiday Assignment Tool", "icon": "calendar-plus"},
-	# The records both rows above write. Neither tool has an undo: a run is
+	# The records the tool above writes. It has no undo: a run is
 	# reversed by cancelling its assignments from this list, so the list cannot
 	# be further away than the tools that fill it.
 	{"type": "Link", "link_type": "DocType", "link_to": "Holiday List Assignment", "label": "Holiday List Assignment", "icon": "calendar-range"},
@@ -451,6 +449,11 @@ _SIDEBAR_DROP = {
 	("link", "Workspace", _TA_SIDEBAR.lower()),
 	# a child table of Exchange Setting since its first draft; it has no list
 	("link", "DocType", "exchange instance"),
+	# opened the web page in a new tab; it is the desk page above now
+	("link", "URL", "/attendance-insights"),
+	("link", "URL", "/canteen-analysis"),
+	# taken off the sidebars; the doctype stays, reached from its list
+	("link", "DocType", "bulk week off"),
 }
 
 # Everything on a Workspace Sidebar Item that describes the row itself. idx is
@@ -572,6 +575,50 @@ def compose_shift_attendance_sidebar():
 		frappe.flags.in_import = in_import
 
 	print(f"{APP_NAME}: laid out the '{_HR_SHIFT_SIDEBAR}' sidebar ({len(rows)} rows)")
+
+
+def mirror_ta_sidebar():
+	"""Give the Upande TA sidebar the same rows, in the same order, as the
+	Shift & Attendance sidebar laid out above, so the two never drift. Only
+	Home differs: it opens the Upande TA workspace."""
+	if not (
+		frappe.db.exists("Workspace Sidebar", _HR_SHIFT_SIDEBAR)
+		and frappe.db.exists("Workspace Sidebar", _TA_SIDEBAR)
+	):
+		return
+
+	source = frappe.get_doc("Workspace Sidebar", _HR_SHIFT_SIDEBAR)
+	target = frappe.get_doc("Workspace Sidebar", _TA_SIDEBAR)
+
+	rows = []
+	for item in source.items:
+		row = {f: item.get(f) for f in _SIDEBAR_ITEM_FIELDS if item.get(f)}
+		row["child"] = item.get("child") or 0
+		if row.get("link_type") == "Workspace" and row.get("link_to") == _HR_SHIFT_SIDEBAR:
+			row["link_to"] = _TA_SIDEBAR
+		rows.append(row)
+
+	def shape(row):
+		return tuple((f, row.get(f) or None) for f in (*_SIDEBAR_ITEM_FIELDS, "child"))
+
+	if [shape(r) for r in rows] == [shape(i.as_dict()) for i in target.items]:
+		return
+
+	target.items = []
+	for row in rows:
+		target.append("items", row)
+
+	# before_save would export the sidebar back into this app's folder in
+	# developer mode; in_import is the flag that export checks
+	in_import = frappe.flags.in_import
+	frappe.flags.in_import = True
+	try:
+		target.flags.ignore_permissions = True
+		target.save()
+	finally:
+		frappe.flags.in_import = in_import
+
+	print(f"{APP_NAME}: laid out the '{_TA_SIDEBAR}' sidebar like '{_HR_SHIFT_SIDEBAR}' ({len(rows)} rows)")
 
 
 # The workspace page itself, as opposed to its sidebar. HRMS puts an

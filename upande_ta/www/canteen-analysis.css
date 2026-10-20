@@ -100,7 +100,6 @@ input[type=search]:hover{border-color:var(--text-3)}
 .filt{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .filt label{font-size:12px;font-weight:500;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em;margin:0}
 .filt-sep{width:1px;height:26px;background:var(--border);margin:0 6px}
-#r-farm{display:none!important}
 .r-unit{font-size:13px;font-weight:600;color:var(--text-2);margin-left:auto;white-space:nowrap}
 .r-company-wrap{position:relative;display:inline-flex;align-items:center}
 #r-company{appearance:none;-webkit-appearance:none;border:none;background:transparent;font-size:19px;font-weight:700;color:transparent;padding:0 4px;cursor:pointer}
@@ -354,3 +353,15 @@ select.ta-sel-native{display:none!important}
 .dr-kpi.dr-kpi-sk{--tc:rgba(10,10,10,.08)}
 @media(prefers-reduced-motion:reduce){.sk,.ch-wrap.sk-chart::after{animation:none}}
 
+
+/* Inside the desk page: the desk title bar replaces the sidebar's own head */
+.att-framed .att-sb-brand,.att-framed #att-sb-home,.att-framed #wm-account{display:none!important}
+@media(min-width:901px){.att-framed .att-sb-head{display:none!important}}
+
+/* No sidebar: everything it held is in the topbar now */
+.att-sidebar,.att-sb-toggle,.r-unit{display:none!important}
+.topbar{margin:0 16px!important}
+.body{margin:0 16px!important}
+#r-views .sb-view-btn{display:inline-flex;width:auto;align-items:center;letter-spacing:0;font-weight:500;border:1px solid var(--border);border-radius:var(--radius-sm,6px)}
+.topbar .cn-views{display:flex;justify-content:center;margin-bottom:10px}
+.topbar .cn-right{margin-left:auto;display:flex;align-items:center;gap:12px}

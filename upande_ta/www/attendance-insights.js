@@ -499,6 +499,18 @@
     ['rs-present','rs-leave','rs-off','rs-absent','rs-total'].forEach(function(id){
       var el=$(id); if(el) el.innerHTML='<span class="sk sk-num"></span>';
     });
+    // employee table: shimmer rows under the same columns until the register lands
+    var tib=$('tile-inline-tbody'), tih=$('tile-inline-thead');
+    if(tib){
+      var n=(tih && tih.querySelectorAll('th').length) || 10, rows='';
+      for(var r=0;r<12;r++){
+        rows+='<tr class="sk-row">';
+        for(var c=0;c<n;c++) rows+='<td><span class="sk sk-cell" style="width:'+(c===0?24:(c===2?70:(40+((r*7+c*13)%45))))+'%"></span></td>';
+        rows+='</tr>';
+      }
+      tib.innerHTML=rows;
+      var cnt=$('tile-inline-count'); if(cnt) cnt.innerHTML='<span class="sk sk-num" style="display:inline-block;width:70px"></span>';
+    }
   }
 
   // ── MAIN LOAD — progressive render (no Promise.all blocking) ──
@@ -525,6 +537,7 @@
   function load(){
     try{ if(window._reloadTrend) window._reloadTrend(); }catch(e){}
     try{ if(window._reloadLost) window._reloadLost(); }catch(e){}
+    try{ if(window._reloadAudit) window._reloadAudit(); }catch(e){}
     try{ if(window._reloadBT) window._reloadBT(); }catch(e){}
     var farm=$('r-farm').value, company=$('r-company').value, emptype=$('r-emptype').value;
     var _rd=_selDate; var from=_rd, to=_rd;
@@ -705,7 +718,7 @@
     });
     var cnt=$('dev-count'); if(cnt) cnt.textContent=rows.length+' DEVICE'+(rows.length===1?'':'S');
     if(!rows.length){
-      body.innerHTML='<tr><td colspan="4"><div class="empty">'
+      body.innerHTML='<tr><td colspan="6"><div class="empty">'
         +(_devs.length?'No device matches that search':'No devices configured')+'</div></td></tr>';
       return;
     }
@@ -716,7 +729,9 @@
         +'<td>'+esc(d.location||'—')+'</td>'
         +'<td class="dev-sn">'+esc(d.sn||'—')+'</td>'
         +'<td>'+esc(seen)+'</td>'
-        +'<td><span class="sb-dev-dot"></span> '+esc(st)+'</td></tr>';
+        +'<td>'+esc(d.last_checkin?String(d.last_checkin).slice(0,16):'never')+'</td>'
+        +'<td><span class="sb-dev-dot"></span> '+esc(st)+'</td>'
+        +'<td class="dev-act"><button type="button" class="btn q dev-poll-one" data-sn="'+esc(d.sn||'')+'">GET CHECKINS</button></td></tr>';
     }).join('');
   }
   (function(){
@@ -724,9 +739,10 @@
     var xls=$('dev-xls');
     if(xls) xls.addEventListener('click', function(){
       try{
-        var aoa=[['Device Name','Device ID','Last Seen','Status']].concat(_devs.map(function(d){
+        var aoa=[['Device Name','Device ID','Last Seen','Last Checkin','Status']].concat(_devs.map(function(d){
           return [d.location||'', d.sn||'',
                   d.last_seen?String(d.last_seen).slice(0,16):'never',
+                  d.last_checkin?String(d.last_checkin).slice(0,16):'never',
                   d.status||'Unknown'];
         }));
         var wb=XLSX.utils.book_new();
@@ -851,7 +867,38 @@
       body.appendChild(grp);
     });
     try{ _sbSyncActive(); }catch(e){}
+    // the topbar's Unit/Division picker lists the selected company's units
+    try{
+      var fs=$('r-farm'), keep=fs.value, seen={}, opts='<option value="">All Units</option>';
+      cos.forEach(function(co){ (scoped[co]||[]).forEach(function(f){
+        if(!f || seen[f]) return; seen[f]=1;
+        var c=(counts[co]||{})[f];
+        opts+='<option value="'+esc(f)+'">'+esc(f)+(c?' ('+(c.tw+c.rest)+')':'')+'</option>';
+      }); });
+      fs.innerHTML=opts; fs.value=seen[keep]?keep:'';
+      drawUnitButtons();
+    }catch(e){}
   }
+  // Unit/Division as toggle buttons, like the employment types: one per unit
+  // of the selected company plus All Units; #r-farm stays the value they set.
+  function drawUnitButtons(){
+    var box=$('r-unit-btns'), fs=$('r-farm'); if(!box||!fs) return;
+    box.innerHTML='';
+    Array.prototype.forEach.call(fs.options, function(o){
+      var b=document.createElement('button'); b.type='button';
+      b.className='et-btn'+(fs.value===o.value?' active':'');
+      b.setAttribute('data-unit', o.value);
+      b.textContent=o.textContent;
+      b.addEventListener('click', function(){
+        if(fs.value===o.value) return;
+        fs.value=o.value;
+        drawUnitButtons();
+        fs.dispatchEvent(new Event('change'));
+      });
+      box.appendChild(b);
+    });
+  }
+  window._drawUnitButtons=drawUnitButtons;
   (function(){var t=$('att-sb-toggle'),c=$('att-sb-close'),sb=$('att-sidebar');
     if(t&&sb)t.addEventListener('click',function(){sb.classList.toggle('open')});
     if(c&&sb)c.addEventListener('click',function(){sb.classList.remove('open')});
@@ -1761,7 +1808,22 @@ function renderAvgHours(serverSeries){
     // Setting the range above is not a user edit — record it as already seen so
     // the watcher does not fire a second, identical fetch.
     drSyncDateWatch();
-    loadEmpHistory(empId);
+    // the payroll period is the employee's own company's, not the Company
+    // filter's: ask for it before loading, and keep the default if that fails
+    var qs=new URLSearchParams({employee:empId, date:window._selDate||todayISO()}).toString();
+    fetch('/api/method/upande_ta.upande_ta.api.attendance_insights.employee_payroll_window?'+qs)
+      .then(function(r){ return r.ok ? r.json() : {}; })
+      .catch(function(){ return {}; })
+      .then(function(res){
+        if(currentEmpId!==empId) return;
+        var w=(res&&res.message)||{};
+        if(w.from && w.to){
+          if($('dr-from')._setDate) $('dr-from')._setDate(w.from); else $('dr-from').value=w.from;
+          if($('dr-to')._setDate) $('dr-to')._setDate(w.to); else $('dr-to').value=w.to;
+          drSyncDateWatch();
+        }
+        loadEmpHistory(empId);
+      });
   }
 
   function closeDrawer(){
@@ -2007,14 +2069,14 @@ function renderAvgHours(serverSeries){
   }
 
   /* date-picker change handler wired in initDateCtl */
-  $('r-farm').addEventListener('change',function(){load();scheduleAutoRefresh()});
+  $('r-farm').addEventListener('change',function(){load();scheduleAutoRefresh();drawUnitButtons()});
   $('r-company').addEventListener('change',function(){
     try{ localStorage.setItem('att_company', this.value||''); }catch(e){}
     // A farm from the PREVIOUS company is meaningless for the new one (and
     // silently returns zero employees rather than erroring) -- the sidebar's
     // own company-header click already clears it via _sbSetSelect, this is
     // the same rule for the top-right picker.
-    var farmSel=$('r-farm'); if(farmSel) farmSel.value='';
+    var farmSel=$('r-farm'); if(farmSel){ farmSel.value=''; drawUnitButtons(); }
     syncCompanyLabel();
     load();scheduleAutoRefresh();
   });
@@ -2367,6 +2429,8 @@ function renderAvgHours(serverSeries){
   makeFrappeDate('att-rf-ctl','att-range-from', daysAgoISO(6));
   makeFrappeDate('att-rt-ctl','att-range-to', window._selDate || todayISO());
   makeFrappeDate('shift-date-ctl','shift-date', todayISO());
+  // the Get Checkins window builds its dates when it first opens
+  window.attMakeFrappeDate = makeFrappeDate;
   makeFrappeDate('dr-from-ctl','dr-from', daysAgoISO(89));
   makeFrappeDate('dr-to-ctl','dr-to', todayISO());
   $('shift-date').value = todayISO();
@@ -3006,7 +3070,6 @@ function renderAvgHours(serverSeries){
            + '<small>'+label+'</small><b>'+value+'</b></span>';
     }
     st.innerHTML='<div class="lost-sum">'+
-      tile('window',   'WINDOW',             m.from+' → '+m.to)+
       tile('total',    'TOTAL LOST',         fmtMins(m.total_lost_mins),   !(m.total_lost_mins||0))+
       tile('behaviour','LATE / EARLY',       fmtMins(m.behaviour_mins),    !(m.behaviour_mins||0))+
       tile('affected', 'EMPLOYEES AFFECTED', (m.employees_affected||0),    !(m.employees_affected||0))+
@@ -3896,7 +3959,7 @@ function _fitTopbar(){ try{
     // NOTE: offsetParent is ALWAYS null for position:fixed elements, so test display+height.
     var kpVisible=kp && ovOn && getComputedStyle(kp).display!=='none' && kp.getBoundingClientRect().height>0;
     var contentTop=kpVisible ? kp.getBoundingClientRect().bottom : tb.getBoundingClientRect().bottom;
-    b.style.paddingTop=Math.round(contentTop+3)+'px';
+    b.style.paddingTop=Math.round(contentTop+14)+'px';
     // overview charts fill down to the sidebar's bottom level (viewport - 16px)
     var cr=document.getElementById('r-charts-row');
     if(cr && ovOn && cr.offsetParent!==null){
@@ -4178,4 +4241,355 @@ function _fitTopbar(){ try{
   else enhanceAll();
   // cards that start hidden (the other action tabs) are enhanced when they appear
   document.addEventListener('click', function(){ setTimeout(enhanceAll, 0); });
+})();
+
+// Shown inside the desk (the Attendance Insights desk page frames this page):
+// the desk is already around it, so the Back to Desk button goes, and any
+// other /app link opens in the desk rather than inside the frame.
+(function () {
+  var framed = false;
+  try { framed = window.self !== window.top && window.top.location.origin === window.location.origin; } catch (e) {}
+  if (!framed) return;
+  // the desk's own title bar names the page and has Refresh: the sidebar's
+  // logo, title and home button would only repeat it
+  document.documentElement.classList.add('att-framed');
+  document.addEventListener('click', function (ev) {
+    var a = ev.target && ev.target.closest && ev.target.closest('a[href^="/app"]');
+    if (a && a.target !== '_blank') { ev.preventDefault(); window.top.frappe ? window.top.frappe.set_route(a.getAttribute('href')) : (window.top.location.href = a.href); }
+  });
+})();
+
+
+// Get Checkins: ask devices for the punches they hold between two dates.
+(function () {
+  function el(id){ return document.getElementById(id); }
+  function escp(v){ return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function today(){ var d=new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,10); }
+  function csrf(){ var t=''; try{ t=frappe.csrf_token||''; }catch(e){} if(!t){ var m=document.cookie.match(/csrftoken=([^;]+)/); t=m?m[1]:''; } return t; }
+  function devices(){
+    return Array.prototype.map.call(document.querySelectorAll('#dev-tbody .dev-poll-one'), function(b){
+      var tr=b.closest('tr'); return { sn:b.getAttribute('data-sn'), name: tr && tr.cells[0] ? tr.cells[0].textContent : '' };
+    }).filter(function(d){ return d.sn; });
+  }
+  function open(only){
+    var ov=el('poll-modal'); if(!ov) return;
+    if(window.attMakeFrappeDate){
+      window.attMakeFrappeDate('poll-start-ctl','poll-start', el('poll-start').value || today());
+      window.attMakeFrappeDate('poll-end-ctl','poll-end', el('poll-end').value || today());
+    }
+    var list=devices();
+    if(only){
+      // one device, picked from its row: only that one
+      var d=list.filter(function(x){ return x.sn===only; })[0] || {sn:only, name:only};
+      el('poll-title').textContent='Get Checkins — '+d.name;
+      el('poll-devices-label').style.display='none';
+      el('poll-devices').style.display='none';
+      el('poll-devices').innerHTML='<input type="checkbox" class="poll-dev" value="'+escp(d.sn)+'" checked>';
+    } else {
+      el('poll-title').textContent='Get Checkins';
+      el('poll-devices-label').style.display='flex';
+      el('poll-devices').style.display='block';
+      el('poll-devices').innerHTML=list.map(function(x){
+        return '<label style="display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer"><input type="checkbox" class="poll-dev" value="'+escp(x.sn)+'" checked> '+escp(x.name)+' <span style="color:var(--text-3)">('+escp(x.sn)+')</span></label>';
+      }).join('') || '<div class="empty">No devices configured</div>';
+      el('poll-all').checked=true;
+    }
+    el('poll-feedback').innerHTML='';
+    el('poll-submit').disabled=false;
+    ov.classList.add('open');
+  }
+  function close(){ var ov=el('poll-modal'); if(ov) ov.classList.remove('open'); }
+  function submit(){
+    var picked=Array.prototype.map.call(document.querySelectorAll('.poll-dev:checked'), function(c){ return c.value; });
+    var start=el('poll-start').value, end=el('poll-end').value, fb=el('poll-feedback');
+    if(!start||!end){ fb.innerHTML='<div class="alert">Set the Start Date and End Date.</div>'; return; }
+    if(end<start){ fb.innerHTML='<div class="alert">End Date cannot be before Start Date.</div>'; return; }
+    if(!picked.length){ fb.innerHTML='<div class="alert">Pick at least one device.</div>'; return; }
+    el('poll-submit').disabled=true;
+    fb.innerHTML='<div class="info-box">Getting checkins from '+picked.length+' device(s)…</div>';
+    fetch('/api/method/upande_ta.upande_ta.api.attendance_insights.poll_device_checkins', {
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded','X-Frappe-CSRF-Token':csrf()},
+      body:'devices='+encodeURIComponent(JSON.stringify(picked))+'&start_date='+encodeURIComponent(start)+'&end_date='+encodeURIComponent(end)
+    }).then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); }).then(function(res){
+      el('poll-submit').disabled=false;
+      if(!res.ok){
+        var msg='Could not get the checkins.';
+        try{ msg=JSON.parse(JSON.parse(res.j._server_messages)[0]).message||msg; }catch(e){}
+        fb.innerHTML='<div class="alert">'+escp(String(msg).replace(/<[^>]*>/g,''))+'</div>'; return;
+      }
+      var m=res.j.message||{}, failed=m.failed||[];
+      if(!failed.length){
+        // all asked: close, and say so above the devices table for a moment
+        close();
+        var ds=el('dev-status');
+        if(ds){
+          ds.innerHTML='<div style="margin:10px 12px;padding:8px 12px;border-radius:6px;background:#ecfdf5;border:1px solid #a7f3d0;font-size:13px"><strong>SENT</strong> — '
+            +(m.queued||0)+' device(s) asked for checkins from '+escp(start)+' to '+escp(end)+'.</div>';
+          clearTimeout(ds._t); ds._t=setTimeout(function(){ ds.innerHTML=''; }, 8000);
+        }
+        return;
+      }
+      fb.innerHTML='<div style="padding:10px 14px;border-radius:6px;background:'+(failed.length?'#fef2f2':'#ecfdf5')+';border:1px solid '+(failed.length?'#fecaca':'#a7f3d0')+';font-size:13px"><strong>'
+        +(failed.length?'PARTIAL':'SENT')+'</strong> — '+(m.queued||0)+' device(s) asked for checkins from '+escp(start)+' to '+escp(end)+'.'
+        +(failed.length?'<br>'+failed.map(function(f){ return '• '+escp(f.device)+': '+escp(f.reason); }).join('<br>'):'')+'</div>';
+    }).catch(function(){ el('poll-submit').disabled=false; fb.innerHTML='<div class="alert">Could not get the checkins.</div>'; });
+  }
+  document.addEventListener('click', function(ev){
+    var t=ev.target; if(!t || !t.closest) return;
+    if(t.closest('#dev-poll')){ open(null); return; }
+    var one=t.closest('.dev-poll-one'); if(one){ open(one.getAttribute('data-sn')); return; }
+    if(t.closest('#poll-modal-close') || t.closest('#poll-cancel') || t.id==='poll-modal'){ close(); return; }
+    if(t.closest('#poll-submit')){ submit(); return; }
+    if(t.id==='poll-all'){ Array.prototype.forEach.call(document.querySelectorAll('.poll-dev'), function(c){ c.checked=t.checked; }); }
+  });
+})();
+
+
+// Workforce Audit: headcount by department / designation, female and male,
+// for a date range, with who joined and who left in it.
+(function () {
+  function el(id){ return document.getElementById(id); }
+  function escp(v){ return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function iso(d){ d=new Date(d.getTime()-d.getTimezoneOffset()*60000); return d.toISOString().slice(0,10); }
+  var VIEW='department', DATA=null, built=false, seq=0, tmr=null;
+  var HEAD_COLS=[
+    {k:'female',t:'Female'},{k:'male',t:'Male'},{k:'other',t:'Not Set'},{k:'total',t:'Total'},
+    {k:'female_pct',t:'Female %'},{k:'male_pct',t:'Male %'},{k:'joined',t:'Joined'},{k:'left',t:'Left'},
+    {k:'absent_days',t:'Absent Days'},{k:'leave_days',t:'On Leave'},{k:'sick_days',t:'Sick Off'}
+  ];
+  // Absenteeism, per department: absent days over the days attendance was
+  // marked as worked or missed (present + absent + half day)
+  var ABS_COLS=[
+    {k:'total',t:'Employees'},{k:'absent_employees',t:'Employees Absent'},
+    {k:'present_days',t:'Present Days'},{k:'absent_days',t:'Absent Days'},
+    {k:'absent_female',t:'Absent Female'},{k:'absent_male',t:'Absent Male'},
+    {k:'half_days',t:'Half Days'},{k:'leave_days',t:'On Leave'},{k:'sick_days',t:'Sick Off'},{k:'abs_rate',t:'Absenteeism %'}
+  ];
+  function cols(){ return VIEW==='absence' ? ABS_COLS : HEAD_COLS; }
+  function rate(g){ var d=(g.present_days||0)+(g.absent_days||0)+(g.half_days||0); return d ? Math.round((g.absent_days||0)/d*1000)/10 : 0; }
+  function group(){
+    var out={};
+    (DATA&&DATA.rows||[]).forEach(function(r){
+      var key = (VIEW==='department'||VIEW==='absence') ? (r.department||'') : VIEW==='designation' ? (r.designation||'') : (r.department||'')+'\u0000'+(r.designation||'');
+      var SUM=['female','male','other','total','joined','left','joined_female','joined_male','left_female','left_male','present_days','absent_days','absent_female','absent_male','leave_days','sick_days','half_days','absent_employees'];
+      var g=out[key]; if(!g){ g=out[key]={department:r.department||'',designation:r.designation||''}; SUM.forEach(function(f){ g[f]=0; }); }
+      SUM.forEach(function(f){ g[f]+=r[f]||0; });
+    });
+    return Object.keys(out).map(function(k){ var g=out[k]; g.female_pct=g.total?Math.round(g.female/g.total*100):0; g.male_pct=g.total?Math.round(g.male/g.total*100):0; g.abs_rate=rate(g); return g; })
+      .sort(function(a,b){ return VIEW==='absence' ? (b.abs_rate-a.abs_rate || b.absent_days-a.absent_days) : (b.total-a.total || (a.department+a.designation).localeCompare(b.department+b.designation)); });
+  }
+  function labels(){ return (VIEW==='department'||VIEW==='absence')?['Department']:VIEW==='designation'?['Designation']:['Department','Designation']; }
+  function names(g){ return (VIEW==='department'||VIEW==='absence')?[g.department||'Not Set']:VIEW==='designation'?[g.designation||'Not Set']:[g.department||'Not Set', g.designation||'Not Set']; }
+  function cell(g,k){
+    if(k==='female_pct') return g.total?g.female_pct+'%':'—';
+    if(k==='male_pct') return g.total?g.male_pct+'%':'—';
+    if(k==='abs_rate') return ((g.present_days||0)+(g.absent_days||0)+(g.half_days||0))?g.abs_rate+'%':'—';
+    if(k==='joined') return g.joined?(g.joined+'<span class="lost-of"> · '+g.joined_female+'F '+g.joined_male+'M</span>'):'—';
+    if(k==='left') return g.left?(g.left+'<span class="lost-of"> · '+g.left_female+'F '+g.left_male+'M</span>'):'—';
+    return g[k]||(k==='total'?0:'—');
+  }
+  function render(){
+    var st=el('aud-status'), th=el('aud-thead'), tb=el('aud-tbody'); if(!tb) return;
+    if(!DATA){ return; }
+    var t=DATA.totals||{};
+    function tile(mod,label,v){ return '<span class="lost-sum-i lost-sum-i--'+mod+'"><small>'+label+'</small><b>'+v+'</b></span>'; }
+    if(VIEW==='absence'){
+      st.innerHTML='<div class="lost-sum">'
+        +tile('total','ABSENTEEISM',rate(t)+'%')+tile('affected','ABSENT DAYS',t.absent_days||0)
+        +tile('behaviour','EMPLOYEES ABSENT',(t.absent_employees||0)+(t.total?' of '+t.total:''))
+        +tile('leave','ON LEAVE',t.leave_days||0)+tile('sick','SICK OFF',t.sick_days||0)+tile('noscan','HALF DAYS',t.half_days||0)+'</div>';
+    } else
+    st.innerHTML='<div class="lost-sum">'
+      +tile('total','EMPLOYED',t.total||0)+tile('affected','FEMALE',(t.female||0)+(t.total?' · '+Math.round((t.female||0)/t.total*100)+'%':''))
+      +tile('behaviour','MALE',(t.male||0)+(t.total?' · '+Math.round((t.male||0)/t.total*100)+'%':''))
+      +tile('frequent','JOINED',t.joined||0)+tile('noscan','LEFT',t.left||0)
+      +tile('leave','ON LEAVE',t.leave_days||0)+tile('sick','SICK OFF',t.sick_days||0)+'</div>';
+    th.innerHTML='<tr>'+labels().map(function(l){ return '<th>'+l+'</th>'; }).join('')
+      +cols().map(function(c){ return '<th class="num">'+c.t+'</th>'; }).join('')+'</tr>';
+    var rows=group();
+    if(!rows.length){ tb.innerHTML='<tr><td colspan="'+(labels().length+cols().length)+'"><div class="empty">No employees for this selection</div></td></tr>'; return; }
+    tb.innerHTML=rows.map(function(g){
+      return '<tr class="aud-row" data-dep="'+escp(g.department)+'" data-des="'+escp(g.designation)+'">'+names(g).map(function(n,i){ return '<td>'+(i===0?'<b>'+escp(n)+'</b>':escp(n))+'</td>'; }).join('')
+        +cols().map(function(c){ return '<td class="num">'+cell(g,c.k)+'</td>'; }).join('')+'</tr>';
+    }).join('');
+  }
+  function skeleton(){
+    var tb=el('aud-tbody'); if(!tb) return;
+    var n=labels().length+cols().length, h='';
+    for(var r=0;r<10;r++){ h+='<tr class="sk-row">'; for(var c=0;c<n;c++) h+='<td><span class="sk sk-cell" style="width:'+(c<labels().length?60:40)+'%"></span></td>'; h+='</tr>'; }
+    tb.innerHTML=h;
+  }
+  function load(){
+    var my=++seq, from=(el('aud-from')||{}).value, to=(el('aud-to')||{}).value;
+    if(!from||!to) return;
+    skeleton();
+    var qs=new URLSearchParams({from_date:from,to_date:to,
+      company:((el('r-company')||{}).value||''), farm:((el('r-farm')||{}).value||''),
+      employment_type:((el('r-emptype')||{}).value||'')}).toString();
+    fetch('/api/method/upande_ta.upande_ta.api.attendance_insights.workforce_audit?'+qs)
+      .then(function(r){ return r.json().then(function(j){ return {ok:r.ok,j:j}; }); })
+      .then(function(res){
+        if(my!==seq) return;
+        if(!res.ok){ var m='Could not load the audit.'; try{ m=JSON.parse(JSON.parse(res.j._server_messages)[0]).message||m; }catch(e){} el('aud-status').innerHTML='<div class="alert">'+escp(String(m).replace(/<[^>]*>/g,''))+'</div>'; el('aud-tbody').innerHTML=''; return; }
+        DATA=res.j.message||null; render();
+      }).catch(function(){ if(my===seq){ el('aud-status').innerHTML='<div class="alert">Could not load the audit.</div>'; } });
+  }
+  function schedule(){ if(tmr) clearTimeout(tmr); tmr=setTimeout(function(){ tmr=null; load(); }, 150); }
+  function build(){
+    if(built || !window.attMakeFrappeDate) return;
+    built=true;
+    var to=window._selDate||iso(new Date()), d=new Date(to+'T00:00:00');
+    var p=window._payroll, from=(p&&p.from)||iso(new Date(d.getFullYear(), d.getMonth(), 1));
+    if(p&&p.to) to=p.to;
+    window.attMakeFrappeDate('aud-from-ctl','aud-from',from);
+    window.attMakeFrappeDate('aud-to-ctl','aud-to',to);
+    ['aud-from','aud-to'].forEach(function(id){
+      var inp=el(id); if(!inp) return; var last=inp.value;
+      setInterval(function(){ if(inp.value!==last){ last=inp.value; schedule(); } }, 400);
+    });
+  }
+  // ── row drawer: the employees behind a department / designation row ──
+  var DR=null;
+  function inGroup(e, dep, des){
+    if(VIEW==='designation') return (e.designation||'')===des;
+    if(VIEW==='both') return (e.department||'')===dep && (e.designation||'')===des;
+    return (e.department||'')===dep;
+  }
+  function openGroup(dep, des){
+    if(!DATA) return;
+    var list=(DATA.employees||[]).filter(function(e){ return inGroup(e, dep, des); });
+    var title = VIEW==='designation' ? (des||'Not Set') : VIEW==='both' ? ((dep||'Not Set')+' · '+(des||'Not Set')) : (dep||'Not Set');
+    var f=0,m=0; list.forEach(function(e){ var g=(e.gender||'').toLowerCase(); if(g==='female')f++; else if(g==='male')m++; });
+    DR={title:title, list:list};
+    el('aud-dr-name').textContent=title;
+    el('aud-dr-sub').textContent=list.length+' employees · '+f+' female · '+m+' male · '+DATA.from+' → '+DATA.to;
+    // every employee row carries the whole period: left date and each kind of day
+    var DAYS=[['present_days','Present'],['absent_days','Absent'],['half_days','Half Day'],['leave_days','On Leave'],['sick_days','Sick Off']];
+    if(list.some(function(e){ return e.wfh_days; })) DAYS.push(['wfh_days','Work From Home']);
+    // the table lists the people; the period's days are the tiles above it
+    var head=['Employee','Name','Gender', VIEW==='designation'?'Department':'Designation','Unit','Employment Type','Joined'];
+    var body=list.map(function(e){
+      return '<tr><td class="t-code">'+escp(e.employee)+'</td><td><b>'+escp(e.employee_name)+'</b></td><td>'+escp(e.gender||'Not Set')+'</td>'
+        +'<td>'+escp(VIEW==='designation'?(e.department||''):(e.designation||''))+'</td><td>'+escp(e.farm)+'</td><td>'+escp(e.employment_type)+'</td><td>'+escp(e.date_of_joining)+'</td></tr>';
+    }).join('');
+    DR.days=DAYS;
+    DR.xhead=head.concat(['Left']).concat(DAYS.map(function(d){ return d[1]; }));
+    var n=list.length, o=n-f-m;
+    function dtile(mod,label,v){ return '<span class="lost-sum-i lost-sum-i--'+mod+'"><small>'+label+'</small><b>'+v+'</b></span>'; }
+    var tiles='<div class="lost-sum aud-dr-sum">'+dtile('total','EMPLOYEES',n)
+      +dtile('frequent','FEMALE',f+(n?' · '+Math.round(f/n*100)+'%':''))
+      +dtile('behaviour','MALE',m+(n?' · '+Math.round(m/n*100)+'%':''))
+      +(o?dtile('noscan','NOT SET',o+' · '+Math.round(o/n*100)+'%'):'')
+      +dtile('noscan','LEFT',list.filter(function(e){ return e.relieving_date; }).length)
+      +dtile('unique','PRESENT',list.reduce(function(a,e){ return a+(e.present_days||0); },0))
+      +dtile('total','ABSENT',list.reduce(function(a,e){ return a+(e.absent_days||0); },0))
+      +dtile('behaviour','HALF DAY',list.reduce(function(a,e){ return a+(e.half_days||0); },0))
+      +dtile('leave','ON LEAVE',list.reduce(function(a,e){ return a+(e.leave_days||0); },0))
+      +dtile('sick','SICK OFF',list.reduce(function(a,e){ return a+(e.sick_days||0); },0))+'</div>';
+    el('aud-dr-body').innerHTML=tiles+'<div class="tile-inline-wrap aud-dr-wrap"><table class="tile-inline-tbl"><thead><tr>'
+      +head.map(function(h){ return '<th>'+h+'</th>'; }).join('')+'</tr></thead><tbody>'
+      +(body||'<tr><td colspan="'+head.length+'"><div class="empty">No employees</div></td></tr>')+'</tbody></table></div>';
+    DR.head=head;
+    el('aud-overlay').classList.add('open');
+  }
+  function closeGroup(){ el('aud-overlay').classList.remove('open'); }
+  document.addEventListener('click', function(ev){
+    var t=ev.target; if(!t||!t.closest) return;
+    var tr=t.closest('#aud-tbody tr.aud-row'); if(tr){ openGroup(tr.getAttribute('data-dep'), tr.getAttribute('data-des')); return; }
+    if(t.id==='aud-overlay' || t.closest('#aud-dr-close')){ closeGroup(); return; }
+    if(t.closest('#aud-dr-xls') && DR && window.XLSX){
+      var aoa=[DR.xhead].concat(DR.list.map(function(e){ return [e.employee,e.employee_name,e.gender||'Not Set',VIEW==='designation'?e.department:e.designation,e.farm,e.employment_type,e.date_of_joining,e.relieving_date||''].concat(DR.days.map(function(d){ return e[d[0]]||0; })); }));
+      var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Employees');
+      XLSX.writeFile(wb, 'workforce-audit-'+String(DR.title).replace(/[^A-Za-z0-9]+/g,'-')+'.xlsx');
+    }
+  });
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape' && el('aud-overlay').classList.contains('open')) closeGroup(); });
+
+  window._reloadAudit=function(){ var p=el('panel-audit'); if(p&&p.classList.contains('active')) schedule(); };
+  document.addEventListener('click', function(ev){
+    var t=ev.target; if(!t||!t.closest) return;
+    if(t.closest('#sb-audit')){ setTimeout(function(){ var p=el('panel-audit'); if(p&&p.classList.contains('active')){ build(); schedule(); } }, 0); return; }
+    var v=t.closest('#aud-views .ti-tab');
+    if(v){ document.querySelectorAll('#aud-views .ti-tab').forEach(function(x){ x.classList.toggle('active', x===v); }); VIEW=v.getAttribute('data-av')||'department'; render(); return; }
+    if(t.closest('#aud-xls')){
+      if(!DATA||!window.XLSX) return;
+      var head, aoa;
+      if(VIEW==='absence'){
+        head=labels().concat(ABS_COLS.map(function(c){ return c.t; }));
+        aoa=[head].concat(group().map(function(g){ return names(g).concat(ABS_COLS.map(function(c){ return g[c.k]||0; })); }));
+      } else {
+        head=labels().concat(['Female','Male','Not Set','Total','Female %','Male %','Joined','Joined Female','Joined Male','Left','Left Female','Left Male','Absent Days','On Leave','Sick Off']);
+        aoa=[head].concat(group().map(function(g){ return names(g).concat([g.female,g.male,g.other,g.total,g.female_pct,g.male_pct,g.joined,g.joined_female,g.joined_male,g.left,g.left_female,g.left_male,g.absent_days,g.leave_days,g.sick_days]); }));
+      }
+      var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Workforce Audit');
+      XLSX.writeFile(wb, 'workforce-audit-'+DATA.from+'-to-'+DATA.to+'.xlsx');
+    }
+  });
+})();
+
+// (the sidebar is gone: its units are the Unit/Division picker, its views the topbar tabs)
+
+// One Biometrics tab in the sidebar: Devices and Templates are two views of it,
+// switched from the DEVICES / TEMPLATES tabs in each card's head.
+(function () {
+  function el(id){ return document.getElementById(id); }
+  function markSidebar(){
+    var p=el('panel-templates'), head=el('sb-dev-head');
+    if(head && p && p.classList.contains('active')) head.classList.add('active');
+  }
+  document.addEventListener('click', function(ev){
+    var t=ev.target; if(!t || !t.closest) return;
+    var b=t.closest('.bio-tabs .ti-tab');
+    if(b){
+      var want=b.getAttribute('data-bio'), p=el('panel-'+want);
+      if(!(p && p.classList.contains('active'))){
+        var btn = want==='templates' ? el('sb-templates') : el('sb-dev-head');
+        if(btn) btn.click();
+      }
+      setTimeout(markSidebar, 0);
+      return;
+    }
+    if(t.closest('.tab-btn')) setTimeout(markSidebar, 0);
+  });
+})();
+
+// On the Devices, Templates and Workforce Audit views the filters row would
+// only repeat what the card already has (its own dates): the row steps aside,
+// and for Templates and Workforce Audit the employment-type and unit buttons
+// move into the card head. The company picker stays in the tabs row, top right.
+(function () {
+  var types=document.getElementById('r-emptype-btns'), units=document.getElementById('r-unit-btns');
+  var VIEWS=[
+    {panel:'panel-devices', head:'#devices-card .card-head', move:[]},
+    {panel:'panel-templates', head:'#bt-card .card-head', move:[types, units]},
+    {panel:'panel-audit', head:'#aud-card .card-head', after:'.lost-dates', move:[types, units]}
+  ];
+  // where each movable group lives in the filters row, to put it back
+  var homes=[types, units].filter(Boolean).map(function(n){ return {n:n, parent:n.parentNode, next:n.nextSibling}; });
+  var cur=null;
+  function sync(){
+    var view=null;
+    VIEWS.forEach(function(v){ var p=document.getElementById(v.panel); if(p && p.classList.contains('active')) view=v; });
+    if(view===cur) return;
+    cur=view;
+    homes.forEach(function(h){
+      if(h.n.parentNode!==h.parent) h.parent.insertBefore(h.n, h.next && h.next.parentNode===h.parent ? h.next : null);
+      h.n.classList.remove('in-card');
+    });
+    if(view){
+      var head=document.querySelector(view.head);
+      if(head){
+        var after=head.querySelector(view.after || '.bio-tabs'), at=after ? after.nextSibling : head.firstChild;
+        view.move.forEach(function(n){ if(n){ head.insertBefore(n, at); n.classList.add('in-card'); } });
+      }
+    }
+    document.body.classList.toggle('dev-mode', !!view);
+    try{ window.dispatchEvent(new Event('resize')); }catch(e){}
+  }
+  if(window.MutationObserver) VIEWS.forEach(function(v){
+    var p=document.getElementById(v.panel);
+    if(p) new MutationObserver(sync).observe(p,{attributes:true,attributeFilter:['class']});
+  });
+  sync();
 })();

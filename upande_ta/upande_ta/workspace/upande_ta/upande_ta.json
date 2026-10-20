@@ -265,7 +265,7 @@
    "link_to": "Exchange Setting"
   }
  ],
- "modified": "2026-10-19 11:00:00.000000",
+ "modified": "2026-10-20 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Upande TA",
@@ -286,8 +286,8 @@
    "color": "Cyan",
    "doc_view": "",
    "label": "Attendance Insights",
-   "type": "URL",
-   "url": "/attendance-insights"
+   "type": "Page",
+   "link_to": "attendance-insights"
   },
   {
    "color": "Blue",
