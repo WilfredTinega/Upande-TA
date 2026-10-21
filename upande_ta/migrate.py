@@ -858,7 +858,14 @@ def rename_hr_app_icon():
 	from frappe.model.rename_doc import rename_doc
 
 	if not frappe.db.exists("Desktop Icon", _HR_ICON_SHIPPED):
+		# A migrate that did not re-sync hrms leaves no "Frappe HR" to rename; if the
+		# orphan sweep took "HR" as well, every HR tile lost its group. Recreate it.
+		if not frappe.db.exists("Desktop Icon", _HR_ICON):
+			_create_hr_icon()
 		_reparent_hr_children()
+		_keep_hr_icon_off_orphan_sweep()
+		frappe.cache.delete_key("desktop_icons")
+		frappe.cache.delete_key("bootinfo")
 		return
 
 	if frappe.db.exists("Desktop Icon", _HR_ICON):
@@ -902,9 +909,39 @@ def rename_hr_app_icon():
 		# and for check_app_permission(), so it has to go back.
 		frappe.db.set_value("Desktop Icon", _HR_ICON, "app", "hrms", update_modified=False)
 
+	_keep_hr_icon_off_orphan_sweep()
 	frappe.cache.delete_key("desktop_icons")
 	frappe.cache.delete_key("bootinfo")
 	print(f"{APP_NAME}: Desk app group '{_HR_ICON_SHIPPED}' relabelled '{_HR_ICON}'")
+
+
+def _keep_hr_icon_off_orphan_sweep():
+	"""`remove_orphan_entities()` deletes every standard Desktop Icon with no JSON in
+	its app, and hrms ships frappe_hr.json, not hr.json -- so a standard "HR" was
+	deleted on each migrate that did not also re-sync hrms. A non-standard one is
+	left alone; `app` stays hrms for check_app_permission()."""
+	frappe.db.set_value("Desktop Icon", _HR_ICON, "standard", 0, update_modified=False)
+
+
+def _create_hr_icon():
+	"""The "HR" group, from hrms' own frappe_hr.json with its label changed."""
+	import json
+	import os
+
+	path = os.path.join(frappe.get_app_path("hrms"), "desktop_icon", "frappe_hr.json")
+	try:
+		with open(path) as f:
+			shipped = json.load(f)
+	except (OSError, ValueError):
+		shipped = {"icon_type": "App", "link": "/desk/people", "link_type": "External"}
+	doc = frappe.new_doc("Desktop Icon")
+	for key in ("icon_type", "link", "link_type", "logo_url", "idx", "hidden"):
+		if shipped.get(key) is not None:
+			doc.set(key, shipped[key])
+	doc.label = _HR_ICON
+	doc.app = "hrms"
+	doc.standard = 0
+	doc.insert(ignore_permissions=True)
 
 
 def _reparent_hr_children():
