@@ -120,7 +120,6 @@ const STATUS_INDICATOR = {
 /** Row fields a company may be allowed to type into, and the mark that keeps
  * the typed figure (bulk_overtime.MANUAL_MARKS). */
 const MANUAL_MARKS = {
-	working_hours: "manual_working_hours",
 	biometric_hours: "manual_biometric_hours",
 	approved_hours: "manual_override",
 };
@@ -748,7 +747,6 @@ const bo_mark_typed = (field) =>
 	};
 
 frappe.ui.form.on("Bulk Overtime Entry", {
-	working_hours: bo_mark_typed("working_hours"),
 	biometric_hours: bo_mark_typed("biometric_hours"),
 	approved_hours: bo_mark_typed("approved_hours"),
 });

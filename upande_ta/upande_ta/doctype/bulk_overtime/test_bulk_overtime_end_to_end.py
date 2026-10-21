@@ -1035,21 +1035,6 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		row = self.own_rows(self.make_bulk_overtime())[0]
 		self.assertEqual((row.status, row.approved_hours), ("No Clock-Out", 0))
 
-	def test_worked_stays_the_attendance(self):
-		"""Worked is never typed: it is what the attendance says — and an old
-		hand-typed Worked goes back to it."""
-		self.make_request({self.working_day: 2})
-		doc = self.make_bulk_overtime()
-		row = self.own_rows(doc)[0]
-		row.manual_working_hours = 1  # the old way, on a batch saved before
-		row.working_hours = 2
-		doc.refresh_entries()
-
-		row = self.own_rows(doc)[0]
-		self.assertEqual(row.working_hours, 11.5)
-		self.assertFalse(row.manual_working_hours)
-		self.assertEqual(row.approved_hours, 2)
-
 	# ──────────────────────────────────────────────────────────────────────
 	# Hours typed by hand, where Biometric Setting allows the company
 	# ──────────────────────────────────────────────────────────────────────
@@ -1112,19 +1097,6 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		row = self.own_rows(doc)[0]
 		self.assertEqual((row.manual_override, row.approved_hours), (0, 0))
 
-	def test_allowed_worked_drives_the_biometric(self):
-		self.allow_editing("working_hours")
-		self.make_request({self.working_day: 2})
-		doc = self.make_bulk_overtime()
-		row = self.own_rows(doc)[0]
-		row.manual_working_hours = 1
-		row.working_hours = 10
-		doc.refresh_entries()
-
-		row = self.own_rows(doc)[0]
-		self.assertEqual((row.working_hours, row.biometric_hours), (10, 10 - SHIFT_HOURS))
-		self.assertEqual(row.approved_hours, 1)
-
 	def test_allowed_approved_is_capped_at_the_request_and_needs_a_reason(self):
 		self.allow_editing("approved_hours")
 		self.make_request({self.no_punch_day: 2})
@@ -1159,8 +1131,7 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		doc = self.make_bulk_overtime()
 
 		row = self.own_rows(doc)[0]
-		self.assertEqual(row.working_hours, 11.5, "read from the attendance, not typed")
-		self.assertEqual(row.biometric_hours, 2.5)
+		self.assertEqual(row.biometric_hours, 2.5, "read from the attendance, not typed")
 
 	# ──────────────────────────────────────────────────────────────────────
 	# What the Overtime Request form asks before offering its button
@@ -1250,8 +1221,8 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		row = self.rows_by_date(self.make_bulk_overtime())[self.working_day]
 
 		self.assertEqual(
-			(row.working_hours, row.early_in_hours, row.biometric_hours, row.approved_hours),
-			(11.5, 1, 1.5, 1.5),
+			(row.early_in_hours, row.biometric_hours, row.approved_hours),
+			(1, 1.5, 1.5),
 		)
 
 	def test_a_late_start_is_made_up_before_overtime(self):
@@ -1286,8 +1257,8 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		row = self.rows_by_date(self.make_bulk_overtime())[self.working_day]
 
 		self.assertEqual(
-			(row.working_hours, row.early_in_hours, row.biometric_hours, row.approved_hours),
-			(12.5, 1, 2.5, 2.5),
+			(row.early_in_hours, row.biometric_hours, row.approved_hours),
+			(1, 2.5, 2.5),
 		)
 
 	def test_two_outs_are_an_arrival_and_a_departure(self):
@@ -1299,7 +1270,7 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		self.make_request({self.no_punch_day: 2})
 		row = self.rows_by_date(self.make_bulk_overtime())[self.no_punch_day]
 
-		self.assertEqual((row.working_hours, row.biometric_hours, row.status), (11, 2, "Matched"))
+		self.assertEqual((row.biometric_hours, row.status), (2, "Matched"))
 
 	def test_alternating_shifts_keep_the_attendance_hours(self):
 		"""An alternating shift already takes the first punch as IN and the
@@ -1309,7 +1280,7 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		self.make_request({self.working_day: 3})
 		row = self.rows_by_date(self.make_bulk_overtime())[self.working_day]
 
-		self.assertEqual(row.working_hours, 11.5)
+		self.assertEqual(row.biometric_hours, 2.5)
 
 	def test_a_single_punch_on_a_strict_shift_is_still_no_clock_out(self):
 		self._labels_are_strict()

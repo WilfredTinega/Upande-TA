@@ -85,7 +85,6 @@ PICK_UP_WINDOW_DAYS = 31
 #: keeps the typed figure. The Overtime Edit Company columns carry the same
 #: names.
 MANUAL_MARKS = {
-	"working_hours": "manual_working_hours",
 	"biometric_hours": "manual_biometric_hours",
 	"approved_hours": "manual_override",
 }
@@ -129,17 +128,15 @@ class BulkOvertime(Document):
 			who = "{0}, {1}".format(
 				row.employee_name or row.employee, frappe.format(row.overtime_date, "Date")
 			)
-			worked, shift = flt(row.working_hours) - flt(row.early_in_hours), flt(row.shift_hours)
+			shift = flt(row.shift_hours)
 			if row.manual_override:
-				why = _("Approved set to 0 by hand")
+				why = _("Actual Worked Hours set to 0 by hand")
 			elif row.manual_biometric_hours:
 				why = _("Biometric set to 0 by hand")
 			elif row.status in (engine.NO_ATTENDANCE, engine.NO_CLOCK_OUT, engine.NO_SHIFT):
 				why = _(row.status)
-			elif row.day_type == engine.WORKING_DAY and worked <= shift:
-				why = _("{0}h worked on a {1}h shift is no overtime").format(
-					frappe.format(worked, "Float"), frappe.format(shift, "Float")
-				)
+			elif row.day_type == engine.WORKING_DAY and not flt(row.biometric_hours):
+				why = _("Nothing worked past the {0}h shift").format(frappe.format(shift, "Float"))
 			else:
 				why = _(row.status or "0")
 			lines.append("{0}: {1}".format(frappe.bold(who), why))
@@ -1288,27 +1285,23 @@ class BulkOvertime(Document):
 			row.attendance = record.name if record else None
 			row.shift = record.shift if record else None
 
-			# Worked is the attendance's own figure, unless typed by hand
+			# the hours worked are the attendance's own figure
 			worked = flt(record.working_hours) if record else 0
 			shift_type = shift_types.get(row.shift)
 			day_punches = punches.get((row.employee, date)) or []
 			first_in = record.in_time if record else None
-			if row.manual_working_hours:
-				worked = max(flt(row.working_hours), 0)
-			elif record and _labels_decide(shift_type) and len(day_punches) >= 2:
+			if record and _labels_decide(shift_type) and len(day_punches) >= 2:
 				# The shift reads IN/OUT labels strictly, and readers mislabel
 				# scans: IN, IN or OUT, OUT leaves HRMS with no hours at all.
 				# The first punch is the arrival and the last the departure,
 				# whatever they are labelled.
 				first_in = day_punches[0]
 				worked = round((day_punches[-1] - first_in).total_seconds() / 3600, 4)
-			row.working_hours = worked
 			row.shift_hours = shift_hours.get(row.shift) or default_hours
 
 			row.early_in_hours = 0
 			if (
 				record
-				and not row.manual_working_hours
 				and row.day_type == engine.WORKING_DAY
 				and shift_type
 				and shift_type.start_time is not None
@@ -1339,7 +1332,7 @@ class BulkOvertime(Document):
 			approved, row.status = engine.settle(
 				row.requested_hours,
 				row.biometric_hours,
-				has_attendance=bool(record) or bool(row.manual_working_hours or row.manual_biometric_hours),
+				has_attendance=bool(record) or bool(row.manual_biometric_hours),
 				has_hours=worked > 0 or bool(row.manual_biometric_hours),
 				# a rest day pays every hour worked, so it needs no shift length
 				has_shift=bool(row.shift_hours)
@@ -1659,7 +1652,6 @@ class BulkOvertime(Document):
 					"punch_hours": punch_hours,
 					"shift_hours": round(flt(shift_hours), 2),
 					"beyond_shift": beyond,
-					"worked_hours": flt(row.working_hours),
 					"requested_hours": flt(row.requested_hours),
 					"approved_hours": flt(row.approved_hours),
 					"overtime_request": row.overtime_request,

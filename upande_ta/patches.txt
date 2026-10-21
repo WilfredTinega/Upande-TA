@@ -21,3 +21,5 @@ upande_ta.patches.v1.index_employee_checkin_for_insights
 upande_ta.patches.v1.set_exchange_checkin_person_doctype
 upande_ta.patches.v1.link_exchange_checkin_employee_checkin
 upande_ta.patches.v1.index_employee_checkin_device_time
+upande_ta.patches.v1.repoint_week_off_copies_to_shared_lists
+upande_ta.patches.v1.drop_bulk_overtime_worked_hours

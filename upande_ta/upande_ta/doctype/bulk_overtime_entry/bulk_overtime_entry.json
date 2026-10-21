@@ -19,7 +19,6 @@
   "manual_override",
   "column_break_ruvb",
   "manual_biometric_hours",
-  "manual_working_hours",
   "section_break_source",
   "overtime_request",
   "budget_scope",
@@ -28,7 +27,6 @@
   "column_break_source",
   "shift",
   "shift_hours",
-  "working_hours",
   "early_in_hours",
   "overtime_slip"
  ],
@@ -102,7 +100,7 @@
    "fieldname": "approved_hours",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Approved",
+   "label": "Actual Worked Hours",
    "non_negative": 1,
    "read_only": 1
   },
@@ -116,17 +114,17 @@
    "read_only": 1
   },
   {
+   "depends_on": "eval:doc.manual_override",
    "fieldname": "section_break_override",
    "fieldtype": "Section Break",
-   "label": "Override",
-   "depends_on": "eval:doc.manual_override"
+   "label": "Override"
   },
   {
    "default": "0",
+   "depends_on": "eval:doc.manual_override",
    "fieldname": "manual_override",
    "fieldtype": "Check",
    "label": "Manual Override",
-   "depends_on": "eval:doc.manual_override",
    "read_only_depends_on": "eval:!doc.manual_override"
   },
   {
@@ -167,22 +165,6 @@
    "read_only": 1
   },
   {
-   "default": "0",
-   "fieldname": "manual_working_hours",
-   "fieldtype": "Check",
-   "label": "Worked Entered by Hand",
-   "depends_on": "eval:doc.manual_working_hours",
-   "read_only_depends_on": "eval:!doc.manual_working_hours"
-  },
-  {
-   "columns": 1,
-   "fieldname": "working_hours",
-   "fieldtype": "Float",
-   "in_list_view": 1,
-   "label": "Worked",
-   "read_only": 1
-  },
-  {
    "fieldname": "early_in_hours",
    "fieldtype": "Float",
    "label": "Before Shift Start (Hours)",
@@ -204,10 +186,10 @@
   },
   {
    "default": "0",
+   "depends_on": "eval:doc.manual_biometric_hours",
    "fieldname": "manual_biometric_hours",
    "fieldtype": "Check",
    "label": "Biometric Entered by Hand",
-   "depends_on": "eval:doc.manual_biometric_hours",
    "read_only_depends_on": "eval:!doc.manual_biometric_hours"
   },
   {
@@ -228,7 +210,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-10-13 10:00:00.000000",
+ "modified": "2026-10-21 21:30:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Bulk Overtime Entry",
