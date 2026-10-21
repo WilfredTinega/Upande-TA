@@ -110,7 +110,7 @@
    "options": "Bulk Overtime Entry"
   },
   {
-   "depends_on": "eval:doc.override_reason || (doc.bulk_overtime_entries || []).some(r => r.manual_working_hours || r.manual_biometric_hours || r.manual_override)",
+   "depends_on": "eval:doc.override_reason || (doc.bulk_overtime_entries || []).some(r => r.manual_biometric_hours || r.manual_override)",
    "fieldname": "override_reason",
    "fieldtype": "Small Text",
    "label": "Reason for Manual Changes"
