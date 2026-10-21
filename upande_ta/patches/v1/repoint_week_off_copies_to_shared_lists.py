@@ -29,7 +29,6 @@ from frappe.utils import add_days, getdate
 
 
 def execute():
-	from upande_ta.upande_ta.overrides.holiday_list_assignment import cancel_auto_absent_on_week_off
 	from upande_ta.upande_ta.week_off_change import matching_list
 
 	for copy in _copies():
@@ -37,49 +36,55 @@ def execute():
 		if weekdays is None:
 			continue
 		target = matching_list(copy.from_date, copy.to_date, weekdays)
-		if not target:
-			continue
-
-		try:
-			frappe.db.savepoint("week_off_copy")
-			assignments = frappe.get_all(
-				"Holiday List Assignment", filters={"holiday_list": copy.name}, fields=["name", "docstatus"]
-			)
-			for row in assignments:
-				frappe.db.set_value(
-					"Holiday List Assignment", row.name, "holiday_list", target, update_modified=False
-				)
-				frappe.get_doc("Holiday List Assignment", row.name).add_comment(
-					"Comment",
-					f"Holiday List moved from the per-employee copy {copy.name} to {target}.",
-				)
-			frappe.db.sql(
-				"update `tabLeave Ledger Entry` set holiday_list = %s where holiday_list = %s",
-				(target, copy.name),
-			)
-			frappe.delete_doc("Holiday List", copy.name, ignore_permissions=True, force=True)
-		except Exception:
-			frappe.db.rollback(save_point="week_off_copy")
-			frappe.log_error(
-				title=f"Week-off copy {copy.name} not replaced",
-				message=frappe.get_traceback(),
-			)
-			continue
-
-		for row in assignments:
-			if row.docstatus != 1:
-				continue
-			try:
-				frappe.db.savepoint("week_off_copy_absent")
-				cancel_auto_absent_on_week_off(frappe.get_doc("Holiday List Assignment", row.name))
-			except Exception:
-				frappe.db.rollback(save_point="week_off_copy_absent")
-				frappe.log_error(
-					title=f"Absents on {row.name} not cleared",
-					message=frappe.get_traceback(),
-				)
+		if target:
+			repoint(copy.name, target)
 
 	frappe.cache.delete_value("holidays_between_dates")
+
+
+def repoint(copy: str, target: str):
+	"""Move every assignment and ledger entry on ``copy`` to ``target``, delete
+	the copy, and cancel the Absents the shared list now reads as week offs."""
+	from upande_ta.upande_ta.overrides.holiday_list_assignment import cancel_auto_absent_on_week_off
+
+	try:
+		frappe.db.savepoint("week_off_copy")
+		assignments = frappe.get_all(
+			"Holiday List Assignment", filters={"holiday_list": copy}, fields=["name", "docstatus"]
+		)
+		for row in assignments:
+			frappe.db.set_value(
+				"Holiday List Assignment", row.name, "holiday_list", target, update_modified=False
+			)
+			frappe.get_doc("Holiday List Assignment", row.name).add_comment(
+				"Comment",
+				f"Holiday List moved from the per-employee copy {copy} to {target}.",
+			)
+		frappe.db.sql(
+			"update `tabLeave Ledger Entry` set holiday_list = %s where holiday_list = %s",
+			(target, copy),
+		)
+		frappe.delete_doc("Holiday List", copy, ignore_permissions=True, force=True)
+	except Exception:
+		frappe.db.rollback(save_point="week_off_copy")
+		frappe.log_error(
+			title=f"Week-off copy {copy} not replaced",
+			message=frappe.get_traceback(),
+		)
+		return
+
+	for row in assignments:
+		if row.docstatus != 1:
+			continue
+		try:
+			frappe.db.savepoint("week_off_copy_absent")
+			cancel_auto_absent_on_week_off(frappe.get_doc("Holiday List Assignment", row.name))
+		except Exception:
+			frappe.db.rollback(save_point="week_off_copy_absent")
+			frappe.log_error(
+				title=f"Absents on {row.name} not cleared",
+				message=frappe.get_traceback(),
+			)
 
 
 def _copies() -> list:
