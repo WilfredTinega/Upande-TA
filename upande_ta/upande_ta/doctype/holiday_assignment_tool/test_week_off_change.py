@@ -201,6 +201,42 @@ class IntegrationTestWeekOffChange(_TestCase):
 		self.assertEqual(self._on("2030-03-10"), BASE)
 
 
+	def test_a_shared_list_that_already_reads_right_is_assigned_as_it_is(self):
+		from frappe.utils import add_days, getdate
+
+		shared = f"{PREFIX} Friday Week Off {YEAR}"
+		holidays, date = [], getdate(f"{YEAR}-01-04")  # the first Friday
+		while date.year == YEAR:
+			public = str(date) == PUBLIC_HOLIDAY
+			holidays.append(
+				{
+					"holiday_date": date,
+					"description": "Public Holiday" if public else "Friday",
+					"weekly_off": 0 if public else 1,
+				}
+			)
+			date = add_days(date, 7)
+		frappe.get_doc(
+			{
+				"doctype": "Holiday List",
+				"holiday_list_name": shared,
+				"from_date": f"{YEAR}-01-01",
+				"to_date": f"{YEAR}-12-31",
+				"holidays": holidays,
+			}
+		).insert(ignore_permissions=True)
+		lists = frappe.db.count("Holiday List")
+
+		result = self._change("2030-03-08", "2030-03-24")
+
+		self.assertEqual(result["holiday_list"], shared)
+		self.assertEqual(frappe.db.count("Holiday List"), lists, "no list is made for the employee")
+		self.assertEqual(self._on("2030-03-25"), BASE)
+
+	def test_a_made_list_is_named_for_the_window_not_the_employee(self):
+		result = self._change("2030-03-08", "2030-03-24")
+		self.assertEqual(result["holiday_list"], "Friday Week Off 08-03-2030 to 24-03-2030")
+
 	def test_the_setting_switches_it_off(self):
 		frappe.db.set_single_value("Biometric Setting", "disable_week_off_change", 1)
 		with self.assertRaises(frappe.ValidationError) as caught:
@@ -324,7 +360,7 @@ class IntegrationTestWeekOffChange(_TestCase):
 		two_day = self._move_to_thursday_and_friday("2030-06-01")
 		result = self._remove("2030-06-07", "2030-06-16")  # Fridays 7 and 14
 
-		self.assertEqual(self._week_offs(result["holiday_list"]), ["2030-06-13"], "Thursday 13th stays")
+		self.assertEqual(result["holiday_list"], BASE, "Thursday only is what the Thursday list already reads")
 		self.assertEqual(self._on("2030-06-17"), two_day)
 
 	def test_removing_a_day_that_is_not_a_week_off_is_refused(self):
@@ -335,7 +371,7 @@ class IntegrationTestWeekOffChange(_TestCase):
 		self._move_to_thursday_and_friday("2030-06-01")
 		result = self._change("2030-06-06", "2030-06-16")  # Thursday
 
-		self.assertEqual(self._week_offs(result["holiday_list"]), ["2030-06-06", "2030-06-13"])
+		self.assertEqual(result["holiday_list"], BASE, "Thursday only is what the Thursday list already reads")
 
 
 	# ──────────────────────────────────────────────────────────────────────
