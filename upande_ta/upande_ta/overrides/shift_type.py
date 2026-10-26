@@ -18,6 +18,13 @@ Assignments, the company's filling the gaps). A day no assignment covers keeps
 what HRMS would have said. A holiday list set on the Shift Type itself still
 wins for every day, as in HRMS.
 
+A day that already has attendance under *another* shift is not marked either.
+HRMS only skips days with attendance under its own shift, so once the old
+shift's assignment goes Inactive (HRMS retires ended assignments nightly, and a
+shift change from the sheet does it at once), those days fall to the
+employee's default shift, which marks them Absent beside the Present the old
+shift already recorded.
+
 Patched at runtime (before_request / before_job), like the Monthly Attendance
 Sheet, so hrms core is not edited.
 """
@@ -30,6 +37,11 @@ _hrms_get_dates_for_attendance = None
 
 def get_dates_for_attendance(self, employee: str) -> list:
 	dates = _hrms_get_dates_for_attendance(self, employee)
+	if not dates:
+		return dates
+
+	marked = dates_with_attendance(employee, getdate(dates[0]), getdate(dates[-1]))
+	dates = [date for date in dates if getdate(date) not in marked]
 	if not dates or self.holiday_list:
 		return dates
 
@@ -44,6 +56,22 @@ def get_dates_for_attendance(self, employee: str) -> list:
 
 
 get_dates_for_attendance._upande_ta_patched = True
+
+
+def dates_with_attendance(employee, from_date, to_date) -> set:
+	"""Days with attendance under any shift, cancelled records aside."""
+	return {
+		getdate(day)
+		for day in frappe.get_all(
+			"Attendance",
+			filters={
+				"employee": employee,
+				"docstatus": ["<", 2],
+				"attendance_date": ["between", [from_date, to_date]],
+			},
+			pluck="attendance_date",
+		)
+	}
 
 
 def apply_patch(*args, **kwargs):

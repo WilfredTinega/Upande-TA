@@ -27,9 +27,9 @@ a cancelled Absent frees the date while staying on the record, and its
 ``on_cancel`` unlinks any check-ins it had claimed so they can be reprocessed.
 
 The conflict is resolved through the parent's own two lookups
-(``get_duplicate_attendance_record`` / ``get_overlapping_shift_attendance``), so
-this cancels precisely the row that would have blocked the insert and nothing
-else. Any other status — Present, On Leave, Holiday — still collides exactly as
+(``get_duplicate_attendance_record`` / ``get_overlapping_shift_attendance``),
+plus an Absent for the same date under any other shift, which ERPNext lets
+through but which would leave the day both Absent and Present. Any other status — Present, On Leave, Holiday — still collides exactly as
 it does in stock ERPNext.
 
 Switched by ``Biometric Setting.auto_supersede_absent`` (on by default).
@@ -102,6 +102,22 @@ class UpandeAttendance(Attendance):
 		overlapping = self.get_overlapping_shift_attendance() or {}
 		if overlapping.get("name") and overlapping["name"] not in names:
 			names.append(overlapping["name"])
+
+		# An Absent under a shift whose timings do not overlap this one passes
+		# ERPNext's checks and would stay beside this record for the same day.
+		for name in frappe.get_all(
+			"Attendance",
+			filters={
+				"employee": self.employee,
+				"attendance_date": self.attendance_date,
+				"status": "Absent",
+				"docstatus": ["<", 2],
+				"name": ["!=", self.name or ""],
+			},
+			pluck="name",
+		):
+			if name not in names:
+				names.append(name)
 
 		absent = []
 		for name in names:
