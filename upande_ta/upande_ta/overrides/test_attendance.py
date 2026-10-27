@@ -108,3 +108,41 @@ class IntegrationTestAttendanceSupersede(IntegrationTestCase):
 
 		with self.assertRaises(DuplicateAttendanceError):
 			self._mark("Present")
+
+	def test_present_supersedes_an_absent_under_another_shift(self):
+		morning = _shift_type("_Test TA Morning", "06:00:00", "10:00:00")
+		evening = _shift_type("_Test TA Evening", "14:00:00", "18:00:00")
+		absent = mark_attendance(self.employee, self.day, "Absent", evening)
+		self.assertIsNotNone(absent, "could not seed the Absent this test needs")
+
+		present = frappe.new_doc("Attendance")
+		present.update(
+			{"employee": self.employee, "attendance_date": self.day, "status": "Present", "shift": morning}
+		)
+		present.insert(ignore_permissions=True)
+
+		self.assertFalse(frappe.db.exists("Attendance", absent))
+
+	def test_no_absent_beside_a_present_under_another_shift(self):
+		morning = _shift_type("_Test TA Morning", "06:00:00", "10:00:00")
+		evening = _shift_type("_Test TA Evening", "14:00:00", "18:00:00")
+		present = mark_attendance(self.employee, self.day, "Present", morning)
+		self.assertIsNotNone(present, "could not seed the Present this test needs")
+
+		self.assertIsNone(mark_attendance(self.employee, self.day, "Absent", evening))
+		self.assertEqual(
+			frappe.get_all(
+				"Attendance",
+				filters={"employee": self.employee, "attendance_date": self.day, "docstatus": ["<", 2]},
+				pluck="status",
+			),
+			["Present"],
+		)
+
+
+def _shift_type(name, start, end):
+	if not frappe.db.exists("Shift Type", name):
+		frappe.get_doc({"doctype": "Shift Type", "name": name, "start_time": start, "end_time": end}).insert(
+			ignore_permissions=True
+		)
+	return name
