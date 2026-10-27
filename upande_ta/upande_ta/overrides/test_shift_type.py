@@ -21,9 +21,10 @@ class IntegrationTestShiftTypeDateEffectiveHolidays(IntegrationTestCase):
 		shift_type.apply_patch()
 		self.shift = frappe.new_doc("Shift Type")
 
-	def dates(self, days):
+	def dates(self, days, marked=()):
 		with (
 			patch.object(shift_type, "_hrms_get_dates_for_attendance", return_value=list(DATES)),
+			patch.object(shift_type, "dates_with_attendance", return_value={getdate(d) for d in marked}),
 			patch("upande_ta.upande_ta.week_off_change.days_in_force", return_value=days),
 		):
 			return ShiftType.get_dates_for_attendance(self.shift, "_T-EMP")
@@ -47,3 +48,10 @@ class IntegrationTestShiftTypeDateEffectiveHolidays(IntegrationTestCase):
 		self.shift.holiday_list = "_Test Shift List"
 		days = {getdate(d): _day(weekly_off=True) for d in DATES}
 		self.assertEqual(self.dates(days), DATES)
+
+	def test_day_with_attendance_under_another_shift_is_not_marked_absent(self):
+		self.assertEqual(self.dates({}, marked=["2026-08-18"]), ["2026-08-17", "2026-08-19", "2026-08-20"])
+
+	def test_attendance_under_another_shift_counts_with_shift_holiday_list(self):
+		self.shift.holiday_list = "_Test Shift List"
+		self.assertEqual(self.dates({}, marked=DATES), [])

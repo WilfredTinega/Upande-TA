@@ -7,8 +7,10 @@ checked through HRMS' own resolver.
     employee is on a Thursday week off, with a public holiday on a Friday
       change: from Friday F to E
 
-    as_on F .. E   -> a replica whose only weekly off is Friday, public holiday kept
+    as_on F .. E   -> the shared Friday list, public holiday kept
     as_on E + 1    -> the Thursday list again
+
+No list is ever made: the shared lists below are the ones a change assigns.
 """
 
 import unittest
@@ -34,6 +36,37 @@ BASE = f"{PREFIX} Thursday Week Off"
 #: Mondays through Sundays of two weeks in March 2030; 7 and 14 are Thursdays.
 YEAR = 2030
 PUBLIC_HOLIDAY = "2030-03-15"  # a Friday
+#: the shared lists a change can land on, by the weekdays they keep off
+SHARED = {
+	f"{PREFIX} Friday Week Off {YEAR}": (4,),
+	f"{PREFIX} Saturday Week Off {YEAR}": (5,),
+	f"{PREFIX} Tuesday Week Off {YEAR}": (1,),
+	f"{PREFIX} Tuesday & Wednesday Week Off {YEAR}": (1, 2),
+	f"{PREFIX} No Week Off {YEAR}": (),
+}
+FRIDAY = f"{PREFIX} Friday Week Off {YEAR}"
+NO_WEEK_OFF = f"{PREFIX} No Week Off {YEAR}"
+
+
+def _make_shared(name, weekdays):
+	from frappe.utils import add_days, getdate
+
+	holidays, date = [], getdate(f"{YEAR}-01-01")
+	while date.year == YEAR:
+		if str(date) == PUBLIC_HOLIDAY:
+			holidays.append({"holiday_date": date, "description": "Public Holiday", "weekly_off": 0})
+		elif date.weekday() in weekdays:
+			holidays.append({"holiday_date": date, "description": date.strftime("%A"), "weekly_off": 1})
+		date = add_days(date, 1)
+	frappe.get_doc(
+		{
+			"doctype": "Holiday List",
+			"holiday_list_name": name,
+			"from_date": f"{YEAR}-01-01",
+			"to_date": f"{YEAR}-12-31",
+			"holidays": holidays,
+		}
+	).insert(ignore_permissions=True)
 
 
 def _site_connected() -> bool:
@@ -64,7 +97,9 @@ class IntegrationTestWeekOffChange(_TestCase):
 			while date.year == YEAR:
 				holidays.append({"holiday_date": date, "description": "Thursday", "weekly_off": 1})
 				date = add_days(date, 7)
-			holidays.append({"holiday_date": PUBLIC_HOLIDAY, "description": "Public Holiday", "weekly_off": 0})
+			holidays.append(
+				{"holiday_date": PUBLIC_HOLIDAY, "description": "Public Holiday", "weekly_off": 0}
+			)
 			frappe.get_doc(
 				{
 					"doctype": "Holiday List",
@@ -74,6 +109,10 @@ class IntegrationTestWeekOffChange(_TestCase):
 					"holidays": sorted(holidays, key=lambda h: str(h["holiday_date"])),
 				}
 			).insert(ignore_permissions=True)
+
+		for name, weekdays in SHARED.items():
+			if not frappe.db.exists("Holiday List", name):
+				_make_shared(name, weekdays)
 
 		employee = frappe.get_doc(
 			{
@@ -129,12 +168,12 @@ class IntegrationTestWeekOffChange(_TestCase):
 
 		return get_holiday_list_for_employee(self.employee, raise_exception=False, as_on=date)
 
-	def _week_offs(self, holiday_list):
+	def _week_offs(self, holiday_list, start, end):
 		return [
 			str(d)
 			for d in frappe.get_all(
 				"Holiday",
-				filters={"parent": holiday_list, "weekly_off": 1},
+				filters={"parent": holiday_list, "weekly_off": 1, "holiday_date": ["between", [start, end]]},
 				pluck="holiday_date",
 				order_by="holiday_date",
 			)
@@ -142,12 +181,13 @@ class IntegrationTestWeekOffChange(_TestCase):
 
 	def test_the_clicked_weekday_is_the_only_week_off_in_the_window(self):
 		result = self._change("2030-03-08", "2030-03-24")  # Friday .. Sunday
-		replica = result["holiday_list"]
+		shared = result["holiday_list"]
 
 		self.assertEqual(result["weekday"], "Friday")
-		self.assertEqual(self._week_offs(replica), ["2030-03-08", "2030-03-22"])
+		self.assertEqual(shared, FRIDAY)
+		self.assertEqual(self._week_offs(shared, "2030-03-08", "2030-03-24"), ["2030-03-08", "2030-03-22"])
 		self.assertTrue(
-			frappe.db.exists("Holiday", {"parent": replica, "holiday_date": PUBLIC_HOLIDAY, "weekly_off": 0}),
+			frappe.db.exists("Holiday", {"parent": shared, "holiday_date": PUBLIC_HOLIDAY, "weekly_off": 0}),
 			"the public holiday on Friday 15th is kept, as a public holiday",
 		)
 
@@ -175,7 +215,8 @@ class IntegrationTestWeekOffChange(_TestCase):
 		second = self._change("2030-03-09", "2030-03-31")  # Saturday, around it
 
 		replaced_lists = {
-			frappe.db.get_value("Holiday List Assignment", name, "holiday_list") for name in second["replaced"]
+			frappe.db.get_value("Holiday List Assignment", name, "holiday_list")
+			for name in second["replaced"]
 		}
 		self.assertEqual(replaced_lists, {first["holiday_list"], BASE}, "the change and its return")
 		self.assertEqual(self._on("2030-03-20"), second["holiday_list"])
@@ -197,9 +238,38 @@ class IntegrationTestWeekOffChange(_TestCase):
 
 	def test_a_single_day(self):
 		result = self._change("2030-03-09", "2030-03-09")
-		self.assertEqual(self._week_offs(result["holiday_list"]), ["2030-03-09"])
+		self.assertEqual(self._week_offs(result["holiday_list"], "2030-03-09", "2030-03-09"), ["2030-03-09"])
 		self.assertEqual(self._on("2030-03-10"), BASE)
 
+	def test_no_holiday_list_is_made(self):
+		lists = frappe.db.count("Holiday List")
+		self._change("2030-03-08", "2030-03-24")
+		self._remove("2030-03-07", "2030-03-20")
+		self.assertEqual(frappe.db.count("Holiday List"), lists)
+
+	def test_a_window_past_the_year_is_assigned_up_to_its_end(self):
+		result = self._change("2030-12-06", "2031-01-31")  # a Friday
+
+		self.assertEqual(result["holiday_list"], FRIDAY)
+		self.assertEqual(self._on("2030-12-31"), FRIDAY)
+
+	def test_a_week_off_no_list_keeps_is_refused(self):
+		from upande_ta.upande_ta.week_off_change import change_week_off
+
+		lists = frappe.db.count("Holiday List")
+		with self.assertRaises(frappe.ValidationError) as caught:
+			change_week_off(self.employee, "2030-03-11", "2030-03-24", '["Monday"]')
+		self.assertIn("No holiday list", str(caught.exception))
+		self.assertEqual(frappe.db.count("Holiday List"), lists)
+
+	def test_a_holiday_list_can_be_assigned_from_the_sheet(self):
+		from upande_ta.upande_ta.week_off_change import assign_holiday_list, holiday_list_on
+
+		self.assertEqual(holiday_list_on(self.employee, "2030-04-01"), BASE)
+		assign_holiday_list(self.employee, FRIDAY, "2030-04-01")
+		self.assertEqual(holiday_list_on(self.employee, "2030-04-01"), FRIDAY)
+		self.assertEqual(self._on("2030-12-31"), FRIDAY)
+		self.assertEqual(self._on("2030-03-31"), BASE)
 
 	def test_the_setting_switches_it_off(self):
 		frappe.db.set_single_value("Biometric Setting", "disable_week_off_change", 1)
@@ -216,7 +286,8 @@ class IntegrationTestWeekOffChange(_TestCase):
 
 		self.assertEqual(result["weekday"], "Tuesday & Wednesday")
 		self.assertEqual(
-			self._week_offs(result["holiday_list"]), ["2030-03-12", "2030-03-13", "2030-03-19", "2030-03-20"]
+			self._week_offs(result["holiday_list"], "2030-03-12", "2030-03-24"),
+			["2030-03-12", "2030-03-13", "2030-03-19", "2030-03-20"],
 		)
 		self.assertIn("Tuesday & Wednesday", result["holiday_list"])
 
@@ -232,7 +303,10 @@ class IntegrationTestWeekOffChange(_TestCase):
 		self._change("2030-03-12", "2030-03-12")  # Tuesday, one day
 		wider = self._change("2030-03-12", "2030-03-31")
 
-		self.assertEqual(self._week_offs(wider["holiday_list"]), ["2030-03-12", "2030-03-19", "2030-03-26"])
+		self.assertEqual(
+			self._week_offs(wider["holiday_list"], "2030-03-12", "2030-03-31"),
+			["2030-03-12", "2030-03-19", "2030-03-26"],
+		)
 		self.assertTrue(
 			frappe.db.exists("Holiday", {"parent": wider["holiday_list"], "holiday_date": PUBLIC_HOLIDAY}),
 			"the public holiday after the one-day change is still read from the list beyond it",
@@ -285,7 +359,9 @@ class IntegrationTestWeekOffChange(_TestCase):
 			while date.year == YEAR:
 				holidays.append({"holiday_date": date, "description": "Thursday", "weekly_off": 1})
 				if add_days(date, 1).year == YEAR:
-					holidays.append({"holiday_date": add_days(date, 1), "description": "Friday", "weekly_off": 1})
+					holidays.append(
+						{"holiday_date": add_days(date, 1), "description": "Friday", "weekly_off": 1}
+					)
 				date = add_days(date, 7)
 			frappe.get_doc(
 				{
@@ -312,7 +388,8 @@ class IntegrationTestWeekOffChange(_TestCase):
 	def test_removing_the_only_week_off_leaves_none_in_the_window(self):
 		result = self._remove("2030-03-07", "2030-03-20")  # Thursdays 7 and 14
 
-		self.assertEqual(self._week_offs(result["holiday_list"]), [])
+		self.assertEqual(result["holiday_list"], NO_WEEK_OFF)
+		self.assertEqual(self._week_offs(result["holiday_list"], "2030-03-07", "2030-03-20"), [])
 		self.assertTrue(
 			frappe.db.exists("Holiday", {"parent": result["holiday_list"], "holiday_date": PUBLIC_HOLIDAY}),
 			"public holidays are kept",
@@ -324,7 +401,9 @@ class IntegrationTestWeekOffChange(_TestCase):
 		two_day = self._move_to_thursday_and_friday("2030-06-01")
 		result = self._remove("2030-06-07", "2030-06-16")  # Fridays 7 and 14
 
-		self.assertEqual(self._week_offs(result["holiday_list"]), ["2030-06-13"], "Thursday 13th stays")
+		self.assertEqual(
+			result["holiday_list"], BASE, "Thursday only is what the Thursday list already reads"
+		)
 		self.assertEqual(self._on("2030-06-17"), two_day)
 
 	def test_removing_a_day_that_is_not_a_week_off_is_refused(self):
@@ -335,8 +414,9 @@ class IntegrationTestWeekOffChange(_TestCase):
 		self._move_to_thursday_and_friday("2030-06-01")
 		result = self._change("2030-06-06", "2030-06-16")  # Thursday
 
-		self.assertEqual(self._week_offs(result["holiday_list"]), ["2030-06-06", "2030-06-13"])
-
+		self.assertEqual(
+			result["holiday_list"], BASE, "Thursday only is what the Thursday list already reads"
+		)
 
 	# ──────────────────────────────────────────────────────────────────────
 	# What a Holiday Assignment Tool run or a Bulk Week Off would overlap
@@ -373,11 +453,23 @@ class IntegrationTestWeekOffChange(_TestCase):
 	def test_a_tool_window_reports_the_days_it_replaces(self):
 		friday = self._list(f"{PREFIX} Friday", weekday=4)
 		found = self._preview(
-			holiday_list=friday, from_date="2030-03-01", to_date="2030-03-31", restore_to=BASE, cancel_in_window=True
+			holiday_list=friday,
+			from_date="2030-03-01",
+			to_date="2030-03-31",
+			restore_to=BASE,
+			cancel_in_window=True,
 		)
 		self.assertEqual(
 			found["replaced"],
-			[{"holiday_list": BASE, "new": friday, "from_date": "2030-03-01", "to_date": "2030-03-31", "backdated": False}],
+			[
+				{
+					"holiday_list": BASE,
+					"new": friday,
+					"from_date": "2030-03-01",
+					"to_date": "2030-03-31",
+					"backdated": False,
+				}
+			],
 		)
 		self.assertEqual((found["blank_days"], found["weeks_without_week_off"], found["later"]), ([], [], []))
 
@@ -386,7 +478,9 @@ class IntegrationTestWeekOffChange(_TestCase):
 		monday = self._list(f"{PREFIX} Monday", weekday=0)
 		self._assign(monday, "2030-06-01")
 
-		found = self._preview(holiday_list=friday, from_date="2030-05-01", to_date=None, cancel_in_window=False)
+		found = self._preview(
+			holiday_list=friday, from_date="2030-05-01", to_date=None, cancel_in_window=False
+		)
 
 		self.assertEqual(found["later"], [{"from_date": "2030-06-01", "holiday_list": monday}])
 		self.assertEqual(found["replaced"][0]["to_date"], "2030-05-31", "only until the later one starts")
@@ -394,7 +488,11 @@ class IntegrationTestWeekOffChange(_TestCase):
 	def test_a_list_without_week_offs_is_reported(self):
 		empty = self._list(f"{PREFIX} No Week Off")
 		found = self._preview(
-			holiday_list=empty, from_date="2030-03-04", to_date="2030-03-17", restore_to=BASE, cancel_in_window=True
+			holiday_list=empty,
+			from_date="2030-03-04",
+			to_date="2030-03-17",
+			restore_to=BASE,
+			cancel_in_window=True,
 		)
 		self.assertEqual(found["weeks_without_week_off"], ["2030-03-04", "2030-03-11"])
 

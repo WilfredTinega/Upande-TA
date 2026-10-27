@@ -8,11 +8,13 @@ Change: the day clicked becomes the employee's only week off, every week, from
 that date to the end date given. Remove: the weekday clicked stops being a
 week off for that window, and any other week off stays.
 
-Either way the list they are on is replicated for the window — its public
-holidays kept, its weekly offs rewritten — and assigned through the same
-window rule as the Holiday Assignment Tool: the window owns its days, and the
-day after it the employee returns to the list they would otherwise have been
-on.
+Either way the existing list keeping those week offs all through the window —
+"Friday Week Off 2026" — is assigned as it is, public holidays and all. No
+holiday list is ever made here: with none to assign, the change is refused. It
+is assigned
+through the same window rule as the Holiday Assignment Tool: the window owns
+its days, and the day after it the employee returns to the list they would
+otherwise have been on.
 """
 
 import frappe
@@ -49,10 +51,9 @@ def change_week_off(employee: str, from_date: str, to_date: str, weekdays=None) 
 			)
 		)
 
-	name = "{0} {1} Week Off {2} to {3}".format(employee, weekday, _day(start), _day(end))
-	window_list = replicate(name, start, end, days, keep_off=lambda date: wanted[date])
+	window_list, end = existing_list(start, end, numbers, days)
 	result = _assign(employee, window_list, start, end, weekday)
-	result.update(_clear_absent_on_week_off(employee, window_list))
+	result.update(_clear_absent_on_week_off(employee, window_list, start, end))
 	return result
 
 
@@ -70,15 +71,46 @@ def remove_week_off(employee: str, from_date: str, to_date: str) -> dict:
 			)
 		)
 
-	name = "{0} No {1} Week Off {2} to {3}".format(employee, weekday, _day(start), _day(end))
-	window_list = replicate(
-		name,
-		start,
-		end,
-		days,
-		keep_off=lambda date: days[date]["weekly_off"] and date.weekday() != start.weekday(),
-	)
+	# the week offs of the list in force on the day clicked, less that weekday
+	kept = {
+		date.weekday()
+		for date, day in days.items()
+		if day["weekly_off"] and day["holiday_list"] == days[start]["holiday_list"]
+	} - {start.weekday()}
+	window_list, end = existing_list(start, end, kept, days)
 	return _assign(employee, window_list, start, end, weekday)
+
+
+@frappe.whitelist()
+def holiday_list_on(employee: str, date: str) -> str | None:
+	"""The holiday list in force for the employee on ``date``, if any."""
+	frappe.has_permission("Employee", doc=employee, throw=True)
+	date = getdate(date)
+	return days_in_force(employee, date, date)[date]["holiday_list"]
+
+
+@frappe.whitelist(methods=["POST"])
+def assign_holiday_list(employee: str, holiday_list: str, from_date: str) -> dict:
+	"""Put an employee who has no holiday list on ``holiday_list`` from
+	``from_date`` on."""
+	from upande_ta.upande_ta.overrides.monthly_attendance_sheet import week_off_change_disabled
+
+	if week_off_change_disabled():
+		frappe.throw(_("Week Off Change is disabled in Biometric Setting."))
+	frappe.has_permission("Holiday List Assignment", "create", throw=True)
+	frappe.has_permission("Employee", doc=employee, throw=True)
+
+	start = getdate(from_date)
+	if not _list_covers(holiday_list, start):
+		frappe.throw(
+			_("{0} does not cover {1}.").format(frappe.bold(holiday_list), frappe.format(start, "Date"))
+		)
+	created, replaced = assign_holiday_window(employee, holiday_list, start, None, None)
+	return {
+		"holiday_list": holiday_list,
+		"created": [get_link_to_form("Holiday List Assignment", name) for name in created],
+		"replaced": replaced,
+	}
 
 
 def _weekdays(value) -> list:
@@ -102,7 +134,6 @@ def _window(employee, from_date, to_date):
 	if week_off_change_disabled():
 		frappe.throw(_("Week Off Change is disabled in Biometric Setting."))
 	frappe.has_permission("Holiday List Assignment", "create", throw=True)
-	frappe.has_permission("Holiday List", "create", throw=True)
 	frappe.has_permission("Employee", doc=employee, throw=True)
 
 	start, end = getdate(from_date), getdate(to_date)
@@ -184,47 +215,101 @@ def _assign(employee, window_list, start, end, weekday) -> dict:
 	}
 
 
-def _day(date) -> str:
-	return date.strftime("%d-%m-%Y")
-
-
-def replicate(name: str, start, end, days: dict, keep_off) -> str:
-	"""A holiday list for ``start .. end``: each day's public holiday as it is
-	now, and a weekly off on every date ``keep_off(date)`` accepts. A public
-	holiday stays a public holiday whatever weekday it falls on."""
-	holidays = []
-	for date in sorted(days):
-		if days[date]["public"]:
-			holidays.append({"holiday_date": date, "description": days[date]["public"], "weekly_off": 0})
-		elif keep_off(date):
-			holidays.append({"holiday_date": date, "description": date.strftime("%A"), "weekly_off": 1})
-	weekly = sorted({h["description"] for h in holidays if h["weekly_off"]})
-	source = next((day["holiday_list"] for day in days.values() if day["holiday_list"]), None)
-
-	if frappe.db.exists("Holiday List", name):
-		doc = frappe.get_doc("Holiday List", name)
-		doc.set("holidays", holidays)
-	else:
-		doc = frappe.get_doc(
-			{
-				"doctype": "Holiday List",
-				"holiday_list_name": name,
-				"from_date": start,
-				"to_date": end,
-				"weekly_off": weekly[0] if len(weekly) == 1 else None,
-				"holidays": holidays,
-			}
+def existing_list(start, end, weekdays: set, days: dict) -> tuple[str, object]:
+	"""``(holiday_list, end)``: the list keeping exactly ``weekdays`` off from
+	``start`` — the one already in force when it does. Lists run a year, so a
+	window past the last one's end is assigned up to that end."""
+	in_force = {day["holiday_list"] for day in days.values() if day["holiday_list"]}
+	found = matching_list(start, end, weekdays, prefer=in_force)
+	if not found and end.year > start.year:
+		end = start.replace(month=12, day=31)
+		found = matching_list(start, end, weekdays, prefer=in_force)
+	if not found:
+		names = [WEEKDAYS[number] for number in sorted(weekdays)]
+		frappe.throw(
+			_("No holiday list has {0} as the week off from {1} to {2}.").format(
+				" & ".join(names) if names else _("no day"),
+				frappe.format(start, "Date"),
+				frappe.format(end, "Date"),
+			)
 		)
-	for field in ("country", "subdivision"):
-		if source and doc.meta.has_field(field) and not doc.get(field):
-			doc.set(field, frappe.db.get_value("Holiday List", source, field))
-	doc.flags.ignore_permissions = True
-	doc.save()
-	return doc.name
+	return found, end
 
 
-def _clear_absent_on_week_off(employee: str, holiday_list: str) -> dict:
-	"""Cancel and delete the Absent attendance on the new week off: it was
+def matching_list(start, end, weekdays: set, prefer=()) -> str | None:
+	"""The holiday list whose period covers ``start .. end`` and whose week
+	offs in it fall on exactly ``weekdays`` (``date.weekday()`` numbers),
+	every one of them — "Friday Week Off 2026" for ``{4}``. Its own public
+	holidays come with it: a shared list records one landing on its week off
+	as a plain week off, so they cannot be compared against the old list's.
+
+	Of several, one of ``prefer`` (the lists already in force) wins, then the
+	one named the usual way ("Monday & Tuesday Week Off 2026"), then the one
+	most assigned, then the longest period. Lists
+	made for one employee by the old week-off change (named after them) are
+	passed over."""
+	covering = frappe.get_all(
+		"Holiday List",
+		filters={"from_date": ["<=", start], "to_date": [">=", end]},
+		fields=["name", "from_date", "to_date"],
+	)
+	if not covering:
+		return None
+
+	found = {row.name: {} for row in covering}
+	for h in frappe.get_all(
+		"Holiday",
+		filters={"parent": ["in", list(found)], "holiday_date": ["between", [start, end]]},
+		fields=["parent", "holiday_date", "weekly_off"],
+	):
+		found[h.parent][getdate(h.holiday_date)] = bool(h.weekly_off)
+
+	needed, date = [], getdate(start)
+	while date <= getdate(end):
+		if date.weekday() in weekdays:
+			needed.append(date)
+		date = add_days(date, 1)
+
+	def reads_right(holidays):
+		return all(date in holidays for date in needed) and all(
+			date.weekday() in weekdays for date, weekly_off in holidays.items() if weekly_off
+		)
+
+	matches = [row for row in covering if reads_right(found[row.name])]
+	if not matches:
+		return None
+
+	first_words = {row.name.split(" ", 1)[0] for row in matches}
+	employees = set(frappe.get_all("Employee", filters={"name": ["in", list(first_words)]}, pluck="name"))
+	matches = [row for row in matches if row.name.split(" ", 1)[0] not in employees]
+	if not matches:
+		return None
+
+	names = [WEEKDAYS[number] for number in sorted(weekdays)]
+	label = " & ".join([", ".join(names[:-1]), names[-1]]) if len(names) > 1 else "".join(names)
+	conventional = f"{label} Week Off {getdate(start).year}" if names else None
+	in_use = dict(
+		frappe.db.sql(
+			"""select holiday_list, count(*) from `tabHoliday List Assignment`
+			where docstatus = 1 and holiday_list in %s group by holiday_list""",
+			([row.name for row in matches],),
+		)
+	)
+	matches.sort(
+		key=lambda row: (
+			row.name not in prefer,
+			row.name != conventional,
+			-in_use.get(row.name, 0),
+			-date_diff(row.to_date, row.from_date),
+			row.name,
+		)
+	)
+	return matches[0].name
+
+
+def _clear_absent_on_week_off(employee: str, holiday_list: str, start, end) -> dict:
+	"""Cancel and delete the Absent attendance on the new week off in the
+	window — the list may be a shared one running past it: it was
 	written before that day was a rest day. One that cannot go — no permission,
 	or something linked to it — is left and named."""
 	absent = frappe.db.sql(
@@ -234,9 +319,10 @@ def _clear_absent_on_week_off(employee: str, holiday_list: str) -> dict:
 		join `tabHoliday` h on h.holiday_date = a.attendance_date
 		where h.parent = %s and h.weekly_off = 1
 			and a.employee = %s and a.docstatus < 2 and a.status = 'Absent'
+			and a.attendance_date between %s and %s
 		order by a.attendance_date
 		""",
-		(holiday_list, employee),
+		(holiday_list, employee, start, end),
 		as_dict=True,
 	)
 	removed, kept = [], []
