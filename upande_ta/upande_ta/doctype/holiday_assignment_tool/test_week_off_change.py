@@ -262,6 +262,15 @@ class IntegrationTestWeekOffChange(_TestCase):
 		self.assertIn("No holiday list", str(caught.exception))
 		self.assertEqual(frappe.db.count("Holiday List"), lists)
 
+	def test_a_holiday_list_can_be_assigned_from_the_sheet(self):
+		from upande_ta.upande_ta.week_off_change import assign_holiday_list, holiday_list_on
+
+		self.assertEqual(holiday_list_on(self.employee, "2030-04-01"), BASE)
+		assign_holiday_list(self.employee, FRIDAY, "2030-04-01")
+		self.assertEqual(holiday_list_on(self.employee, "2030-04-01"), FRIDAY)
+		self.assertEqual(self._on("2030-12-31"), FRIDAY)
+		self.assertEqual(self._on("2030-03-31"), BASE)
+
 	def test_the_setting_switches_it_off(self):
 		frappe.db.set_single_value("Biometric Setting", "disable_week_off_change", 1)
 		with self.assertRaises(frappe.ValidationError) as caught:

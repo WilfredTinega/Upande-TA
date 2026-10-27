@@ -123,6 +123,22 @@ class IntegrationTestAttendanceSupersede(IntegrationTestCase):
 
 		self.assertFalse(frappe.db.exists("Attendance", absent))
 
+	def test_no_absent_beside_a_present_under_another_shift(self):
+		morning = _shift_type("_Test TA Morning", "06:00:00", "10:00:00")
+		evening = _shift_type("_Test TA Evening", "14:00:00", "18:00:00")
+		present = mark_attendance(self.employee, self.day, "Present", morning)
+		self.assertIsNotNone(present, "could not seed the Present this test needs")
+
+		self.assertIsNone(mark_attendance(self.employee, self.day, "Absent", evening))
+		self.assertEqual(
+			frappe.get_all(
+				"Attendance",
+				filters={"employee": self.employee, "attendance_date": self.day, "docstatus": ["<", 2]},
+				pluck="status",
+			),
+			["Present"],
+		)
+
 
 def _shift_type(name, start, end):
 	if not frappe.db.exists("Shift Type", name):

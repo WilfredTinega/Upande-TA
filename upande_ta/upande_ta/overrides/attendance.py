@@ -38,7 +38,7 @@ Switched by ``Biometric Setting.auto_supersede_absent`` (on by default).
 import frappe
 from frappe import _
 from frappe.utils import cint
-from hrms.hr.doctype.attendance.attendance import Attendance
+from hrms.hr.doctype.attendance.attendance import Attendance, DuplicateAttendanceError
 
 # Statuses that outrank a provisional Absent. "Absent" itself is missing on
 # purpose: two Absents for one day is a duplicate to reject, not to resolve.
@@ -52,7 +52,37 @@ MAX_SUPERSEDE_PASSES = 5
 class UpandeAttendance(Attendance):
 	def validate(self):
 		self.supersede_conflicting_absent()
+		self.refuse_absent_beside_attendance()
 		super().validate()
+
+	def refuse_absent_beside_attendance(self):
+		"""An Absent is never written for a day that already has a Present,
+		Half Day, Work From Home or On Leave, under any shift."""
+		if self.status != "Absent" or not (self.employee and self.attendance_date):
+			return
+		other = frappe.db.get_value(
+			"Attendance",
+			{
+				"employee": self.employee,
+				"attendance_date": self.attendance_date,
+				"status": ["in", SUPERSEDES_ABSENT],
+				"docstatus": ["<", 2],
+				"name": ["!=", self.name or ""],
+			},
+			["name", "status"],
+			as_dict=True,
+		)
+		if other:
+			frappe.throw(
+				_("{0} is already marked {1} on {2}: {3}").format(
+					frappe.bold(self.employee_name or self.employee),
+					frappe.bold(_(other.status)),
+					frappe.bold(frappe.format(self.attendance_date, "Date")),
+					frappe.get_desk_link("Attendance", other.name),
+				),
+				title=_("Attendance Already Marked"),
+				exc=DuplicateAttendanceError,
+			)
 
 	def after_insert(self):
 		superseded = self.flags.get("superseded_absent") or []

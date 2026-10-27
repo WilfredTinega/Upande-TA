@@ -249,7 +249,7 @@ class IntegrationTestOvertimeRequest(_TestCase):
 	def test_a_week_number_fills_monday_to_sunday(self):
 		for week, year, expected in [
 			("Week 20", 2030, ("2030-05-13", "2030-05-19")),
-			("Week 38", 2030, ("2030-09-16", "2030-09-22")),
+			("Week 37", 2030, ("2030-09-09", "2030-09-15")),
 			("Week 40", 2030, ("2030-09-30", "2030-10-06")),
 		]:
 			with self.subTest(week=week):
@@ -282,6 +282,47 @@ class IntegrationTestOvertimeRequest(_TestCase):
 		doc = self._request("Week", overtime_date="2030-10-01")  # a Tuesday
 		self.assertEqual((str(doc.overtime_date), str(doc.to_date)), ("2030-09-30", "2030-10-06"))
 		self.assertEqual((doc.week, doc.week_year), ("Week 40", 2030))
+
+	def _period_end_midweek(self):
+		"""A 2030 payroll period end that is not a Sunday, so the week it falls
+		in runs on into the next period."""
+		from frappe.utils import add_days, getdate
+
+		from upande_ta.upande_ta.doctype.overtime_request.overtime_request import payroll_period
+
+		date = getdate("2030-02-01")
+		while True:
+			end = payroll_period(self.company, date)[1]
+			if end.weekday() != 6:
+				return end
+			date = add_days(end, 1)
+
+	def test_a_week_the_payroll_period_ends_in_is_cut_at_its_end(self):
+		from frappe.utils import add_days
+
+		from upande_ta.upande_ta.doctype.overtime_request.overtime_request import payroll_period
+
+		end = self._period_end_midweek()
+		monday = add_days(end, -end.weekday())
+		year, number, _weekday = monday.isocalendar()
+		doc = self._request("Week", week=f"Week {number:02d}", week_year=year)
+
+		start, finish = payroll_period(self.company, add_days(monday, 3))
+		self.assertEqual(
+			(str(doc.overtime_date), str(doc.to_date)),
+			(str(max(monday, start)), str(min(add_days(monday, 6), finish))),
+		)
+		self.assertLess(doc.number_of_days, 7)
+
+	def test_the_days_after_the_payroll_period_closes_can_be_requested(self):
+		from frappe.utils import add_days
+
+		end = self._period_end_midweek()
+		self._request("Single Day", overtime_date=end)
+		after = self._request("Single Day", overtime_date=add_days(end, 1))
+		self.assertTrue(after.name)
+		if end.weekday():
+			self._refused_this_week("Single Day", overtime_date=add_days(end, -1))
 
 	def test_a_month_runs_first_to_last(self):
 		doc = self._request("Month", month="2030-11")
@@ -369,7 +410,7 @@ class IntegrationTestOvertimeRequest(_TestCase):
 	def test_a_draft_already_holds_the_week(self):
 		"""Refused on save, not on approval: the draft is enough."""
 		self._request("Week", week="Week 12", week_year=2031)
-		self._refused_this_week("Single Day", overtime_date="2031-03-19")
+		self._refused_this_week("Single Day", overtime_date="2031-03-21")
 
 	def test_a_request_in_the_next_week_is_fine(self):
 		self._request("Single Day", overtime_date="2031-03-07")  # Friday, week 10

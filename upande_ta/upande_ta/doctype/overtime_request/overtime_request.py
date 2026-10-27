@@ -16,6 +16,13 @@ Monday who will stay late on Thursday — and Bulk Overtime allocates it to the
 people the attendance shows working overtime, never past the budget. See
 :meth:`OvertimeRequest.validate_budgets`.
 
+Weeks are tied to the payroll period. A week the payroll period ends in is
+cut at the period's end: a Week request covers the part of the week in the
+current payroll period (or, for a week the current period does not reach, the
+part holding the week's Thursday), and "one request per week" is counted within
+one payroll period, so the days after the period closes can be requested on
+their own.
+
 What Requested Hours means depends on the range. On a **Week** request it is
 the employee's total for the week, shared out evenly over their working days —
 rest days and public holidays from the holiday list in force on each date get
@@ -120,10 +127,10 @@ class OvertimeRequest(Document):
 				# nothing picked yet: overtime is nearly always asked for the
 				# week it is being worked in, so that is where the field starts
 				start = add_days(getdate(today()), -getdate(today()).weekday())
-			self.overtime_date, self.to_date = start, add_days(start, 6)
 			# written back off the resolved Monday, so week 1 of a year that
 			# starts in December is stored under the year that numbers it
 			self.week_year, week_no, _weekday = start.isocalendar()
+			self.overtime_date, self.to_date = self.week_in_payroll_period(start)
 			self.week = week_label(week_no)
 
 		elif self.request_for == MONTH:
@@ -146,6 +153,28 @@ class OvertimeRequest(Document):
 			self.week = self.week_year = None
 		if self.request_for != MONTH:
 			self.month = None
+
+	def week_in_payroll_period(self, monday) -> tuple:
+		"""The part of the week from ``monday`` inside one payroll period: the
+		current one when it reaches into the week, else the one holding the
+		Thursday."""
+		sunday = add_days(monday, 6)
+		start, end = payroll_period(self.company, today())
+		if not (start <= sunday and end >= monday):
+			start, end = payroll_period(self.company, add_days(monday, 3))
+		return max(monday, start), min(sunday, end)
+
+	def week_window(self) -> tuple:
+		"""Monday to Sunday around the request, cut to the payroll periods it
+		falls in — the stretch "one per week" is counted over."""
+		start = getdate(self.overtime_date)
+		end = getdate(self.to_date)
+		period_start = payroll_period(self.company, start)[0]
+		period_end = payroll_period(self.company, end)[1]
+		return (
+			max(add_days(start, -start.weekday()), period_start),
+			min(add_days(end, 6 - end.weekday()), period_end),
+		)
 
 	def default_week_year(self) -> int:
 		"""The year a week number is counted in when none was given: the one the
@@ -256,16 +285,14 @@ class OvertimeRequest(Document):
 		self.department = self.designation = None
 
 	def validate_one_budget_per_week(self):
-		"""A Department and Unit/Division has one budget per ISO week, for the
+		"""A Department and Unit/Division has one budget per ISO week within a
+		payroll period, for the
 		same reason an employee is on one request per week: a second one would
 		be a second pool for the same people and the same days."""
 		if self.flags.ignore_weekly_limit or not (self.overtime_date and self.to_date and self.budgets):
 			return
 
-		start = getdate(self.overtime_date)
-		end = getdate(self.to_date)
-		monday = add_days(start, -start.weekday())
-		sunday = add_days(end, 6 - end.weekday())
+		monday, sunday = self.week_window()
 
 		Request = frappe.qb.DocType("Overtime Request")
 		Line = frappe.qb.DocType("Overtime Request Budget")
@@ -312,8 +339,10 @@ class OvertimeRequest(Document):
 		)
 
 	def validate_one_request_per_week(self):
-		"""An employee is on one request per ISO week, Monday to Sunday: a
-		second day of overtime in a week belongs on that week's request.
+		"""An employee is on one request per ISO week, Monday to Sunday, within
+		a payroll period: a second day of overtime in a week belongs on that
+		week's request, but the days after the payroll period closes start
+		afresh.
 
 		Checked on save, against every request not rejected or cancelled —
 		drafts and those awaiting approval included — so the clash shows when
@@ -322,10 +351,7 @@ class OvertimeRequest(Document):
 		if self.flags.ignore_weekly_limit or not (self.overtime_date and self.to_date and self.employees):
 			return
 
-		start = getdate(self.overtime_date)
-		end = getdate(self.to_date)
-		monday = add_days(start, -start.weekday())
-		sunday = add_days(end, 6 - end.weekday())
+		monday, sunday = self.week_window()
 
 		Request = frappe.qb.DocType("Overtime Request")
 		Row = frappe.qb.DocType("Overtime Request Employee")
@@ -469,6 +495,15 @@ class OvertimeRequest(Document):
 # ──────────────────────────────────────────────────────────────────────────
 # Weeks are picked by ISO number and year; months by the browser's own picker
 # ──────────────────────────────────────────────────────────────────────────
+
+
+def payroll_period(company, on_date) -> tuple:
+	"""``(start, end)`` of the company's payroll period holding ``on_date``,
+	as Biometric Setting's Payroll Dates set it (the 21st to the 20th by
+	default)."""
+	from upande_ta.upande_ta.doctype.biometric_setting.biometric_setting import payroll_window_for
+
+	return payroll_window_for(company, getdate(on_date))
 
 
 def budget_scope(line) -> str:

@@ -509,6 +509,8 @@ frappe.provide("frappe.views");
 
 	const CHANGE_WEEK_OFF_METHOD = "upande_ta.upande_ta.week_off_change.change_week_off";
 	const REMOVE_WEEK_OFF_METHOD = "upande_ta.upande_ta.week_off_change.remove_week_off";
+	const HOLIDAY_LIST_ON_METHOD = "upande_ta.upande_ta.week_off_change.holiday_list_on";
+	const ASSIGN_HOLIDAY_LIST_METHOD = "upande_ta.upande_ta.week_off_change.assign_holiday_list";
 	const SHIFT_SCHEDULE_METHOD = "upande_ta.upande_ta.shift_change.get_shift_schedule";
 	const CHANGE_SHIFT_METHOD = "upande_ta.upande_ta.shift_change.change_shift";
 	const SHIFT_SCHEDULE_DAYS = 30;
@@ -571,7 +573,16 @@ frappe.provide("frappe.views");
 				String(row[fieldname] || "")
 					.replace(/<[^>]*>/g, "")
 					.trim() === "WO";
-			showWeekOffDialog(report, row, `${year}-${month}-${day}`, isWeekOff);
+			const clicked = `${year}-${month}-${day}`;
+			frappe
+				.call({
+					method: HOLIDAY_LIST_ON_METHOD,
+					args: { employee: row.employee, date: clicked },
+				})
+				.then((r) => {
+					if (r && r.message) showWeekOffDialog(report, row, clicked, isWeekOff);
+					else showAssignHolidayListDialog(report, row, clicked);
+				});
 		});
 	}
 
@@ -608,6 +619,69 @@ frappe.provide("frappe.views");
 		return `<table class="table table-bordered table-sm" style="margin:0">
 			<thead><tr><th>${__("Shift")}</th><th>${__("Start Date")}</th><th>${__("End Date")}</th><th>${__("Assignment")}</th></tr></thead>
 			<tbody>${rows}</tbody></table>`;
+	}
+
+	function showAssignHolidayListDialog(report, row, date) {
+		const dialog = new frappe.ui.Dialog({
+			title: __("Assign Holiday List"),
+			fields: [
+				{
+					fieldtype: "Data",
+					fieldname: "employee",
+					label: __("Employee"),
+					read_only: 1,
+					default: `${row.employee_name || ""} (${row.employee})`,
+				},
+				{ fieldtype: "Column Break" },
+				{
+					fieldtype: "Date",
+					fieldname: "from_date",
+					label: __("From Date"),
+					reqd: 1,
+					default: date,
+				},
+				{ fieldtype: "Section Break" },
+				{
+					fieldtype: "Link",
+					fieldname: "holiday_list",
+					label: __("Holiday List"),
+					options: "Holiday List",
+					reqd: 1,
+				},
+			],
+			primary_action_label: __("Assign Holiday List"),
+			primary_action(values) {
+				frappe
+					.call({
+						method: ASSIGN_HOLIDAY_LIST_METHOD,
+						type: "POST",
+						args: {
+							employee: row.employee,
+							holiday_list: values.holiday_list,
+							from_date: values.from_date,
+						},
+						freeze: true,
+					})
+					.then((r) => {
+						const result = (r && r.message) || {};
+						dialog.hide();
+						frappe.msgprint({
+							title: __("Holiday List Assigned"),
+							indicator: "green",
+							message: [
+								__("{0}: {1} from {2}.", [
+									frappe.utils.escape_html(row.employee_name || row.employee),
+									frappe.utils.escape_html(values.holiday_list),
+									frappe.datetime.str_to_user(values.from_date),
+								]),
+								...(result.created || []),
+							].join("<br>"),
+						});
+						report.refresh();
+					});
+			},
+		});
+		dialog.show();
 	}
 
 	function showWeekOffDialog(report, row, date, isWeekOff) {

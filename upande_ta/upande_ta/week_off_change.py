@@ -81,6 +81,38 @@ def remove_week_off(employee: str, from_date: str, to_date: str) -> dict:
 	return _assign(employee, window_list, start, end, weekday)
 
 
+@frappe.whitelist()
+def holiday_list_on(employee: str, date: str) -> str | None:
+	"""The holiday list in force for the employee on ``date``, if any."""
+	frappe.has_permission("Employee", doc=employee, throw=True)
+	date = getdate(date)
+	return days_in_force(employee, date, date)[date]["holiday_list"]
+
+
+@frappe.whitelist(methods=["POST"])
+def assign_holiday_list(employee: str, holiday_list: str, from_date: str) -> dict:
+	"""Put an employee who has no holiday list on ``holiday_list`` from
+	``from_date`` on."""
+	from upande_ta.upande_ta.overrides.monthly_attendance_sheet import week_off_change_disabled
+
+	if week_off_change_disabled():
+		frappe.throw(_("Week Off Change is disabled in Biometric Setting."))
+	frappe.has_permission("Holiday List Assignment", "create", throw=True)
+	frappe.has_permission("Employee", doc=employee, throw=True)
+
+	start = getdate(from_date)
+	if not _list_covers(holiday_list, start):
+		frappe.throw(
+			_("{0} does not cover {1}.").format(frappe.bold(holiday_list), frappe.format(start, "Date"))
+		)
+	created, replaced = assign_holiday_window(employee, holiday_list, start, None, None)
+	return {
+		"holiday_list": holiday_list,
+		"created": [get_link_to_form("Holiday List Assignment", name) for name in created],
+		"replaced": replaced,
+	}
+
+
 def _weekdays(value) -> list:
 	"""Weekday names, in week order, from what the desk sends: a JSON array,
 	a list, or one name."""
