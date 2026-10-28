@@ -53,6 +53,11 @@
   "employee",
   "section_break_asec",
   "devices",
+  "offline_sms_section",
+  "enable_offline_sms",
+  "offline_sms_after_minutes",
+  "column_break_offline_sms",
+  "offline_sms_recipients",
   "checkin_review_filters_section",
   "r_company",
   "column_break_httu",
@@ -160,6 +165,39 @@
    "fieldtype": "Table",
    "label": "Devices",
    "options": "Biometric Device"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "offline_sms_section",
+   "fieldtype": "Section Break",
+   "label": "Offline Device SMS Alerts"
+  },
+  {
+   "default": "0",
+   "description": "Every hour, SMS the users below a list of devices that have not reported for the set number of minutes. Repeats hourly until they are back online. Uses SMS Settings.",
+   "fieldname": "enable_offline_sms",
+   "fieldtype": "Check",
+   "label": "Enable Offline SMS Alerts"
+  },
+  {
+   "default": "60",
+   "depends_on": "enable_offline_sms",
+   "fieldname": "offline_sms_after_minutes",
+   "fieldtype": "Int",
+   "label": "Alert When Offline For (Minutes)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "column_break_offline_sms",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "enable_offline_sms",
+   "description": "Each user's Mobile No (on their User record) receives the SMS.",
+   "fieldname": "offline_sms_recipients",
+   "fieldtype": "Table",
+   "label": "SMS Recipients",
+   "options": "Biometric Alert Recipient"
   },
   {
    "fieldname": "users_tab",
@@ -767,7 +805,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-26 18:00:00.000000",
+ "modified": "2026-10-28 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

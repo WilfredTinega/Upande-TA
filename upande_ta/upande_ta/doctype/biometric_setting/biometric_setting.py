@@ -1240,6 +1240,51 @@ def mark_stale_devices_offline_scheduled():
 	return {"flipped": len(stale)}
 
 
+def send_offline_device_sms():
+	"""Hourly: SMS the configured users the devices that have gone quiet.
+
+	Repeats every hour while a device stays down. Devices that have never
+	reported (no last_seen) are skipped so an unused row does not page
+	people forever.
+	"""
+	settings = frappe.get_single("Biometric Setting")
+	if not settings.enable_offline_sms:
+		return {"sent": False, "reason": "disabled"}
+
+	numbers = []
+	for row in settings.offline_sms_recipients or []:
+		no = frappe.db.get_value("User", {"name": row.user, "enabled": 1}, "mobile_no")
+		if no and no not in numbers:
+			numbers.append(no)
+	if not numbers:
+		return {"sent": False, "reason": "no recipients with a mobile number"}
+
+	minutes = settings.offline_sms_after_minutes or 60
+	cutoff = frappe.utils.add_to_date(now_datetime(), minutes=-minutes)
+	offline = [
+		d for d in settings.devices
+		if d.last_seen and frappe.utils.get_datetime(d.last_seen) < cutoff
+	]
+	if not offline:
+		return {"sent": False, "reason": "all devices reporting"}
+
+	lines = [
+		f"{d.device_sn}{' (' + d.device_location + ')' if d.device_location else ''}"
+		f" since {frappe.utils.get_datetime(d.last_seen).strftime('%d-%b %H:%M')}"
+		for d in offline
+	]
+	msg = f"Biometric alert: {len(offline)} device(s) offline over {minutes} min: " + "; ".join(lines)
+
+	from frappe.core.doctype.sms_settings.sms_settings import send_sms
+
+	try:
+		send_sms(numbers, msg, success_msg=False)
+	except Exception:
+		frappe.log_error(title="Biometric offline SMS failed", message=frappe.get_traceback())
+		return {"sent": False, "reason": "send failed"}
+	return {"sent": True, "devices": len(offline), "recipients": len(numbers)}
+
+
 @frappe.whitelist()
 def get_device_statuses():
 	stale = mark_stale_devices_offline()

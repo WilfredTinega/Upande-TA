@@ -140,6 +140,9 @@ has_permission = {
 }
 
 scheduler_events = {
+	"hourly": [
+		"upande_ta.upande_ta.doctype.biometric_setting.biometric_setting.send_offline_device_sms",
+	],
 	"cron": {
 		"0 0 * * *": [
 			"upande_ta.upande_ta.doctype.bulk_week_off.bulk_week_off.submit_due_employee_transfers",
