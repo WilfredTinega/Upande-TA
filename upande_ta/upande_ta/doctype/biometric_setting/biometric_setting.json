@@ -97,6 +97,7 @@
   "attendance_active_only",
   "disable_week_off_change",
   "disable_shift_change",
+  "group_by_greenhouse",
   "show_temporary_in_attendance_insights",
   "attendance_payroll_periods",
   "attendance_filters_section",
@@ -765,6 +766,13 @@
    "description": "On the Monthly Attendance Sheet"
   },
   {
+   "default": "0",
+   "fieldname": "group_by_greenhouse",
+   "fieldtype": "Check",
+   "label": "Group by Greenhouse",
+   "description": "On the Monthly Attendance Sheet"
+  },
+  {
    "default": "1",
    "fieldname": "show_temporary_in_attendance_insights",
    "fieldtype": "Check",
@@ -810,7 +818,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-13 12:00:00.000000",
+ "modified": "2026-10-28 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",
