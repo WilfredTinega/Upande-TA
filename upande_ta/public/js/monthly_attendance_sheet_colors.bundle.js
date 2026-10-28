@@ -193,9 +193,20 @@ frappe.provide("frappe.views");
 	// filters.category and applies WHERE e.grade = category. The sheet's filter
 	// list lives in a file-based standard report JS, so we splice ours in at
 	// runtime once report_settings is loaded (before setup_filters reads it).
+	function addGreenhouseGroupBy(settings) {
+		if (!(frappe.boot && frappe.boot.upande_ta_group_by_greenhouse)) return;
+		const groupBy = settings.filters.find((df) => df && df.fieldname === "group_by");
+		if (!groupBy) return;
+		const options = Array.isArray(groupBy.options)
+			? groupBy.options
+			: String(groupBy.options || "").split("\n");
+		if (!options.includes("Greenhouse")) groupBy.options = [...options, "Greenhouse"];
+	}
+
 	function injectCategoryFilter(settings) {
 		try {
 			if (!settings || !Array.isArray(settings.filters)) return;
+			addGreenhouseGroupBy(settings);
 			if (settings.filters.some((f) => f && f.fieldname === "category")) return;
 			const filter = {
 				fieldname: "category",
@@ -217,6 +228,7 @@ frappe.provide("frappe.views");
 
 	const CHANGE_WEEK_OFF_METHOD = "upande_ta.upande_ta.week_off_change.change_week_off";
 	const REMOVE_WEEK_OFF_METHOD = "upande_ta.upande_ta.week_off_change.remove_week_off";
+	const ADD_WEEK_OFF_METHOD = "upande_ta.upande_ta.week_off_change.add_week_off";
 	const HOLIDAY_LIST_ON_METHOD = "upande_ta.upande_ta.week_off_change.holiday_list_on";
 	const ASSIGN_HOLIDAY_LIST_METHOD = "upande_ta.upande_ta.week_off_change.assign_holiday_list";
 	const SHIFT_SCHEDULE_METHOD = "upande_ta.upande_ta.shift_change.get_shift_schedule";
@@ -396,13 +408,19 @@ frappe.provide("frappe.views");
 				.then((r) => {
 					const result = (r && r.message) || {};
 					dialog.hide();
-					const lines = [done(values)];
+					const range = {
+						from_date: result.from_date || date,
+						to_date: result.to_date || values.to_date,
+					};
+					const lines = [done(range)];
 					if (result.restored_to) {
 						lines.push(
 							__("Back on {0} from {1}.", [
 								frappe.utils.escape_html(result.restored_to),
-								frappe.datetime.str_to_user(frappe.datetime.add_days(values.to_date, 1)),
-							])
+								frappe.datetime.str_to_user(
+									frappe.datetime.add_days(range.to_date, 1),
+								),
+							]),
 						);
 					}
 					if ((result.created || []).length) lines.push(result.created.join(", "));
@@ -425,8 +443,10 @@ frappe.provide("frappe.views");
 				});
 		};
 
-		const span = (values) =>
-			[frappe.datetime.str_to_user(date), frappe.datetime.str_to_user(values.to_date)];
+		const span = (range) => [
+			frappe.datetime.str_to_user(range.from_date),
+			frappe.datetime.str_to_user(range.to_date),
+		];
 
 		const dialog = new frappe.ui.Dialog({
 			title: __("Week Off"),
@@ -452,34 +472,39 @@ frappe.provide("frappe.views");
 			],
 			primary_action_label: __("Change Week Off"),
 			primary_action(values) {
-				const days = values.week_off_days || [];
-				if (!days.length) {
-					frappe.msgprint(__("Tick at least one Week Off Day."));
-					return;
-				}
-				const ordered = WEEK_ORDER.filter((day) => days.includes(day));
-				run(
-					CHANGE_WEEK_OFF_METHOD,
-					values,
-					(v) =>
-						__("{0}: {1} week off from {2} to {3}.", [
-							who,
-							ordered.map((day) => __(day)).join(" & "),
-							...span(v),
-						]),
-					{ weekdays: JSON.stringify(ordered) }
-				);
+				weekOffAction(CHANGE_WEEK_OFF_METHOD, values, "{0}: {1} week off from {2} to {3}.");
 			},
 		});
 
-		if (isWeekOff) {
-			dialog.set_secondary_action_label(__("Remove Week Off"));
-			dialog.set_secondary_action(() => {
-				run(REMOVE_WEEK_OFF_METHOD, dialog.get_values(true), (v) =>
-					__("{0}: no {1} week off from {2} to {3}.", [who, __(weekday), ...span(v)])
-				);
-			});
-		}
+		const weekOffAction = (method, values, message) => {
+			const days = values.week_off_days || [];
+			if (!days.length) {
+				frappe.msgprint(__("Tick at least one Week Off Day."));
+				return;
+			}
+			const ordered = WEEK_ORDER.filter((day) => days.includes(day));
+			run(
+				method,
+				values,
+				(v) => __(message, [who, ordered.map((day) => __(day)).join(" & "), ...span(v)]),
+				{ weekdays: JSON.stringify(ordered) },
+			);
+		};
+
+		dialog.add_custom_action(__("Add Week Off"), () =>
+			weekOffAction(
+				ADD_WEEK_OFF_METHOD,
+				dialog.get_values(true),
+				"{0}: {1} added as a week off from {2} to {3}.",
+			),
+		);
+		dialog.add_custom_action(__("Remove Week Off"), () =>
+			weekOffAction(
+				REMOVE_WEEK_OFF_METHOD,
+				dialog.get_values(true),
+				"{0}: no {1} week off from {2} to {3}.",
+			),
+		);
 		dialog.show();
 	}
 

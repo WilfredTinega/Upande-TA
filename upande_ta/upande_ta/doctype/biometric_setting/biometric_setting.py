@@ -90,6 +90,16 @@ class BiometricSetting(Document):
 		self._sync_scheduled_jobs()
 		self._ensure_biometric_user_parents()
 		self._normalize_poll_device_values()
+		self._refresh_sheet_options()
+
+	def _refresh_sheet_options(self):
+		"""The Monthly Attendance Sheet reads these from the boot payload, which
+		is cached per user: drop it so the change shows on the next reload."""
+		if any(
+			self.has_value_changed(field)
+			for field in ("disable_week_off_change", "disable_shift_change", "group_by_greenhouse")
+		):
+			frappe.cache.delete_key("bootinfo")
 
 	def _normalize_poll_device_values(self):
 		sn_to_loc = {

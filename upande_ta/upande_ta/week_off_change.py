@@ -35,10 +35,16 @@ WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", 
 @frappe.whitelist(methods=["POST"])
 def change_week_off(employee: str, from_date: str, to_date: str, weekdays=None) -> dict:
 	"""``weekdays`` — the clicked day's by default — become the only week off
-	from ``from_date`` to ``to_date``. Some staff take two."""
+	in every week from ``from_date`` to ``to_date``. Some staff take two.
+
+	The window is widened to whole weeks, Monday to Sunday: the old week off
+	in the week of either date goes with the change, so no week is left with
+	both the old day and the new one."""
+	clicked = getdate(from_date)
+	chosen = _weekdays(weekdays) or [clicked.strftime("%A")]
+	from_date, to_date = whole_weeks(clicked, getdate(to_date))
 	start, end, days = _window(employee, from_date, to_date)
 
-	chosen = _weekdays(weekdays) or [start.strftime("%A")]
 	numbers = {WEEKDAYS.index(day) for day in chosen}
 	weekday = " & ".join(chosen)
 
@@ -57,28 +63,69 @@ def change_week_off(employee: str, from_date: str, to_date: str, weekdays=None) 
 	return result
 
 
-@frappe.whitelist(methods=["POST"])
-def remove_week_off(employee: str, from_date: str, to_date: str) -> dict:
-	"""The clicked weekday is no longer a week off from ``from_date`` to
-	``to_date``; any other week off stays."""
-	start, end, days = _window(employee, from_date, to_date)
-	weekday = start.strftime("%A")
+def whole_weeks(start, end) -> tuple:
+	"""Monday of ``start``'s week to Sunday of ``end``'s."""
+	if end < start:
+		return start, end
+	return add_days(start, -start.weekday()), add_days(end, 6 - end.weekday())
 
-	if not any(day["weekly_off"] and date.weekday() == start.weekday() for date, day in days.items()):
+
+@frappe.whitelist(methods=["POST"])
+def add_week_off(employee: str, from_date: str, to_date: str, weekdays=None) -> dict:
+	"""``weekdays`` — the clicked day's by default — become week offs as well
+	in every week from ``from_date`` to ``to_date``; the week offs already
+	there stay. Widened to whole weeks, as a change is."""
+	clicked = getdate(from_date)
+	chosen = _weekdays(weekdays) or [clicked.strftime("%A")]
+	start, end, days = _window(employee, *whole_weeks(clicked, getdate(to_date)))
+
+	current = _week_offs_on(days, clicked)
+	added = {WEEKDAYS.index(day) for day in chosen} - current
+	if not added:
 		frappe.throw(
-			_("{0} is not a week off from {1} to {2}.").format(
-				weekday, frappe.format(start, "Date"), frappe.format(end, "Date")
+			_("{0} is already a week off from {1} to {2}.").format(
+				" & ".join(chosen), frappe.format(start, "Date"), frappe.format(end, "Date")
 			)
 		)
 
-	# the week offs of the list in force on the day clicked, less that weekday
-	kept = {
-		date.weekday()
-		for date, day in days.items()
-		if day["weekly_off"] and day["holiday_list"] == days[start]["holiday_list"]
-	} - {start.weekday()}
-	window_list, end = existing_list(start, end, kept, days)
-	return _assign(employee, window_list, start, end, weekday)
+	window_list, end = existing_list(start, end, current | added, days)
+	result = _assign(employee, window_list, start, end, _names(added))
+	result.update(_clear_absent_on_week_off(employee, window_list, start, end))
+	return result
+
+
+@frappe.whitelist(methods=["POST"])
+def remove_week_off(employee: str, from_date: str, to_date: str, weekdays=None) -> dict:
+	"""``weekdays`` — the clicked day's by default — are no longer week offs
+	in any week from ``from_date`` to ``to_date``; any other week off stays.
+	Widened to whole weeks, as a change is."""
+	clicked = getdate(from_date)
+	chosen = _weekdays(weekdays) or [clicked.strftime("%A")]
+	start, end, days = _window(employee, *whole_weeks(clicked, getdate(to_date)))
+
+	current = _week_offs_on(days, clicked)
+	removed = {WEEKDAYS.index(day) for day in chosen} & current
+	if not removed:
+		frappe.throw(
+			_("{0} is not a week off from {1} to {2}.").format(
+				" & ".join(chosen), frappe.format(start, "Date"), frappe.format(end, "Date")
+			)
+		)
+
+	window_list, end = existing_list(start, end, current - removed, days)
+	return _assign(employee, window_list, start, end, _names(removed))
+
+
+def _week_offs_on(days: dict, date) -> set:
+	"""The weekdays kept off in the window by the list in force on ``date``."""
+	holiday_list = days[date]["holiday_list"]
+	return {
+		d.weekday() for d, day in days.items() if day["weekly_off"] and day["holiday_list"] == holiday_list
+	}
+
+
+def _names(weekdays: set) -> str:
+	return " & ".join(WEEKDAYS[number] for number in sorted(weekdays))
 
 
 @frappe.whitelist()
@@ -208,6 +255,8 @@ def _assign(employee, window_list, start, end, weekday) -> dict:
 	created, replaced = assign_holiday_window(employee, window_list, start, end, restore_to)
 	return {
 		"holiday_list": window_list,
+		"from_date": str(start),
+		"to_date": str(end),
 		"weekday": weekday,
 		"restored_to": restore_to,
 		"created": [get_link_to_form("Holiday List Assignment", name) for name in created],

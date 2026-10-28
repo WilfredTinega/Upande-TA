@@ -16,6 +16,40 @@ _DAY_RE = re.compile(r"^\d{2}-\d{2}-\d{4}$")
 
 _LEAVE_SEP = "|"
 
+#: The Group By option added for sites that keep employees' greenhouses on
+#: the Employee (upande_agriculture's Greenhouses table).
+GREENHOUSE = "Greenhouse"
+
+
+def greenhouse_table():
+	"""``(child doctype, link target)`` of Employee's Greenhouses table, or
+	None where the site has no such table."""
+	for df in frappe.get_meta("Employee").get_table_fields():
+		child = frappe.get_meta(df.options)
+		field = child.get_field("greenhouse")
+		if field and field.fieldtype == "Link":
+			return df.options, field.options
+	return None
+
+
+def group_by_greenhouse(employees: dict) -> tuple[dict, list]:
+	"""``{greenhouse: {employee: details}}`` and the greenhouses in order, from
+	a flat ``{employee: details}``. An employee in two greenhouses is listed
+	under both; one in none is left off, as HRMS leaves off an employee with
+	no Branch when grouping by Branch."""
+	table = greenhouse_table()
+	grouped = {}
+	if table and employees:
+		for row in frappe.get_all(
+			table[0],
+			filters={"parenttype": "Employee", "parent": ["in", list(employees)]},
+			fields=["parent", "greenhouse"],
+			order_by="greenhouse, parent",
+		):
+			if row.greenhouse:
+				grouped.setdefault(row.greenhouse, frappe._dict())[row.parent] = employees[row.parent]
+	return grouped, sorted(grouped)
+
 
 def get_leave_abbr(leave_type: str) -> str:
 	if not leave_type:
@@ -436,6 +470,14 @@ def execute(filters=None):
 
 	columns, data, message, chart = original(filters)
 
+	if (filters or {}).get("group_by") == GREENHOUSE:
+		table = greenhouse_table()
+		for c in columns or []:
+			if c.get("fieldname") == "greenhouse":
+				c["options"] = table[1] if table else None
+				c["width"] = 160
+				break
+
 	# Shift holds long labels (e.g. "LOE/ECE SECURITY DAY SHIFT"); left-align it
 	# so the names read naturally instead of hugging the right edge.
 	for c in columns or []:
@@ -484,9 +526,17 @@ def get_employee_related_details(filters):
 	grouped ``{group_value: {name: emp}}`` map produced when a Group By is set.
 	"""
 	original = _hrms_gerd or getattr(_hrms, "_upande_ta_original_gerd", None)
+	f = frappe._dict(filters or {})
+
+	if f.get("group_by") == GREENHOUSE:
+		# HRMS orders by the group-by column, which Employee does not have
+		emp_map, _values = original(frappe._dict(filters, group_by=None))
+		if f.get("category"):
+			emp_map = {name: emp for name, emp in emp_map.items() if emp.get("grade") == f.category}
+		return group_by_greenhouse(emp_map)
+
 	emp_map, group_by_param_values = original(filters)
 
-	f = frappe._dict(filters or {})
 	category = f.get("category")
 	if not category:
 		return emp_map, group_by_param_values
@@ -766,11 +816,18 @@ def shift_change_disabled() -> bool:
 	return _setting_enabled("disable_shift_change", False)
 
 
+def greenhouse_grouping_enabled() -> bool:
+	"""Whether Group By offers Greenhouse: ticked in Biometric Setting, on a
+	site that keeps employees' greenhouses. Off by default."""
+	return _setting_enabled("group_by_greenhouse", False) and bool(greenhouse_table())
+
+
 def extend_bootinfo(bootinfo=None):
 	"""Tell the desk whether the week-off and shift changes are available, so
 	the sheet knows without a round trip when a cell is clicked."""
 	try:
 		bootinfo.upande_ta_week_off_change_disabled = week_off_change_disabled()
 		bootinfo.upande_ta_shift_change_disabled = shift_change_disabled()
+		bootinfo.upande_ta_group_by_greenhouse = greenhouse_grouping_enabled()
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Monthly Attendance Sheet bootinfo")

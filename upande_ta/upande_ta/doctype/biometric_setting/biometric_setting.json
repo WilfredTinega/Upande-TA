@@ -94,7 +94,8 @@
   "absent_run_now",
   "monthly_attendance_sheet_section",
   "disable_week_off_change",
-  "disable_shift_change"
+  "disable_shift_change",
+  "group_by_greenhouse"
  ],
  "fields": [
   {
@@ -616,13 +617,20 @@
    "fieldname": "disable_shift_change",
    "fieldtype": "Check",
    "label": "Disable Shift Change"
+  },
+  {
+   "default": "0",
+   "fieldname": "group_by_greenhouse",
+   "fieldtype": "Check",
+   "label": "Group by Greenhouse",
+   "description": "On the Monthly Attendance Sheet"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-18 12:00:00.000000",
+ "modified": "2026-10-28 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",
