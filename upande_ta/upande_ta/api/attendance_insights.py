@@ -33,6 +33,11 @@ from upande_ta.upande_ta.overrides.monthly_attendance_sheet import get_disabled_
 # the employment type, so every farm badge read 0.
 TASK_WORKER_EMPLOYMENT_TYPE = "Temporary"
 
+# A later scan is a checkout once it is this far after the check-in
+MIN_CHECKOUT_GAP = 4 * 3600
+# After the shift has ended a shorter stay still counts, but not a re-tap
+MIN_CLOSED_GAP = 10 * 60
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Company access control.
@@ -229,8 +234,11 @@ def attendance_dashboard_data():
 	grace_out = "IFNULL(CASE WHEN st.enable_early_exit_marking = 1 THEN st.early_exit_grace_period ELSE 0 END, 0)"
 	shift_start_dt = "ADDTIME(CAST(DATE(c.time) AS DATETIME), st.start_time)"
 	shift_end_dt = "ADDTIME(CAST(DATE(c.time) AS DATETIME), st.end_time)"
-	late_expr = "GREATEST(0, TIMESTAMPDIFF(MINUTE, DATE_ADD(" + shift_start_dt + ", INTERVAL " + grace_in + " MINUTE), c.time))"
-	early_expr = "GREATEST(0, TIMESTAMPDIFF(MINUTE, c.time, DATE_SUB(" + shift_end_dt + ", INTERVAL " + grace_out + " MINUTE)))"
+	# inside the grace period is on time; past it the full gap from the shift edge counts
+	late_diff = "TIMESTAMPDIFF(MINUTE, " + shift_start_dt + ", c.time)"
+	early_diff = "TIMESTAMPDIFF(MINUTE, c.time, " + shift_end_dt + ")"
+	late_expr = "CASE WHEN " + late_diff + " > " + grace_in + " THEN " + late_diff + " ELSE 0 END"
+	early_expr = "CASE WHEN " + early_diff + " > " + grace_out + " THEN " + early_diff + " ELSE 0 END"
 
 	# ── filter dropdowns ─────────────────────────────────────────────────────────
 	# Scoped to the caller's permitted companies so a restricted user never even
@@ -299,11 +307,11 @@ def attendance_dashboard_data():
 	),
 	fl AS (
 		SELECT fi.employee AS employee, fi.day AS day, fi.first_in AS first_in,
-			   GREATEST(0, TIMESTAMPDIFF(MINUTE,
-				   DATE_ADD(ADDTIME(CAST(fi.day AS DATETIME), st.start_time),
-							INTERVAL IFNULL(CASE WHEN st.enable_late_entry_marking = 1
-											THEN st.late_entry_grace_period ELSE 0 END, 0) MINUTE),
-				   fi.first_in)) AS mins_late
+			   CASE WHEN TIMESTAMPDIFF(MINUTE, ADDTIME(CAST(fi.day AS DATETIME), st.start_time), fi.first_in)
+						 > IFNULL(CASE WHEN st.enable_late_entry_marking = 1
+									  THEN st.late_entry_grace_period ELSE 0 END, 0)
+					THEN TIMESTAMPDIFF(MINUTE, ADDTIME(CAST(fi.day AS DATETIME), st.start_time), fi.first_in)
+					ELSE 0 END AS mins_late
 		FROM fi
 		INNER JOIN `tabEmployee` e2 ON e2.name = fi.employee
 		LEFT JOIN `tabShift Type` st ON st.name = COALESCE(fi.shift, e2.default_shift)
@@ -342,10 +350,11 @@ def attendance_dashboard_data():
 	),
 	fe AS (
 		SELECT lo.employee AS employee, lo.day AS day,
-			   GREATEST(0, TIMESTAMPDIFF(MINUTE, lo.last_out,
-				   DATE_SUB(ADDTIME(CAST(lo.day AS DATETIME), st.end_time),
-							INTERVAL IFNULL(CASE WHEN st.enable_early_exit_marking = 1
-											THEN st.early_exit_grace_period ELSE 0 END, 0) MINUTE))) AS mins_early
+			   CASE WHEN TIMESTAMPDIFF(MINUTE, lo.last_out, ADDTIME(CAST(lo.day AS DATETIME), st.end_time))
+						 > IFNULL(CASE WHEN st.enable_early_exit_marking = 1
+									  THEN st.early_exit_grace_period ELSE 0 END, 0)
+					THEN TIMESTAMPDIFF(MINUTE, lo.last_out, ADDTIME(CAST(lo.day AS DATETIME), st.end_time))
+					ELSE 0 END AS mins_early
 		FROM lo
 		INNER JOIN `tabEmployee` e2 ON e2.name = lo.employee
 		LEFT JOIN `tabShift Type` st ON st.name = COALESCE(lo.shift, e2.default_shift)
@@ -660,7 +669,13 @@ def attendance_register():
 			l_sh_start = {}
 			l_sh_dur = {}
 			l_sh_night = {}
-			for sr in frappe.db.sql("SELECT name, start_time, end_time FROM `tabShift Type`", as_dict=True):
+			l_sh_gin = {}
+			l_sh_gout = {}
+			for sr in frappe.db.sql("""
+				SELECT name, start_time, end_time,
+					   CASE WHEN enable_late_entry_marking = 1 THEN IFNULL(late_entry_grace_period, 0) ELSE 0 END AS gin,
+					   CASE WHEN enable_early_exit_marking = 1 THEN IFNULL(early_exit_grace_period, 0) ELSE 0 END AS gout
+				FROM `tabShift Type`""", as_dict=True):
 				if sr.get("start_time") is None or sr.get("end_time") is None:
 					continue
 				s_m = mins_of_day(sr["start_time"])
@@ -675,6 +690,8 @@ def attendance_register():
 				l_sh_start[sr["name"]] = s_m
 				l_sh_dur[sr["name"]] = d_m
 				l_sh_night[sr["name"]] = n_f
+				l_sh_gin[sr["name"]] = int(sr["gin"] or 0)
+				l_sh_gout[sr["name"]] = int(sr["gout"] or 0)
 
 			l_emps = frappe.db.sql("""
 				SELECT e.name AS emp, e.employee_name AS nm,
@@ -806,9 +823,6 @@ def attendance_register():
 				l_dates.append(str(frappe.utils.add_days(l_from, l_i)))
 				l_i = l_i + 1
 
-			MIN_EARLY = 60		  # a departure inside the last hour is on time
-			MIN_OPEN_GAP = 10800	# today, before the shift ends, an OUT needs a 3h gap
-
 			l_out = []
 			# Per-day breakdown for ONE employee. The list rows are aggregates —
 			# "94h 30m over 7d" says nothing about which days — so the UI asks for
@@ -918,6 +932,8 @@ def attendance_register():
 					if late >= dur:
 						acc["mismatch_days"] = acc["mismatch_days"] + 1
 						continue
+					if late <= (l_sh_gin.get(eff) or 0):
+						late = 0
 					if late > 0:
 						acc["late_days"] = acc["late_days"] + 1
 						acc["late_mins"] = acc["late_mins"] + late
@@ -925,23 +941,22 @@ def attendance_register():
 
 					o_raw = bio.get("fout")
 					use_out = o_raw is not None
-					if use_out and dd == l_today:
-						# while the shift is still running, only a departure with a
-						# real gap after the arrival counts as a checkout
-						shift_over = l_now_m >= (s_m + dur) if not is_night else False
-						if not shift_over:
-							o_chk_m = mins_of_day(o_raw) or 0
-							if is_night and o_chk_m < 720:
-								o_chk_m = o_chk_m + 1440
-							gap = (o_chk_m - f_m) * 60
-							if gap < MIN_OPEN_GAP:
-								use_out = False
+					if use_out:
+						# a checkout is 4h+ after the arrival; once the shift is over
+						# a shorter stay counts too, but not a re-tap within 10 minutes
+						shift_over = dd != l_today or l_now_m >= (s_m + dur)
+						o_chk_m = mins_of_day(o_raw) or 0
+						if o_chk_m < f_m:
+							o_chk_m = o_chk_m + 1440
+						gap = (o_chk_m - f_m) * 60
+						if gap < MIN_CHECKOUT_GAP and not (shift_over and gap > MIN_CLOSED_GAP):
+							use_out = False
 					if use_out:
 						o_m = mins_of_day(o_raw) or 0
 						if o_m < f_m:
 							o_m = o_m + 1440
 						early = (s_m + dur) - o_m
-						if early >= MIN_EARLY:
+						if early > (l_sh_gout.get(eff) or 0):
 							acc["early_days"] = acc["early_days"] + 1
 							acc["early_mins"] = acc["early_mins"] + early
 							d_loss = d_loss + early
@@ -1119,14 +1134,13 @@ def attendance_register():
 			ci_params.update(_cparams)
 		biometric_rows = frappe.db.sql("""
 			SELECT ec.employee,
-				MIN(CASE WHEN ec.log_type='IN' THEN ec.`time` END) AS in_time,
-				-- Raw last OUT plus the IN->OUT gap. Whether that counts as a real
-				-- checkout is decided per employee below, because it depends on the
-				-- date and on whether their shift has already ended.
-				MAX(CASE WHEN ec.log_type='OUT' THEN ec.`time` END) AS raw_out,
-				TIMESTAMPDIFF(SECOND,
-					MIN(CASE WHEN ec.log_type='IN' THEN ec.`time` END),
-					MAX(CASE WHEN ec.log_type='OUT' THEN ec.`time` END)) AS out_gap_sec
+				-- First and last scan of the day whatever the reader labelled them
+				-- (one tap is stored two to four times with mixed IN/OUT labels).
+				-- Whether the last scan counts as a checkout is decided per
+				-- employee below, from the gap and whether the shift has ended.
+				MIN(ec.`time`) AS in_time,
+				MAX(ec.`time`) AS raw_out,
+				TIMESTAMPDIFF(SECOND, MIN(ec.`time`), MAX(ec.`time`)) AS out_gap_sec
 			FROM `tabEmployee Checkin` ec
 			JOIN `tabEmployee` emp ON emp.name = ec.employee
 			WHERE ec.`time` >= %(reg_date)s AND ec.`time` < %(reg_date)s + INTERVAL 1 DAY AND emp.status='Active'
@@ -1135,23 +1149,29 @@ def attendance_register():
 		""", ci_params, as_dict=True)
 		biometric_map = {r.employee: r for r in biometric_rows}
 
-		# Which OUT counts as a checkout:
-		#   * past dates				-> the last OUT of that day (the day is complete)
-		#   * today, shift already over  -> the last OUT of the day
-		#   * today, shift still running -> only if it is >= 3h after the IN, otherwise
-		#								   it is a reader bounce and we show no checkout
-		MIN_OPEN_SHIFT_GAP = 10800
+		# Which scan counts as a checkout:
+		#   * 4h or more after the check-in            -> always
+		#   * less than that, once the shift has ended -> only if more than
+		#	 10 minutes after the check-in (a re-tap seconds later is not
+		#	 a departure)
+		#   * otherwise                                -> no checkout yet
 		def resolve_out(b, eff):
-			if b is None or b.get("raw_out") is None:
+			if b is None:
 				return None
-			if not is_today:
-				return str(b.get("raw_out"))
+			return pick_out(b.get("in_time"), b.get("raw_out"), eff)
+
+		def pick_out(in_v, out_v, eff):
+			if not out_v:
+				return None
+			if not in_v:
+				return str(out_v)
+			gap = (frappe.utils.get_datetime(out_v) - frappe.utils.get_datetime(in_v)).total_seconds()
+			if gap >= MIN_CHECKOUT_GAP:
+				return str(out_v)
 			se = shift_end_map.get(eff)
-			if se and now_t >= str(se)[:8]:
-				return str(b.get("raw_out"))
-			gap = b.get("out_gap_sec")
-			if gap is not None and gap >= MIN_OPEN_SHIFT_GAP:
-				return str(b.get("raw_out"))
+			shift_over = (not is_today) or bool(se and now_t >= str(se)[:8])
+			if shift_over and gap > MIN_CLOSED_GAP:
+				return str(out_v)
 			return None
 
 		# ── night-shift check-ins that started the PREVIOUS evening and may run
@@ -1295,7 +1315,7 @@ def attendance_register():
 				if st in ("Present", "Work From Home", "Half Day"):
 					row = base(emp)
 					row["in_time"] = str(att.in_time) if att.in_time else (str(bio.in_time) if bio and bio.in_time else None)
-					row["out_time"] = str(att.out_time) if att.out_time else resolve_out(bio, eff_shift)
+					row["out_time"] = (pick_out(row["in_time"], att.out_time, eff_shift) if att.out_time else None) or resolve_out(bio, eff_shift)
 					row["source"] = "attendance"
 					row["att_status"] = st
 					row["marking_reason"] = att.marking_reason
@@ -1334,7 +1354,7 @@ def attendance_register():
 			elif att and att.att_status in ("Present", "Work From Home", "Half Day"):
 				row = base(emp)
 				row["in_time"] = str(att.in_time) if att.in_time else None
-				row["out_time"] = str(att.out_time) if att.out_time else None
+				row["out_time"] = pick_out(row["in_time"], att.out_time, eff_shift) if att.out_time else None
 				row["source"] = "manual"
 				row["att_status"] = att.att_status
 				row["marking_reason"] = att.marking_reason
@@ -1574,12 +1594,14 @@ def attendance_register():
 		le_sql = (
 			"SELECT x.employee AS employee, x.employee_name AS employee_name, x.farm AS farm, "
 			"	   x.shift AS shift, "
+			"	   IFNULL(CASE WHEN st.enable_late_entry_marking = 1 THEN st.late_entry_grace_period ELSE 0 END, 0) AS grace_in, "
+			"	   IFNULL(CASE WHEN st.enable_early_exit_marking = 1 THEN st.early_exit_grace_period ELSE 0 END, 0) AS grace_out, "
 			"	   TIMESTAMPDIFF(MINUTE, "
 			"		   COALESCE(x.shift_start, TIMESTAMP(DATE(x.first_in), st.start_time)), "
 			"		   x.first_in) AS mins_late, "
-			"	   CASE WHEN %(le_today)s = 0 "
-			"			  OR TIME(%(le_now)s) >= TIME(st.end_time) "
-			"			  OR TIMESTAMPDIFF(SECOND, x.first_in, x.last_out) >= 10800 "
+			"	   CASE WHEN TIMESTAMPDIFF(SECOND, x.first_in, x.last_out) >= 14400 "
+			"			  OR ((%(le_today)s = 0 OR TIME(%(le_now)s) >= TIME(st.end_time)) "
+			"				  AND TIMESTAMPDIFF(SECOND, x.first_in, x.last_out) > 600) "
 			"			THEN TIMESTAMPDIFF(MINUTE, x.last_out, "
 			"				 COALESCE(x.shift_end, TIMESTAMP(DATE(x.last_out), st.end_time))) "
 			"			ELSE NULL END AS mins_early "
@@ -1606,15 +1628,12 @@ def attendance_register():
 		for lr in le_rows:
 			ml = lr.get("mins_late")
 			me = lr.get("mins_early")
-			if ml is not None and ml > 0:
+			if ml is not None and ml > (lr.get("grace_in") or 0):
 				top_late.append({"employee": lr["employee"], "employee_name": lr["employee_name"],
 								 "farm": lr["farm"], "shift": lr["shift"],
 								 "avg_minutes_late": int(ml), "max_minutes_late": int(ml),
 								 "late_days": 1})
-			# A checkout inside the last hour of the shift is effectively on time, so it
-			# is NOT an early-out (the scan itself still shows as the Check-Out on the
-			# dashboard). Only departures more than 60 minutes early are flagged.
-			if me is not None and me >= 60:
+			if me is not None and me > (lr.get("grace_out") or 0):
 				top_early.append({"employee": lr["employee"], "employee_name": lr["employee_name"],
 								  "farm": lr["farm"], "shift": lr["shift"],
 								  "avg_minutes_early": int(me), "max_minutes_early": int(me),
@@ -1698,8 +1717,11 @@ def att_rows():
 	grace_out = "IFNULL(CASE WHEN st.enable_early_exit_marking = 1 THEN st.early_exit_grace_period ELSE 0 END, 0)"
 	shift_start_dt = "ADDTIME(CAST(DATE(c.time) AS DATETIME), st.start_time)"
 	shift_end_dt = "ADDTIME(CAST(DATE(c.time) AS DATETIME), st.end_time)"
-	late_expr = "GREATEST(0, TIMESTAMPDIFF(MINUTE, DATE_ADD(" + shift_start_dt + ", INTERVAL " + grace_in + " MINUTE), c.time))"
-	early_expr = "GREATEST(0, TIMESTAMPDIFF(MINUTE, c.time, DATE_SUB(" + shift_end_dt + ", INTERVAL " + grace_out + " MINUTE)))"
+	# inside the grace period is on time; past it the full gap from the shift edge counts
+	late_diff = "TIMESTAMPDIFF(MINUTE, " + shift_start_dt + ", c.time)"
+	early_diff = "TIMESTAMPDIFF(MINUTE, c.time, " + shift_end_dt + ")"
+	late_expr = "CASE WHEN " + late_diff + " > " + grace_in + " THEN " + late_diff + " ELSE 0 END"
+	early_expr = "CASE WHEN " + early_diff + " > " + grace_out + " THEN " + early_diff + " ELSE 0 END"
 
 	rows_cap = 6000
 	rows = frappe.db.sql("""
@@ -1914,12 +1936,18 @@ def attendance_employee_history():
 
 	p = {"emp_id": emp_id, "h_from": str(h_from), "h_to": str(h_to), "ot_sec": OT_SEC}
 
+	# inside the shift type's grace period is on time
+	LATE_COND = """ec.log_type='IN' AND st.name IS NOT NULL AND TIME(ec.`time`) >= ADDTIME(st.start_time,
+		SEC_TO_TIME((IFNULL(CASE WHEN st.enable_late_entry_marking=1 THEN st.late_entry_grace_period ELSE 0 END,0)+1)*60))"""
+	EARLY_COND = """ec.log_type='OUT' AND st.name IS NOT NULL AND st.end_time>=st.start_time AND TIME(ec.`time`) <= SUBTIME(st.end_time,
+		SEC_TO_TIME((IFNULL(CASE WHEN st.enable_early_exit_marking=1 THEN st.early_exit_grace_period ELSE 0 END,0)+1)*60))"""
+
 	rows = frappe.db.sql("""
 		SELECT ec.name, ec.employee, ec.employee_name, ec.log_type, ec.shift,
 			   ec.`time`, ec.device_id, st.start_time AS shift_start, st.end_time AS shift_end,
-			   CASE WHEN ec.log_type='IN' AND st.name IS NOT NULL AND TIME(ec.`time`)>st.start_time
+			   CASE WHEN """ + LATE_COND + """
 				   THEN TIMESTAMPDIFF(MINUTE,st.start_time,TIME(ec.`time`)) END AS minutes_late,
-			   CASE WHEN ec.log_type='OUT' AND st.name IS NOT NULL AND st.end_time>=st.start_time AND TIME(ec.`time`)<st.end_time
+			   CASE WHEN """ + EARLY_COND + """
 				   THEN TIMESTAMPDIFF(MINUTE,TIME(ec.`time`),st.end_time) END AS minutes_early,
 			   CASE WHEN """ + OT_EXPR + """
 				   THEN TIMESTAMPDIFF(MINUTE,st.end_time,TIME(ec.`time`)) END AS minutes_ot,
@@ -1934,8 +1962,8 @@ def attendance_employee_history():
 		SELECT DATE_FORMAT(ec.`time`,'%%Y-%%m') AS month,
 			COUNT(DISTINCT DATE(ec.`time`)) AS days_present,
 			SUM(ec.log_type='IN') AS in_count, SUM(ec.log_type='OUT') AS out_count,
-			SUM(ec.log_type='IN' AND st.name IS NOT NULL AND TIME(ec.`time`)>st.start_time) AS late_days,
-			SUM(ec.log_type='OUT' AND st.name IS NOT NULL AND st.end_time>=st.start_time AND TIME(ec.`time`)<st.end_time) AS early_days,
+			SUM(""" + LATE_COND + """) AS late_days,
+			SUM(""" + EARLY_COND + """) AS early_days,
 			SUM(""" + OT_EXPR + """) AS ot_days
 		FROM `tabEmployee Checkin` ec
 		LEFT JOIN `tabShift Type` st ON st.name=ec.shift
@@ -1946,10 +1974,10 @@ def attendance_employee_history():
 	kpi = frappe.db.sql("""
 		SELECT COUNT(*) AS total, COUNT(DISTINCT DATE(ec.`time`)) AS days_seen,
 			SUM(ec.log_type='IN') AS in_count, SUM(ec.log_type='OUT') AS out_count,
-			SUM(ec.log_type='IN' AND st.name IS NOT NULL AND TIME(ec.`time`)>st.start_time) AS late_days,
-			SUM(ec.log_type='OUT' AND st.name IS NOT NULL AND st.end_time>=st.start_time AND TIME(ec.`time`)<st.end_time) AS early_days,
+			SUM(""" + LATE_COND + """) AS late_days,
+			SUM(""" + EARLY_COND + """) AS early_days,
 			SUM(""" + OT_EXPR + """) AS ot_days,
-			AVG(CASE WHEN ec.log_type='IN' AND st.name IS NOT NULL AND TIME(ec.`time`)>st.start_time
+			AVG(CASE WHEN """ + LATE_COND + """
 				THEN TIMESTAMPDIFF(MINUTE,st.start_time,TIME(ec.`time`)) END) AS avg_min_late,
 			AVG(CASE WHEN """ + OT_EXPR + """
 				THEN TIMESTAMPDIFF(MINUTE,st.end_time,TIME(ec.`time`)) END) AS avg_min_ot

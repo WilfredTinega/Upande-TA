@@ -23,6 +23,41 @@ EXTRA_FILTER_FIELDS = {
 }
 
 
+#: The Group By option added for sites that keep employees' greenhouses on
+#: the Employee (upande_agriculture's Greenhouses table).
+GREENHOUSE = "Greenhouse"
+
+
+def greenhouse_table():
+	"""``(child doctype, link target)`` of Employee's Greenhouses table, or
+	None where the site has no such table."""
+	for df in frappe.get_meta("Employee").get_table_fields():
+		child = frappe.get_meta(df.options)
+		field = child.get_field("greenhouse")
+		if field and field.fieldtype == "Link":
+			return df.options, field.options
+	return None
+
+
+def group_by_greenhouse(employees: dict) -> tuple[dict, list]:
+	"""``{greenhouse: {employee: details}}`` and the greenhouses in order, from
+	a flat ``{employee: details}``. An employee in two greenhouses is listed
+	under both; one in none is left off, as HRMS leaves off an employee with
+	no Branch when grouping by Branch."""
+	table = greenhouse_table()
+	grouped = {}
+	if table and employees:
+		for row in frappe.get_all(
+			table[0],
+			filters={"parenttype": "Employee", "parent": ["in", list(employees)]},
+			fields=["parent", "greenhouse"],
+			order_by="greenhouse, parent",
+		):
+			if row.greenhouse:
+				grouped.setdefault(row.greenhouse, frappe._dict())[row.parent] = employees[row.parent]
+	return grouped, sorted(grouped)
+
+
 def get_extra_filter_config() -> list[dict]:
 	"""Describe the extra filters the client should render, in display order.
 
@@ -119,6 +154,7 @@ def extend_bootinfo(bootinfo=None):
 		bootinfo.upande_ta_attendance_filters = get_extra_filter_config()
 		bootinfo.upande_ta_week_off_change_disabled = week_off_change_disabled()
 		bootinfo.upande_ta_shift_change_disabled = shift_change_disabled()
+		bootinfo.upande_ta_group_by_greenhouse = greenhouse_grouping_enabled()
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Monthly Attendance Sheet filters bootinfo")
 
@@ -266,7 +302,8 @@ def get_attendance_records(filters):
 
 
 def get_employee_related_details(filters):
-	"""HRMS' employee query plus the Employment Type / Unit/Division filters.
+	"""HRMS' employee query plus the Employment Type / Unit/Division filters,
+	and the Greenhouse grouping HRMS does not offer.
 
 	Wraps rather than reimplements the original so it keeps following HRMS'
 	selected fields and group-by handling; the extra filters are applied by
@@ -279,8 +316,18 @@ def get_employee_related_details(filters):
 	if original is None or original is get_employee_related_details:
 		frappe.throw(_("Monthly Attendance Sheet override is not correctly patched."))
 
-	emp_map, group_by_param_values = original(filters)
+	if filters.group_by == GREENHOUSE:
+		# HRMS orders by the group-by column, which Employee does not have
+		emp_map, group_by_param_values = original(frappe._dict(filters, group_by=None))
+		emp_map, group_by_param_values = _keep_allowed(filters, emp_map, group_by_param_values, grouped=False)
+		return group_by_greenhouse(emp_map)
 
+	emp_map, group_by_param_values = original(filters)
+	return _keep_allowed(filters, emp_map, group_by_param_values, grouped=bool(filters.group_by))
+
+
+def _keep_allowed(filters, emp_map, group_by_param_values, grouped):
+	"""Drop the employees the extra filters and settings leave out."""
 	allowed = get_allowed_employees(filters)
 	disabled = get_disabled_employee_names()
 
@@ -288,7 +335,7 @@ def get_employee_related_details(filters):
 		# Grouped, emp_map is {group: {employee: details}}; flat, it is
 		# {employee: details}. Either way only the employees already on the
 		# sheet are asked about.
-		if filters.group_by:
+		if grouped:
 			names = {name for employees in emp_map.values() for name in employees}
 		else:
 			names = set(emp_map)
@@ -300,7 +347,7 @@ def get_employee_related_details(filters):
 	def keep(name):
 		return (allowed is None or name in allowed) and name not in disabled
 
-	if not filters.group_by:
+	if not grouped:
 		return {name: emp for name, emp in emp_map.items() if keep(name)}, group_by_param_values
 
 	# Grouped: emp_map is {group value: {employee: details}}. Drop the employees
@@ -706,6 +753,12 @@ def shift_change_disabled() -> bool:
 	return _setting_enabled("disable_shift_change", False)
 
 
+def greenhouse_grouping_enabled() -> bool:
+	"""Whether Group By offers Greenhouse: ticked in Biometric Setting, on a
+	site that keeps employees' greenhouses. Off by default."""
+	return _setting_enabled("group_by_greenhouse", False) and bool(greenhouse_table())
+
+
 def get_inactive_employee_names(names) -> set:
 	"""Of `names`, the ones whose Employee.status is not Active.
 
@@ -904,6 +957,14 @@ def execute(filters=None):
 	columns, data, message, chart = original(filters)
 
 	add_company_column(columns, data)
+
+	if (filters or {}).get("group_by") == GREENHOUSE:
+		table = greenhouse_table()
+		for c in columns or []:
+			if c.get("fieldname") == "greenhouse":
+				c["options"] = table[1] if table else None
+				c["width"] = 160
+				break
 
 	# Shift holds long labels (e.g. "LOE/ECE SECURITY DAY SHIFT"); left-align it
 	# so the names read naturally instead of hugging the right edge.
