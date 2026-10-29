@@ -194,8 +194,10 @@ class IntegrationTestWeekOffChange(_TestCase):
 	def test_hrms_resolves_the_window_and_the_return(self):
 		result = self._change("2030-03-08", "2030-03-24")
 
-		self.assertEqual(self._on("2030-03-07"), BASE)
-		self.assertEqual(self._on("2030-03-08"), result["holiday_list"])
+		# widened to the whole weeks, Monday 4th to Sunday 24th
+		self.assertEqual((result["from_date"], result["to_date"]), ("2030-03-04", "2030-03-24"))
+		self.assertEqual(self._on("2030-03-03"), BASE)
+		self.assertEqual(self._on("2030-03-04"), result["holiday_list"])
 		self.assertEqual(self._on("2030-03-24"), result["holiday_list"])
 		self.assertEqual(self._on("2030-03-25"), BASE)
 		self.assertEqual(result["restored_to"], BASE)
@@ -206,8 +208,9 @@ class IntegrationTestWeekOffChange(_TestCase):
 
 		self.assertEqual(second["weekday"], "Saturday")
 		self.assertEqual(self._on("2030-03-10"), second["holiday_list"])
-		# the day before the new window keeps the first change
-		self.assertEqual(self._on("2030-03-08"), first["holiday_list"])
+		# both cover the same whole weeks, so the second replaces the first
+		self.assertEqual(self._on("2030-03-08"), second["holiday_list"])
+		self.assertNotEqual(first["holiday_list"], second["holiday_list"])
 		self.assertEqual(self._on("2030-03-25"), BASE)
 
 	def test_a_wider_window_cancels_a_change_inside_it(self):
@@ -238,13 +241,22 @@ class IntegrationTestWeekOffChange(_TestCase):
 
 	def test_a_single_day(self):
 		result = self._change("2030-03-09", "2030-03-09")
-		self.assertEqual(self._week_offs(result["holiday_list"], "2030-03-09", "2030-03-09"), ["2030-03-09"])
-		self.assertEqual(self._on("2030-03-10"), BASE)
+		self.assertEqual(self._week_offs(result["holiday_list"], "2030-03-04", "2030-03-10"), ["2030-03-09"])
+		self.assertEqual(self._on("2030-03-10"), result["holiday_list"])
+		self.assertEqual(self._on("2030-03-11"), BASE)
+
+	def test_the_old_week_off_in_the_same_week_is_cleared(self):
+		"""Thursday to Friday, clicked on Friday 8th: Thursday 7th of that
+		week stops being a week off, so the week has only the new day."""
+		self._change("2030-03-08", "2030-03-08")
+		self.assertEqual(self._on("2030-03-07"), FRIDAY)
+		self.assertEqual(self._week_offs(FRIDAY, "2030-03-04", "2030-03-10"), ["2030-03-08"])
+		self.assertEqual(self._on("2030-03-11"), BASE)
 
 	def test_no_holiday_list_is_made(self):
 		lists = frappe.db.count("Holiday List")
 		self._change("2030-03-08", "2030-03-24")
-		self._remove("2030-03-07", "2030-03-20")
+		self._remove("2030-04-04", "2030-04-17")
 		self.assertEqual(frappe.db.count("Holiday List"), lists)
 
 	def test_a_window_past_the_year_is_assigned_up_to_its_end(self):
@@ -344,10 +356,10 @@ class IntegrationTestWeekOffChange(_TestCase):
 	# Removing a week off
 	# ──────────────────────────────────────────────────────────────────────
 
-	def _remove(self, from_date, to_date):
+	def _remove(self, from_date, to_date, weekdays=None):
 		from upande_ta.upande_ta.week_off_change import remove_week_off
 
-		return remove_week_off(self.employee, from_date, to_date)
+		return remove_week_off(self.employee, from_date, to_date, weekdays)
 
 	def _move_to_thursday_and_friday(self, from_date):
 		"""A two-day list from ``from_date``, for this test only."""
@@ -395,7 +407,34 @@ class IntegrationTestWeekOffChange(_TestCase):
 			"public holidays are kept",
 		)
 		self.assertEqual(self._on("2030-03-10"), result["holiday_list"])
-		self.assertEqual(self._on("2030-03-21"), BASE)
+		# widened to whole weeks: Thursday 21st goes too, Monday 25th is back
+		self.assertEqual(self._on("2030-03-21"), result["holiday_list"])
+		self.assertEqual(self._on("2030-03-25"), BASE)
+
+	def _add(self, from_date, to_date, weekdays):
+		from upande_ta.upande_ta.week_off_change import add_week_off
+
+		return add_week_off(self.employee, from_date, to_date, weekdays)
+
+	def test_adding_a_week_off_keeps_the_one_already_there(self):
+		two_day = self._move_to_thursday_and_friday("2030-12-31")  # only the list is needed
+		result = self._add("2030-03-08", "2030-03-17", '["Friday"]')
+
+		self.assertEqual(result["holiday_list"], two_day)
+		self.assertEqual((result["from_date"], result["to_date"]), ("2030-03-04", "2030-03-17"))
+		self.assertEqual(self._on("2030-03-07"), two_day)
+		self.assertEqual(self._on("2030-03-18"), BASE)
+
+	def test_adding_a_week_off_already_there_is_refused(self):
+		with self.assertRaises(frappe.ValidationError):
+			self._add("2030-03-07", "2030-03-17", '["Thursday"]')
+
+	def test_removing_the_ticked_days(self):
+		two_day = self._move_to_thursday_and_friday("2030-06-01")
+		result = self._remove("2030-06-05", "2030-06-16", '["Thursday", "Friday"]')
+
+		self.assertEqual(result["holiday_list"], NO_WEEK_OFF)
+		self.assertEqual(self._on("2030-06-17"), two_day)
 
 	def test_removing_one_day_of_two_keeps_the_other(self):
 		two_day = self._move_to_thursday_and_friday("2030-06-01")
