@@ -640,6 +640,10 @@ def bulk_command(device_sn, users, command_type, source_device_sn=None):
     # Devices with no farm assigned are unrestricted. This is the authoritative
     # guard for every entry point (bulk_command_per_device / _multi call here).
     caps = _device_capabilities(device_sn)
+    # Skip Face exists because a ZKTeco face from one engine will not load on
+    # another. Legacy devices are only ever sent faces captured by legacy
+    # devices of the same engine, so the option is ignored for them.
+    legacy_target = _is_legacy_device(device_sn)
 
     farm_gated = command_type in ("Add User", "Update User")
     allowed_farms = _device_farms(device_sn) if farm_gated else []
@@ -656,7 +660,7 @@ def bulk_command(device_sn, users, command_type, source_device_sn=None):
             employee_name = str(user.get("employee_name") or "").strip()
             privilege     = str(user.get("privilege") or "0").strip()
             skip_name     = bool(user.get("skip_name"))
-            skip_face     = bool(user.get("skip_face"))
+            skip_face     = bool(user.get("skip_face")) and not legacy_target
 
             if not user_id:
                 failed.append({"user_id": user_id, "reason": "Missing PIN"})
