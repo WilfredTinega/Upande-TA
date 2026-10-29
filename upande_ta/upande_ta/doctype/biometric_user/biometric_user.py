@@ -704,7 +704,12 @@ def bulk_command(device_sn, users, command_type, source_device_sn=None):
                     "privilege":      privilege,
                     "status":         "Active",
                 })
-                force_biodata = _is_template_deleted(device_sn, user_id)
+                # Legacy terminals are often cleared at the device itself, which
+                # the ERP never hears about, so an Add always re-sends their
+                # templates; re-sending ones the device still holds is harmless.
+                force_biodata = (
+                    _is_template_deleted(device_sn, user_id) or _is_legacy_device(device_sn)
+                )
                 _set_template_deleted_flag(device_sn, user_id, False)
 
             elif command_type == "Update User":
@@ -1630,14 +1635,100 @@ def _legacy_fingerprints(employee, device_sn, source_device_sn=None, tpl=None):
     return [fingers[k] for k in sorted(fingers)]
 
 
+def _legacy_face(employee, device_sn, source_device_sn=None):
+    """The 12 face pieces (FID 0-11) to push to legacy ``device_sn``.
+
+    Pieces are only meaningful together, so all of them come from ONE device:
+    the pinned source, else the target's own enrolment, else the most recently
+    updated enrolment on any other legacy terminal. Never mixed across devices.
+    """
+    if not frappe.db.exists("DocType", "Biometric Face"):
+        return []
+    sources = [source_device_sn] if source_device_sn else _legacy_device_sns()
+    sources = [s for s in sources if s and _is_legacy_device(s)]
+    if not sources:
+        return []
+    rows = frappe.get_all(
+        "Biometric Face",
+        filters={"employee": employee, "device_sn": ["in", sources], "valid": 1},
+        fields=["device_sn", "fid", "size", "template", "modified"],
+        order_by="modified desc",
+    )
+    by_device = {}
+    for r in rows:
+        if r.template:
+            by_device.setdefault(r.device_sn, {})[r.fid] = r
+    if not by_device:
+        return []
+    # A set cut short (an interrupted upload) must not beat a whole one, so the
+    # most complete set wins; the target's own, then the newest, break ties.
+    chosen = max(
+        by_device,
+        key=lambda sn: (
+            len(by_device[sn]),
+            sn == device_sn and not source_device_sn,
+            max(p.modified for p in by_device[sn].values()),
+        ),
+    )
+    return [by_device[chosen][k] for k in sorted(by_device[chosen])]
+
+
 def _queue_legacy_biodata(device_sn, user_id, employee, tpl, force, caps,
                           skip_modalities=(), source_device_sn=None):
-    """Legacy-engine push: one ``DATA UPDATE FINGERTMP`` per finger.
+    """Legacy-engine push: ``DATA UPDATE FINGERTMP`` per finger, then the
+    12-piece face as ``DATA UPDATE FACE`` per piece.
 
-    Faces are not pushed yet: these terminals answer with multi-part FACE
-    records whose format we have not captured, and the Bio Template face slot
-    may hold the enrolment photo (USERPIC), which is not a template.
+    The Bio Template face slot is never pushed to these devices: it may hold
+    the enrolment photo (USERPIC) or a single fragment, neither of which a
+    VX7.0 face engine can use.
     """
+    sent = _queue_legacy_fingers(device_sn, user_id, employee, tpl, force, caps,
+                                 skip_modalities, source_device_sn)
+    if "Face" not in skip_modalities and _device_supports(caps, "supports_face"):
+        sent += _queue_legacy_face(device_sn, user_id, employee, force, source_device_sn)
+    return sent
+
+
+def _queue_legacy_face(device_sn, user_id, employee, force, source_device_sn=None):
+    pieces = _legacy_face(employee, device_sn, source_device_sn)
+    if not pieces:
+        return 0
+    if not force:
+        held = {
+            r.fid: r.template
+            for r in frappe.get_all(
+                "Biometric Face",
+                filters={"employee": employee, "device_sn": device_sn},
+                fields=["fid", "template"],
+            )
+        }
+        if held and all(held.get(p.fid) == p.template for p in pieces):
+            frappe.logger().info(f"Legacy face push {device_sn}/{user_id}: already on device")
+            return 0
+
+    for p in pieces:
+        cmd_id = frappe.generate_hash(length=10)
+        _post_to_nodered({
+            "command_id":    cmd_id,
+            "command_type":  f"Add BioData (Face {p.fid})",
+            "device_sn":     device_sn,
+            "user_id":       user_id,
+            "employee_name": employee,
+            # Field names and casing as the terminal itself reports them.
+            "command": (
+                f"C:{cmd_id}:DATA UPDATE FACE"
+                f"\tPIN={user_id}"
+                f"\tFID={p.fid}"
+                f"\tSIZE={p.size or len(p.template)}"
+                f"\tVALID=1"
+                f"\tTMP={p.template}"
+            ),
+        })
+    return len(pieces)
+
+
+def _queue_legacy_fingers(device_sn, user_id, employee, tpl, force, caps,
+                          skip_modalities=(), source_device_sn=None):
     if "Fingerprint" in skip_modalities or not _device_supports(caps, "supports_fingerprint"):
         return 0
 

@@ -189,12 +189,22 @@ def _store_fingerprint(device_sn, employee, user_id, data):
     Biometric Fingerprint, keyed by device + employee + FID. A failure here is
     logged and swallowed: the slot above has already been written.
     """
-    if not frappe.db.exists("DocType", "Biometric Fingerprint"):
+    _store_legacy_part("Biometric Fingerprint", device_sn, employee, user_id, data,
+                       _int(data.get("fid"), _int(data.get("bio_no"))))
+
+
+def _store_face_part(device_sn, employee, user_id, data):
+    """One of the 12 pieces (FID 0-11) of a legacy face template."""
+    _store_legacy_part("Biometric Face", device_sn, employee, user_id, data,
+                       _int(data.get("fid")))
+
+
+def _store_legacy_part(doctype, device_sn, employee, user_id, data, fid):
+    if not frappe.db.exists("DocType", doctype):
         return
     template = _str(data.get("template"))
     if not template:
         return
-    fid = _int(data.get("bio_no"))
     values = {
         "user_id":   user_id,
         "valid":     _int(data.get("valid"), 1),
@@ -205,15 +215,15 @@ def _store_fingerprint(device_sn, employee, user_id, data):
     }
     try:
         existing = frappe.db.get_value(
-            "Biometric Fingerprint",
+            doctype,
             {"device_sn": device_sn, "employee": employee, "fid": fid},
             "name",
         )
         if existing:
-            frappe.db.set_value("Biometric Fingerprint", existing, values)
+            frappe.db.set_value(doctype, existing, values)
         else:
             frappe.get_doc({
-                "doctype":   "Biometric Fingerprint",
+                "doctype":   doctype,
                 "device_sn": device_sn,
                 "employee":  employee,
                 "fid":       fid,
@@ -223,8 +233,8 @@ def _store_fingerprint(device_sn, employee, user_id, data):
     except Exception as e:
         frappe.db.rollback()
         frappe.log_error(
-            f"Could not store finger {fid} for {employee} on {device_sn}: {e}",
-            "Biometric Fingerprint Store",
+            f"Could not store {doctype} part {fid} for {employee} on {device_sn}: {e}",
+            f"{doctype} Store",
         )
 
 
@@ -342,6 +352,23 @@ def store_biotemplate():
         return
     employee_name = employee_row.name
     employee_full_name = employee_row.employee_name or ""
+
+    if prefix == "face" and _int(data.get("legacy")):
+        # A legacy face arrives as 12 pieces. Every piece goes to Biometric
+        # Face; only piece 0 also touches the Bio Template face slot (so the
+        # row still reads "face held"). Writing pieces 1-11 there would just
+        # overwrite it 11 more times with fragments.
+        _store_face_part(device_sn, employee_name, user_id, data)
+        if _int(data.get("fid")) != 0:
+            frappe.response["message"] = {
+                "status":    "stored",
+                "message":   f"Face piece {_int(data.get('fid'))} stored for {employee_name} on {device_sn}.",
+                "employee":  employee_name,
+                "user_id":   user_id,
+                "bio_type":  bio_type,
+                "device_sn": device_sn,
+            }
+            return
 
     parent_name = _ensure_biometric_template_parent(device_sn)
 

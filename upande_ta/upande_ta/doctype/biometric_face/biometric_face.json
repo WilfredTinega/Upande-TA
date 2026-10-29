@@ -1,0 +1,136 @@
+{
+ "actions": [],
+ "creation": "2026-10-29 12:00:00.000000",
+ "description": "One piece of a legacy face template (FID 0-11) per employee per device. Face VX7.0 terminals store a face as 12 pieces; all 12 from the same device are pushed together.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "device_sn",
+  "employee",
+  "employee_name",
+  "user_id",
+  "fid",
+  "column_break_meta",
+  "valid",
+  "size",
+  "major_ver",
+  "minor_ver",
+  "section_break_template",
+  "template"
+ ],
+ "fields": [
+  {
+   "fieldname": "device_sn",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Device SN",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "user_id",
+   "fieldtype": "Data",
+   "label": "Device PIN",
+   "read_only": 1
+  },
+  {
+   "fieldname": "fid",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Piece (FID)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_meta",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "valid",
+   "fieldtype": "Check",
+   "label": "Valid",
+   "read_only": 1
+  },
+  {
+   "fieldname": "size",
+   "fieldtype": "Int",
+   "label": "Size",
+   "read_only": 1
+  },
+  {
+   "fieldname": "major_ver",
+   "fieldtype": "Int",
+   "label": "Algorithm Major Version",
+   "read_only": 1
+  },
+  {
+   "fieldname": "minor_ver",
+   "fieldtype": "Int",
+   "label": "Algorithm Minor Version",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_template",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "template",
+   "fieldtype": "Long Text",
+   "label": "Template",
+   "read_only": 1
+  }
+ ],
+ "in_create": 1,
+ "links": [],
+ "modified": "2026-10-29 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Biometric Face",
+ "autoname": "hash",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "employee_name"
+}
