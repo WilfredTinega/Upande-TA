@@ -180,6 +180,54 @@ def _attach_photo(row_name, filename, content_b64):
         return None
 
 
+def _store_fingerprint(device_sn, employee, user_id, data):
+    """Keep every finger, not just the latest one.
+
+    The Bio Template row has a single fingerprint slot, so a second finger
+    overwrites the first there. Legacy terminals push back finger by finger
+    (``DATA UPDATE FINGERTMP ... FID=``), so each finger is also kept in
+    Biometric Fingerprint, keyed by device + employee + FID. A failure here is
+    logged and swallowed: the slot above has already been written.
+    """
+    if not frappe.db.exists("DocType", "Biometric Fingerprint"):
+        return
+    template = _str(data.get("template"))
+    if not template:
+        return
+    fid = _int(data.get("bio_no"))
+    values = {
+        "user_id":   user_id,
+        "valid":     _int(data.get("valid"), 1),
+        "size":      _int(data.get("size")),
+        "major_ver": _int(data.get("major_ver")),
+        "minor_ver": _int(data.get("minor_ver")),
+        "template":  template,
+    }
+    try:
+        existing = frappe.db.get_value(
+            "Biometric Fingerprint",
+            {"device_sn": device_sn, "employee": employee, "fid": fid},
+            "name",
+        )
+        if existing:
+            frappe.db.set_value("Biometric Fingerprint", existing, values)
+        else:
+            frappe.get_doc({
+                "doctype":   "Biometric Fingerprint",
+                "device_sn": device_sn,
+                "employee":  employee,
+                "fid":       fid,
+                **values,
+            }).insert(ignore_permissions=True)
+        frappe.db.commit()
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(
+            f"Could not store finger {fid} for {employee} on {device_sn}: {e}",
+            "Biometric Fingerprint Store",
+        )
+
+
 @frappe.whitelist(allow_guest=True)
 def store_biotemplate():
     data      = frappe.request.get_json() or {}
@@ -408,6 +456,9 @@ def store_biotemplate():
                 f"Concurrent insert detected for employee {employee_name} on device "
                 f"{device_sn}; merged into existing row instead of creating a duplicate."
             )
+
+    if prefix == "fp":
+        _store_fingerprint(device_sn, employee_name, user_id, data)
 
     if is_photo:
         attached = _attach_photo(

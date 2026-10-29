@@ -15,6 +15,7 @@
   "supports_palm",
   "supports_card",
   "supports_password",
+  "template_format",
   "last_seen",
   "status"
  ],
@@ -105,13 +106,21 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Password"
+  },
+  {
+   "default": "BIODATA",
+   "description": "How this terminal exchanges fingerprint/face templates. BIODATA: ZKTeco push 3.x (DATA UPDATE BIODATA). Legacy FP/FACE: older engines such as Granding FA1-H (Finger VX10.0) that send FP/FACE lines and expect DATA UPDATE FINGERTMP.",
+   "fieldname": "template_format",
+   "fieldtype": "Select",
+   "label": "Template Format",
+   "options": "BIODATA\nLegacy FP/FACE"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-10-20 15:00:00.000000",
+ "modified": "2026-10-29 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Device",

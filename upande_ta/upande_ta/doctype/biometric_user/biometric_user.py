@@ -303,6 +303,37 @@ def sync_templates_from_device(device_sn, source_device_sn=None):
     return {"queued_job": 1, "add": len(add), "update": len(update)}
 
 
+@frappe.whitelist()
+def sync_templates_to_all_devices(source_device_sn):
+    """Sync every other registered device from ``source_device_sn`` (A to all).
+
+    Runs ``sync_templates_from_device`` per target, so large targets go to the
+    background queue exactly as a single A-to-B sync does.
+    """
+    source_device_sn = str(source_device_sn or "").strip()
+    if not source_device_sn:
+        frappe.throw("source_device_sn is required")
+    targets = [
+        sn for sn in frappe.get_all(
+            "Biometric Device",
+            filters={"parent": "Biometric Setting", "parentfield": "devices"},
+            pluck="device_sn",
+            order_by="idx asc",
+        )
+        if sn and sn != source_device_sn
+    ]
+    results = []
+    for sn in targets:
+        label = _lookup_device_location(sn) or sn
+        try:
+            results.append(dict(sync_templates_from_device(sn, source_device_sn) or {}, device=label))
+        except Exception as e:
+            frappe.clear_messages()
+            results.append({"device": label, "error": str(e)})
+    return {"source": _lookup_device_location(source_device_sn) or source_device_sn,
+            "devices": results}
+
+
 def _run_template_sync(device_sn, source_device_sn, add, update, notify_user=None):
     queued = failed = 0
     errors = []
@@ -757,6 +788,7 @@ def bulk_command(device_sn, users, command_type, source_device_sn=None):
                 force=entry["force_biodata"],
                 caps=caps,
                 skip_modalities=("Face",) if entry["skip_face"] else (),
+                source_device_sn=source_device_sn or None,
             )
 
     return {
@@ -1529,8 +1561,130 @@ def _build_userinfo_command(cmd_id, user_id, employee_name, fallback_privilege, 
     )
 
 
+LEGACY_TEMPLATE_FORMAT = "Legacy FP/FACE"
+
+
+def _device_template_format(device_sn):
+    """``BIODATA`` (ZKTeco push 3.x) unless the device is set to legacy FP/FACE."""
+    if not device_sn or not frappe.db.has_column("Biometric Device", "template_format"):
+        return "BIODATA"
+    return frappe.db.get_value(
+        "Biometric Device",
+        {"parent": "Biometric Setting", "parentfield": "devices", "device_sn": device_sn},
+        "template_format",
+    ) or "BIODATA"
+
+
+def _is_legacy_device(device_sn):
+    return _device_template_format(device_sn) == LEGACY_TEMPLATE_FORMAT
+
+
+def _legacy_device_sns():
+    if not frappe.db.has_column("Biometric Device", "template_format"):
+        return []
+    return frappe.get_all(
+        "Biometric Device",
+        filters={
+            "parent":          "Biometric Setting",
+            "parentfield":     "devices",
+            "template_format": LEGACY_TEMPLATE_FORMAT,
+        },
+        pluck="device_sn",
+    )
+
+
+def _legacy_fingerprints(employee, device_sn, source_device_sn=None, tpl=None):
+    """Every finger to push to legacy ``device_sn``, one dict per FID.
+
+    Templates are engine-specific, so only fingers captured by a legacy device
+    are eligible — a ZKTeco 13.0 template on a VX10.0 reader is accepted and
+    then silently discarded. ``source_device_sn`` pins them to one terminal;
+    otherwise the target's own copy of a finger wins, then the newest copy from
+    any other legacy terminal. Falls back to the Bio Template single slot for
+    rows stored before Biometric Fingerprint existed.
+    """
+    sources = [source_device_sn] if source_device_sn else _legacy_device_sns()
+    sources = [s for s in sources if s and _is_legacy_device(s)]
+    fingers = {}
+    if sources and frappe.db.exists("DocType", "Biometric Fingerprint"):
+        rows = frappe.get_all(
+            "Biometric Fingerprint",
+            filters={"employee": employee, "device_sn": ["in", sources], "valid": 1},
+            fields=["device_sn", "fid", "size", "major_ver", "minor_ver", "template"],
+            order_by="modified desc",
+        )
+        for r in sorted(rows, key=lambda r: r.device_sn != device_sn):
+            if r.template and r.fid not in fingers:
+                fingers[r.fid] = r
+
+    if not fingers and tpl and tpl.get("fingerprint_template") and tpl.get("fp_valid"):
+        # Only trust the slot when it came from a legacy engine (Node-RED
+        # stamps legacy FP lines as major version 10).
+        if int(tpl.get("fp_major_ver") or 0) == 10:
+            fid = int(tpl.get("fp_bio_no") or 0)
+            fingers[fid] = frappe._dict(
+                fid=fid,
+                size=len(tpl["fingerprint_template"]),
+                template=tpl["fingerprint_template"],
+            )
+    return [fingers[k] for k in sorted(fingers)]
+
+
+def _queue_legacy_biodata(device_sn, user_id, employee, tpl, force, caps,
+                          skip_modalities=(), source_device_sn=None):
+    """Legacy-engine push: one ``DATA UPDATE FINGERTMP`` per finger.
+
+    Faces are not pushed yet: these terminals answer with multi-part FACE
+    records whose format we have not captured, and the Bio Template face slot
+    may hold the enrolment photo (USERPIC), which is not a template.
+    """
+    if "Fingerprint" in skip_modalities or not _device_supports(caps, "supports_fingerprint"):
+        return 0
+
+    on_device = {}
+    if not force and frappe.db.exists("DocType", "Biometric Fingerprint"):
+        on_device = {
+            r.fid: r.template
+            for r in frappe.get_all(
+                "Biometric Fingerprint",
+                filters={"employee": employee, "device_sn": device_sn},
+                fields=["fid", "template"],
+            )
+        }
+
+    sent = skipped = 0
+    for finger in _legacy_fingerprints(employee, device_sn, source_device_sn, tpl):
+        if on_device.get(finger.fid) == finger.template:
+            skipped += 1
+            continue
+        cmd_id = frappe.generate_hash(length=10)
+        command = (
+            f"C:{cmd_id}:DATA UPDATE FINGERTMP"
+            f"\tPIN={user_id}"
+            f"\tFID={finger.fid}"
+            f"\tSize={finger.size or len(finger.template)}"
+            f"\tValid=1"
+            f"\tTMP={finger.template}"
+        )
+        _post_to_nodered({
+            "command_id":    cmd_id,
+            "command_type":  f"Add BioData (Fingerprint {finger.fid})",
+            "device_sn":     device_sn,
+            "user_id":       user_id,
+            "employee_name": employee,
+            "command":       command,
+        })
+        sent += 1
+
+    if skipped:
+        frappe.logger().info(
+            f"Legacy biodata push {device_sn}/{user_id}: {sent} queued, {skipped} already on device"
+        )
+    return sent
+
+
 def _queue_biodata_for_user(device_sn, user_id, employee=None, tpl=None, force=False, caps=None,
-                            skip_modalities=()):
+                            skip_modalities=(), source_device_sn=None):
     """Push the user's biometric templates to one device.
 
     Two filters apply, in order:
@@ -1560,7 +1714,16 @@ def _queue_biodata_for_user(device_sn, user_id, employee=None, tpl=None, force=F
         return 0
 
     if tpl is None:
-        tpl = _get_template_row(employee, device_sn)
+        tpl = _get_template_row(employee, device_sn, source_device_sn)
+
+    if _is_legacy_device(device_sn):
+        if caps is None:
+            caps = _device_capabilities(device_sn)
+        return _queue_legacy_biodata(
+            device_sn, user_id, employee, tpl, force, caps,
+            skip_modalities=skip_modalities, source_device_sn=source_device_sn,
+        )
+
     if not tpl:
         return 0
 

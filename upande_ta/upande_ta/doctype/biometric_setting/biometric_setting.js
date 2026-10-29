@@ -1122,17 +1122,54 @@ function open_template_sync_dialog(frm, sn, loc) {
 				<span>${__("Templates from")}</span>
 				<select id="sync-source-sel">${options}</select>
 			</label>`,
+		}, {
+			fieldname: "all_devices",
+			fieldtype: "Check",
+			label: __("Sync every other device from this source"),
+			description: __("Pushes the source's users and templates to all registered devices, not just {0}.", [loc]),
 		}],
 		primary_action_label: __("Sync"),
 		primary_action() {
 			const source_sn = d.$wrapper.find("#sync-source-sel").val() || sn;
+			const all_devices = d.get_value("all_devices");
 			d.hide();
-			run_template_sync(frm, sn, loc, source_sn);
+			if (all_devices) {
+				run_template_sync_all(frm, source_sn);
+			} else {
+				run_template_sync(frm, sn, loc, source_sn);
+			}
 		},
 	});
 	d.show();
 	const sel = d.$wrapper.find("#sync-source-sel")[0];
 	if (sel && upande_ta.device_select && upande_ta.device_select.enhance) upande_ta.device_select.enhance(sel);
+}
+
+function run_template_sync_all(frm, source_sn) {
+	frappe.call({
+		method: "upande_ta.upande_ta.doctype.biometric_user.biometric_user.sync_templates_to_all_devices",
+		args: { source_device_sn: source_sn },
+		freeze: true,
+		freeze_message: __("Syncing all devices..."),
+		callback: (r) => {
+			if (r.exc || !r.message) return;
+			const esc = frappe.utils.escape_html;
+			const rows = (r.message.devices || []).map(m => {
+				let status;
+				if (m.error) status = __("Failed: {0}", [esc(m.error)]);
+				else if (m.queued_job) status = __("{0} user(s) syncing in the background", [(m.add || 0) + (m.update || 0)]);
+				else status = __("{0} added, {1} updated, {2} command(s) queued", [m.added || 0, m.updated || 0, m.queued || 0]);
+				return `<tr><td>${esc(m.device)}</td><td>${status}</td></tr>`;
+			}).join("");
+			frappe.msgprint({
+				title: __("Synced from {0}", [esc(r.message.source)]),
+				message: rows
+					? `<table class="table table-sm"><tbody>${rows}</tbody></table>`
+					: __("No other devices registered."),
+			});
+			render_users_tab(frm);
+		}
+	});
 }
 
 function run_template_sync(frm, sn, loc, source_sn) {
