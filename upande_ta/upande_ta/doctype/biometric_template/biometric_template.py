@@ -180,6 +180,11 @@ def _attach_photo(row_name, filename, content_b64):
         return None
 
 
+def is_photo_sent_as_face(template, raw_log=None):
+    """True for a base64 JPEG (``/9j/``) or a USERPIC line posted as a face."""
+    return _str(template).startswith("/9j/") or _str(raw_log).upper().startswith("USERPIC")
+
+
 def _store_fingerprint(device_sn, employee, user_id, data):
     """Keep every finger, not just the latest one.
 
@@ -265,6 +270,13 @@ def store_biotemplate():
         return
 
     kind = bio_type.lower()
+    if kind == "face" and is_photo_sent_as_face(data.get("template"), data.get("raw_log")):
+        # An enrolment photo (USERPIC JPEG) labelled as a face. Stored in the
+        # face slot it would later be pushed to terminals as a "face"; keep it
+        # as the row's photo instead.
+        kind = "photo"
+        data = dict(data, content=data.get("template"),
+                    filename=data.get("filename") or f"{user_id}.jpg")
     is_user_record = kind == "user"
     is_photo = kind == "photo"
     prefix = _BIO_PREFIX.get(kind)

@@ -24,3 +24,4 @@ upande_ta.patches.v1.index_employee_checkin_device_time
 upande_ta.patches.v1.repoint_week_off_copies_to_shared_lists
 upande_ta.patches.v1.drop_bulk_overtime_worked_hours
 upande_ta.patches.v1.repoint_week_off_copies_past_year_end
+upande_ta.patches.v1.move_photos_out_of_face_slot
