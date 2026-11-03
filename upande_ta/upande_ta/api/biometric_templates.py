@@ -451,7 +451,7 @@ def effective_off_days(people, start, end):
 	if lists:
 		for h in frappe.db.sql(
 			"""
-			SELECT parent, holiday_date, weekly_off, description FROM `tabHoliday`
+			SELECT name, parent, holiday_date, weekly_off, description FROM `tabHoliday`
 			WHERE parent IN %(lists)s AND holiday_date BETWEEN %(start)s AND %(end)s
 			""",
 			{"lists": tuple(lists), "start": start, "end": end},

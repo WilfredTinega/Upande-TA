@@ -102,6 +102,7 @@ before_uninstall = [
 override_whitelisted_methods = {
 	"frappe.model.workflow.get_transitions": "upande_ta.upande_ta.overrides.workflow.get_transitions",
 	"frappe.apps.get_apps": "upande_ta.upande_ta.overrides.apps_screen.get_apps",
+	"hrms.api.roster.get_events": "upande_ta.upande_ta.overrides.roster.get_events",
 }
 
 override_doctype_class = {
