@@ -229,6 +229,44 @@ class IntegrationTestExchange(_TestCase):
 		# their home makes the Employee Checkin itself when the punch arrives
 		self.assertEqual(self.logs(checkin), ["Exchange Checkin"])
 
+	def device_payload(self, pin, when, log_type="IN"):
+		return {
+			"record_type": "attendance",
+			"device_sn": "DEV-1",
+			"device_id": "DEV-1",
+			"employee": pin,
+			"time": str(when),
+			"log_type": log_type,
+			"punch_state": "0",
+			"verify_type": "15",
+		}
+
+	def test_a_punch_posted_to_employee_checkin_by_pin_or_payroll_is_kept(self):
+		employee = self.make_hq_employee()
+		when = now_datetime().replace(microsecond=0)
+		by_pin = frappe.new_doc("Employee Checkin", **self.device_payload(employee.device_pin, when)).insert()
+		self.assertEqual((by_pin.doctype, by_pin.exchange_employee), ("Exchange Checkin", employee.name))
+		later = add_to_date(when, minutes=5)
+		by_payroll = frappe.new_doc(
+			"Employee Checkin", **self.device_payload(employee.payroll_number, later, "OUT")
+		).insert()
+		self.assertEqual((by_payroll.exchange_employee, by_payroll.device_sn), (employee.name, "DEV-1"))
+		with self.assertRaises(frappe.LinkValidationError):
+			frappe.new_doc("Employee Checkin", **self.device_payload("NOBODY-0001", when)).insert()
+
+	def test_the_device_payload_posted_to_exchange_checkin_finds_the_person(self):
+		employee = self.make_employee()
+		when = now_datetime().replace(microsecond=0)
+		first = frappe.new_doc("Exchange Checkin", **self.device_payload(PAYROLL, when)).insert()
+		self.assertEqual(
+			(first.person_doctype, first.exchange_employee, first.employee, first.device_sn, first.arrived_via),
+			("Exchange Employee", employee.name, None, "DEV-1", "Device"),
+		)
+		again = frappe.new_doc("Exchange Checkin", **self.device_payload(employee.device_pin, when)).insert()
+		self.assertEqual(again.name, first.name)
+		with self.assertRaises(frappe.ValidationError):
+			frappe.new_doc("Exchange Checkin", **self.device_payload("NOBODY-0001", when)).insert()
+
 	def punch_from_elsewhere(self, payroll, origin="EXC-0100"):
 		return exchange.receive(
 			"Exchange Checkin",

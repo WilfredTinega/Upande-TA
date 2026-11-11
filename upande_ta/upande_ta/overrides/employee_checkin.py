@@ -5,6 +5,24 @@ from datetime import timedelta
 import frappe
 from frappe import _
 from frappe.utils import add_days, get_datetime, get_time, getdate, today
+from hrms.hr.doctype.employee_checkin.employee_checkin import EmployeeCheckin
+
+from upande_ta.upande_ta import exchange
+
+
+class UpandeEmployeeCheckin(EmployeeCheckin):
+	def insert(self, *args, **kwargs):
+		"""A punch whose PIN is no Employee here but an Exchange or HQ
+		Employee's is kept as an Exchange Checkin, so a device feed can post
+		every punch to Employee Checkin."""
+		if self.is_new() and self.employee and not frappe.db.exists("Employee", self.employee):
+			self.check_permission("create")
+			name = exchange.record_device_punch(
+				self.employee, self.time, device_sn=self.get("device_id"), log_type=self.log_type
+			)
+			if name:
+				return frappe.get_doc("Exchange Checkin", name)
+		return super().insert(*args, **kwargs)
 
 
 def prevent_duplicate(doc, method=None):

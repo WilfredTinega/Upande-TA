@@ -930,6 +930,14 @@ def person_by(filters, fields=("name", "host_company")):
 	return None
 
 
+def person_by_pin(pin, fields=("name", "host_company")):
+	"""The active Exchange or HQ Employee a device sends as ``pin``: their
+	device PIN, else their payroll number."""
+	return person_by({"device_pin": pin, "status": "Active"}, fields) or person_by(
+		{"payroll_number": pin, "status": "Active"}, fields
+	)
+
+
 def same_punch(doctype, employee_field, employee, time, log_type) -> str | None:
 	"""An existing punch of ``employee`` at exactly ``time`` with the same log
 	type (both blank counts as the same); the same punch is never kept twice."""
@@ -1072,7 +1080,7 @@ def record_device_punch(pin, time, device_sn=None, log_type=None) -> str | None:
 		return None
 	if frappe.db.exists("Employee", {"attendance_device_id": pin}):
 		return None
-	employee = person_by({"device_pin": pin, "status": "Active"}, fields=("name",))
+	employee = person_by_pin(pin, fields=("name",))
 	if not employee:
 		return None
 	log_type = (log_type or "").strip().upper() or None
