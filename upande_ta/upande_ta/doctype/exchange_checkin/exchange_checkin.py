@@ -13,6 +13,35 @@ from upande_ta.upande_ta import exchange
 
 
 class ExchangeCheckin(Document):
+	def insert(self, *args, **kwargs):
+		existing = self.take_device_payload()
+		if existing:
+			return frappe.get_doc("Exchange Checkin", existing)
+		return super().insert(*args, **kwargs)
+
+	def take_device_payload(self):
+		"""Node-RED posts the device's own punch: the PIN in ``employee`` and
+		the device in ``device_id``. Finds the Exchange or HQ Employee by that
+		PIN or payroll number; returns the same punch when it is already kept."""
+		if self.flags.from_sync or self.exchange_employee:
+			return None
+		pin = str(self.employee or self.payroll_number or "").strip()
+		if not pin:
+			return None
+		person = exchange.person_by_pin(pin, fields=("name",))
+		if not person:
+			frappe.throw(_("No active Exchange or HQ Employee has the device PIN or payroll number {0}.").format(pin))
+		self.person_doctype = person.doctype
+		self.exchange_employee = person.name
+		if not frappe.db.exists("Employee", self.employee):
+			self.employee = None
+		self.device_sn = self.device_sn or self.get("device_id")
+		self.log_type = (self.log_type or "").strip().upper() or None
+		if self.log_type not in (None, "IN", "OUT"):
+			self.log_type = None
+		self.arrived_via = "Device"
+		return exchange.same_punch("Exchange Checkin", "exchange_employee", person.name, self.time, self.log_type)
+
 	def validate(self):
 		if self.flags.from_sync:
 			return

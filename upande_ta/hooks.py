@@ -111,6 +111,9 @@ override_doctype_class = {
 	# DuplicateAttendanceError, which the check-in path answers by flagging the
 	# scan `skip_auto_attendance` — losing it for good.
 	"Attendance": "upande_ta.upande_ta.overrides.attendance.UpandeAttendance",
+	# An Exchange or HQ Employee's PIN is no Employee here: their punch posted
+	# to Employee Checkin is kept as an Exchange Checkin instead of refused.
+	"Employee Checkin": "upande_ta.upande_ta.overrides.employee_checkin.UpandeEmployeeCheckin",
 }
 
 doc_events = {

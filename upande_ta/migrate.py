@@ -135,7 +135,11 @@ def _app_resource_paths():
 	Frappe considers importable instead of a hand-maintained list that drifts.
 	"""
 	from frappe.model.sync import get_doc_files
-	from frappe.modules.utils import get_module_list
+
+	try:
+		from frappe.modules.utils import get_module_list
+	except ImportError:  # Frappe 16 keeps it on the package
+		from frappe import get_module_list
 
 	paths = []
 	for module in get_module_list(APP_NAME) or []:
@@ -855,23 +859,15 @@ _HR_ICON = "HR"
 
 def rename_hr_app_icon():
 	"""Label the Desk app group holding HR, Upande TA and Cova Clinic "HR"."""
-	from frappe.model.rename_doc import rename_doc
+	# Not rename_doc: Frappe 16's Desktop Icon.after_rename deletes the old JSON
+	# from the icon's app folder unconditionally, so with `app` set it removes
+	# hrms' frappe_hr.json and with `app` blanked it raises on an empty module
+	# name -- every migrate since left "Frappe HR" in place and the tiles split.
+	if not frappe.db.exists("Desktop Icon", _HR_ICON):
+		_create_hr_icon()
+	_reparent_hr_children()
 
-	if not frappe.db.exists("Desktop Icon", _HR_ICON_SHIPPED):
-		# A migrate that did not re-sync hrms leaves no "Frappe HR" to rename; if the
-		# orphan sweep took "HR" as well, every HR tile lost its group. Recreate it.
-		if not frappe.db.exists("Desktop Icon", _HR_ICON):
-			_create_hr_icon()
-		_reparent_hr_children()
-		_keep_hr_icon_off_orphan_sweep()
-		frappe.cache.delete_key("desktop_icons")
-		frappe.cache.delete_key("bootinfo")
-		return
-
-	if frappe.db.exists("Desktop Icon", _HR_ICON):
-		# A sync recreated the shipped tile beside ours instead of replacing it.
-		# Fold its children over and drop it; renaming onto a taken name fails.
-		_reparent_hr_children()
+	if frappe.db.exists("Desktop Icon", _HR_ICON_SHIPPED):
 		# Clear standard/app first: Desktop Icon.on_trash deletes the matching
 		# JSON from the *hrms* app folder when developer_mode is on and both set.
 		frappe.db.set_value(
@@ -887,40 +883,22 @@ def rename_hr_app_icon():
 			force=True,
 			ignore_missing=True,
 		)
-	else:
-		# Desktop Icon.after_rename rewrites the app folder -- it deletes
-		# `hrms/desktop_icon/frappe_hr.json` and exports `hr.json` in its place,
-		# unconditionally on delete. Blanking `app` for the duration keeps this
-		# app out of HRMS' source tree; it is restored immediately after.
-		frappe.db.set_value("Desktop Icon", _HR_ICON_SHIPPED, "app", None, update_modified=False)
-		try:
-			rename_doc(
-				"Desktop Icon",
-				_HR_ICON_SHIPPED,
-				_HR_ICON,
-				force=True,
-				ignore_permissions=True,
-				show_alert=False,
-			)
-		except Exception:
-			frappe.db.set_value("Desktop Icon", _HR_ICON_SHIPPED, "app", "hrms", update_modified=False)
-			raise
-		# `app` is what pairs the tile with hrms for Frappe's own duplicate sweep
-		# and for check_app_permission(), so it has to go back.
-		frappe.db.set_value("Desktop Icon", _HR_ICON, "app", "hrms", update_modified=False)
+		print(f"{APP_NAME}: Desk app group '{_HR_ICON_SHIPPED}' relabelled '{_HR_ICON}'")
 
 	_keep_hr_icon_off_orphan_sweep()
 	frappe.cache.delete_key("desktop_icons")
 	frappe.cache.delete_key("bootinfo")
-	print(f"{APP_NAME}: Desk app group '{_HR_ICON_SHIPPED}' relabelled '{_HR_ICON}'")
 
 
 def _keep_hr_icon_off_orphan_sweep():
 	"""`remove_orphan_entities()` deletes every standard Desktop Icon with no JSON in
 	its app, and hrms ships frappe_hr.json, not hr.json -- so a standard "HR" was
 	deleted on each migrate that did not also re-sync hrms. A non-standard one is
-	left alone; `app` stays hrms for check_app_permission()."""
-	frappe.db.set_value("Desktop Icon", _HR_ICON, "standard", 0, update_modified=False)
+	left alone; `app` stays hrms for check_app_permission(). The desk shows a
+	non-standard icon only to its owner or when Administrator owns it."""
+	frappe.db.set_value(
+		"Desktop Icon", _HR_ICON, {"standard": 0, "owner": "Administrator"}, update_modified=False
+	)
 
 
 def _create_hr_icon():
