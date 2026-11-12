@@ -938,17 +938,13 @@ def person_by_pin(pin, fields=("name", "host_company")):
 	)
 
 
-def same_punch(doctype, employee_field, employee, time, log_type) -> str | None:
-	"""An existing punch of ``employee`` at exactly ``time`` with the same log
-	type (both blank counts as the same); the same punch is never kept twice."""
-	return frappe.db.get_value(
-		doctype,
-		{
-			employee_field: employee,
-			"time": get_datetime(time),
-			"log_type": log_type or ["in", ["", None]],
-		},
-	)
+def same_punch(doctype, employee_field, employee, time) -> str | None:
+	"""An existing punch of ``employee`` at exactly ``time``, whatever its log
+	type: one person cannot punch twice in the same second, so the same date
+	and time sent again is the same punch and is never kept twice."""
+	if not (employee and time):
+		return None
+	return frappe.db.get_value(doctype, {employee_field: employee, "time": get_datetime(time)})
 
 
 def receive_checkin(data) -> dict:
@@ -958,9 +954,13 @@ def receive_checkin(data) -> dict:
 	employee = (
 		person_by({"origin_id": data.get("employee_origin_id")}) if data.get("employee_origin_id") else None
 	)
-	same = employee and same_punch(
-		"Exchange Checkin", "exchange_employee", employee.name, data.get("time"), data.get("log_type")
-	)
+	if employee:
+		same = same_punch("Exchange Checkin", "exchange_employee", employee.name, data.get("time"))
+	else:
+		# the person has not arrived yet: their punches wait under their origin
+		same = same_punch(
+			"Exchange Checkin", "employee_origin_id", data.get("employee_origin_id"), data.get("time")
+		)
 	if same:
 		result = {"status": "exists", "name": same}
 	else:
@@ -1031,7 +1031,7 @@ def make_employee_checkin(data) -> dict:
 	)
 	if not employee:
 		frappe.throw(_("No employee here has payroll number {0}.").format(data.get("payroll_number")))
-	existing = same_punch("Employee Checkin", "employee", employee, data.time, data.get("log_type"))
+	existing = same_punch("Employee Checkin", "employee", employee, data.time)
 	if existing:
 		return {"status": "exists", "name": existing, "employee": employee}
 	doc = frappe.get_doc(
@@ -1086,7 +1086,7 @@ def record_device_punch(pin, time, device_sn=None, log_type=None) -> str | None:
 	log_type = (log_type or "").strip().upper() or None
 	if log_type not in (None, "IN", "OUT"):
 		log_type = None
-	existing = same_punch("Exchange Checkin", "exchange_employee", employee.name, time, log_type)
+	existing = same_punch("Exchange Checkin", "exchange_employee", employee.name, time)
 	if existing:
 		return existing
 	doc = frappe.get_doc(

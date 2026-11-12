@@ -329,13 +329,33 @@ class IntegrationTestExchange(_TestCase):
 		)
 		self.assertEqual([r.reference_doctype for r in rows], ["Exchange Employee", "Exchange Checkin"])
 
-	def test_the_same_time_with_another_log_type_is_a_new_punch(self):
+	def test_the_same_time_is_one_punch_whatever_its_log_type(self):
 		employee = self.make_employee()
 		when = now_datetime()
 		first = exchange.record_device_punch(employee.device_pin, when, log_type="IN")
 		self.assertEqual(exchange.record_device_punch(employee.device_pin, when, log_type="IN"), first)
-		other = exchange.record_device_punch(employee.device_pin, when, log_type="OUT")
-		self.assertNotEqual(other, first)
+		self.assertEqual(exchange.record_device_punch(employee.device_pin, when, log_type="OUT"), first)
+		self.assertEqual(frappe.db.count("Exchange Checkin", {"exchange_employee": employee.name}), 1)
+
+	def test_a_punch_typed_in_at_a_time_already_kept_is_refused(self):
+		employee = self.make_employee()
+		when = now_datetime().replace(microsecond=0)
+		exchange.record_device_punch(employee.device_pin, when, log_type="IN")
+		with self.assertRaises(frappe.DuplicateEntryError):
+			frappe.get_doc(
+				{
+					"doctype": "Exchange Checkin",
+					"person_doctype": "Exchange Employee",
+					"exchange_employee": employee.name,
+					"time": when,
+					"log_type": "OUT",
+				}
+			).insert()
+
+	def test_the_same_time_sent_again_by_another_instance_is_not_kept_twice(self):
+		self.punch_from_elsewhere(PAYROLL, origin="EXC-0200")
+		again = self.punch_from_elsewhere(PAYROLL, origin="EXC-0201")
+		self.assertEqual(again["status"], "exists")
 
 	def test_the_device_pin_comes_from_home(self):
 		employee = self.make_employee(pin=None)

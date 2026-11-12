@@ -25,7 +25,7 @@ def execute():
 		)
 		if not employee:
 			continue
-		checkin = exchange.same_punch("Employee Checkin", "employee", employee, row.time, row.log_type)
+		checkin = exchange.same_punch("Employee Checkin", "employee", employee, row.time)
 		if checkin:
 			frappe.db.set_value(
 				"Exchange Checkin",
