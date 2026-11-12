@@ -10,6 +10,7 @@ upande_ta.patches.v1.migrate_device_farm_to_farms
 upande_ta.patches.v1.drop_scp_child_table_fields
 upande_ta.patches.v1.consolidate_ta_workspace
 upande_ta.patches.v1.rename_ta_to_upande_ta
+upande_ta.patches.v1.dedupe_exchange_checkin_punches
 
 [post_model_sync]
 upande_ta.patches.v1.create_gate_pass_department_field

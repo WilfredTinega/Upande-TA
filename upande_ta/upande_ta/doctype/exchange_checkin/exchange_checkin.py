@@ -3,7 +3,12 @@
 
 """One punch by an exchange employee, from a device here or from another
 instance. Kept apart from Employee Checkin so attendance and payroll never
-count it."""
+count it.
+
+A person has one punch per date and time: the same time sent again — by the
+device, by another instance, or typed in — is refused, whatever its log type,
+and a unique key on (exchange_employee, time) holds that even when two copies
+arrive at once."""
 
 import frappe
 from frappe import _
@@ -11,13 +16,29 @@ from frappe.model.document import Document
 
 from upande_ta.upande_ta import exchange
 
+#: The unique key that keeps one punch per person per date and time.
+UNIQUE_PUNCH = "unique_exchange_employee_time"
+
+
+def on_doctype_update():
+	frappe.db.add_unique("Exchange Checkin", ["exchange_employee", "`time`"], constraint_name=UNIQUE_PUNCH)
+
 
 class ExchangeCheckin(Document):
 	def insert(self, *args, **kwargs):
 		existing = self.take_device_payload()
 		if existing:
 			return frappe.get_doc("Exchange Checkin", existing)
-		return super().insert(*args, **kwargs)
+		try:
+			return super().insert(*args, **kwargs)
+		except frappe.UniqueValidationError:
+			# the same punch was saved a moment ago by another request
+			frappe.clear_last_message()
+			self.throw_duplicate(
+				exchange.same_punch(
+					"Exchange Checkin", "exchange_employee", self.exchange_employee, self.time
+				)
+			)
 
 	def take_device_payload(self):
 		"""Node-RED posts the device's own punch: the PIN in ``employee`` and
@@ -30,7 +51,9 @@ class ExchangeCheckin(Document):
 			return None
 		person = exchange.person_by_pin(pin, fields=("name",))
 		if not person:
-			frappe.throw(_("No active Exchange or HQ Employee has the device PIN or payroll number {0}.").format(pin))
+			frappe.throw(
+				_("No active Exchange or HQ Employee has the device PIN or payroll number {0}.").format(pin)
+			)
 		self.person_doctype = person.doctype
 		self.exchange_employee = person.name
 		if not frappe.db.exists("Employee", self.employee):
@@ -40,10 +63,11 @@ class ExchangeCheckin(Document):
 		if self.log_type not in (None, "IN", "OUT"):
 			self.log_type = None
 		self.arrived_via = "Device"
-		return exchange.same_punch("Exchange Checkin", "exchange_employee", person.name, self.time, self.log_type)
+		return exchange.same_punch("Exchange Checkin", "exchange_employee", person.name, self.time)
 
 	def validate(self):
 		if self.flags.from_sync:
+			self.validate_duplicate()
 			return
 		self.person_doctype = self.person_doctype or "Exchange Employee"
 		if self.person_doctype not in exchange.PERSON_DOCTYPES:
@@ -75,22 +99,25 @@ class ExchangeCheckin(Document):
 		self.validate_duplicate()
 
 	def validate_duplicate(self):
+		if not (self.exchange_employee and self.time):
+			return
 		other = frappe.db.get_value(
 			"Exchange Checkin",
-			{
-				"exchange_employee": self.exchange_employee,
-				"time": self.time,
-				"log_type": self.log_type or ["is", "not set"],
-				"name": ["!=", self.name],
-			},
+			{"exchange_employee": self.exchange_employee, "time": self.time, "name": ["!=", self.name]},
 		)
 		if other:
-			frappe.throw(
-				_("{0} already has this punch: {1}.").format(
-					self.employee_name, frappe.get_desk_link("Exchange Checkin", other)
-				),
-				title=_("Duplicate Punch"),
-			)
+			self.throw_duplicate(other)
+
+	def throw_duplicate(self, other):
+		frappe.throw(
+			_("{0} already has a punch at {1}: {2}.").format(
+				self.employee_name or self.exchange_employee,
+				frappe.format(self.time, "Datetime"),
+				frappe.get_desk_link("Exchange Checkin", other) if other else "",
+			),
+			exc=frappe.DuplicateEntryError,
+			title=_("Duplicate Punch"),
+		)
 
 	def after_insert(self):
 		if self.flags.from_sync:
