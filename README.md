@@ -86,8 +86,9 @@ save, guarded by a `before_insert` flag.
 2. **Return punches** — Node-RED creates Employee Checkins via Frappe's standard
    API (device → employee via `attendance_device_id`).
 3. **Deduplicate** — `prevent_duplicate()` rejects a checkin with the same
-   `employee` + `time` + `log_type` (blank and None treated as equivalent),
-   making repeated ATTLOG pulls idempotent.
+   `employee` + `time`, whatever its `log_type`, making repeated ATTLOG pulls
+   idempotent. Direction is deliberately ignored: step 4 relabels stored
+   punches, so a re-polled copy can arrive with a different `log_type`.
 4. **IN/OUT normalization** — readers mislabel direction both ways: ZKTeco
    punches often all arrive as IN, and the gate terminals stamp every scan OUT.
    `normalize_checkin_directions()` groups scans into the employee's **assigned
