@@ -35,7 +35,7 @@
 		const GROUP = __("Biometric Device");
 
 		const $add = listview.page.add_inner_button(__("Add to Device"), () => {
-			const names = listview.get_checked_items(true);
+			const names = checked_items(true);
 			if (!names.length) {
 				frappe.msgprint(__("Tick the employees to add, then press Add to Device."));
 				return;
@@ -56,7 +56,7 @@
 		const INACTIVE = ["Left", "Inactive", "Suspended"];
 
 		const $update = listview.page.add_inner_button(__("Update on Device"), () => {
-			const names = listview.get_checked_items(true);
+			const names = checked_items(true);
 			if (!names.length) {
 				frappe.msgprint(__("Tick the employees to update, then press Update on Device."));
 				return;
@@ -65,7 +65,7 @@
 		}, GROUP);
 
 		const $remove = listview.page.add_inner_button(__("Remove from Device"), () => {
-			const names = listview.get_checked_items(true);
+			const names = checked_items(true);
 			if (!names.length) {
 				frappe.msgprint(__("Tick the employees to remove, then press Remove from Device."));
 				return;
@@ -73,8 +73,17 @@
 			pick_device_then_send(listview, names, "Delete User");
 		}, GROUP);
 
+		// Report View builds its datatable after onload, and get_checked_items
+		// reads straight from it: nothing can be ticked before it exists.
+		function checked_items(only_names) {
+			if (listview.view_name === "Report" && !(listview.datatable && listview.datatable.rowmanager)) {
+				return [];
+			}
+			return listview.get_checked_items(only_names) || [];
+		}
+
 		function sync_device_buttons() {
-			const rows = listview.get_checked_items() || [];
+			const rows = checked_items();
 			// `status` comes off the row the list already loaded. If the column
 			// has been removed from the view it is undefined, and an unknown
 			// status must not read as "they have left" — so Update stays.

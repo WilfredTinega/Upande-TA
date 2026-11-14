@@ -24,10 +24,12 @@ from upande_ta.upande_ta.overtime_engine import (
 	WORKED_LESS,
 	WORKING_DAY,
 	biometric_overtime,
+	over_weekly_base,
 	settle,
 	settle_week,
 	shift_length_hours,
 	split_across_working_days,
+	spread_from_last,
 	swapped_rest_days,
 )
 
@@ -193,6 +195,22 @@ class TestSettleWeek(unittest.TestCase):
 	def test_lengths_must_match(self):
 		with self.assertRaises(ValueError):
 			settle_week(5, [1, 1], [1])
+
+
+class TestWeeklyBase(unittest.TestCase):
+	"""With a weekly base, the overtime of a week is what was worked past it."""
+
+	def test_only_the_hours_past_the_base_are_overtime(self):
+		self.assertEqual(over_weekly_base(50, 46), 4)
+		self.assertEqual(over_weekly_base(46, 46), 0)
+		self.assertEqual(over_weekly_base(30, 46), 0)
+
+	def test_the_hours_go_on_the_last_days_worked(self):
+		self.assertEqual(spread_from_last(4, [9, 9, 9, 9, 9, 5]), [0, 0, 0, 0, 0, 4])
+		self.assertEqual(spread_from_last(7, [9, 9, 9, 0, 5]), [0, 0, 2, 0, 5])
+
+	def test_no_day_takes_more_than_was_worked_on_it(self):
+		self.assertEqual(spread_from_last(30, [9, 9]), [9, 9])
 
 
 class TestSwappedRestDays(unittest.TestCase):

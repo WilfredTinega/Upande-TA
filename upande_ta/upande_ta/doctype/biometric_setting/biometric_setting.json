@@ -90,6 +90,8 @@
   "overtime_edit_section",
   "enable_overtime_editing",
   "limit_overtime_approval",
+  "enable_weekly_overtime",
+  "weekly_overtime_companies",
   "overtime_edit_companies",
   "attendance_filters_tab",
   "attendance_payroll_section",
@@ -812,13 +814,27 @@
    "fieldname": "limit_overtime_approval",
    "fieldtype": "Check",
    "label": "Approval Only for Companies Ticked"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_weekly_overtime",
+   "fieldtype": "Check",
+   "label": "Weekly Overtime"
+  },
+  {
+   "depends_on": "enable_weekly_overtime",
+   "fieldname": "weekly_overtime_companies",
+   "fieldtype": "Table",
+   "label": "Weekly Overtime Companies",
+   "mandatory_depends_on": "enable_weekly_overtime",
+   "options": "Weekly Overtime Company"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-28 12:00:00.000000",
+ "modified": "2026-11-14 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande TA",
  "name": "Biometric Setting",

@@ -90,6 +90,24 @@ MANUAL_MARKS = {
 }
 
 
+def weekly_base_hours(company) -> float:
+	"""The company's Weekly Hours Before Overtime on Biometric Setting, when
+	Weekly Overtime is ticked: its Week requests then pay the hours worked in
+	the week past it. 0 when it is off or the company is not listed."""
+	try:
+		if not company or not frappe.db.get_single_value("Biometric Setting", "enable_weekly_overtime"):
+			return 0.0
+		hours = frappe.db.get_value(
+			"Weekly Overtime Company",
+			{"parent": "Biometric Setting", "parentfield": "weekly_overtime_companies", "company": company},
+			"weekly_hours",
+		)
+		return max(flt(hours), 0.0)
+	except Exception:
+		# the fields are not on this site yet
+		return 0.0
+
+
 class BulkOvertime(Document):
 	# ──────────────────────────────────────────────────────────────────────
 	# Validation
@@ -1268,6 +1286,8 @@ class BulkOvertime(Document):
 		day_types = _DayTypes(self.from_date, self.to_date)
 		swaps = self.swapped_rest_days({row.employee for row in rows})
 		allowed = set(editable_fields(self.company))
+		# hours worked per row, for a week measured against the weekly base
+		self._worked = {}
 
 		for row in rows:
 			for field, mark in MANUAL_MARKS.items():
@@ -1297,6 +1317,7 @@ class BulkOvertime(Document):
 				# whatever they are labelled.
 				first_in = day_punches[0]
 				worked = round((day_punches[-1] - first_in).total_seconds() / 3600, 4)
+			self._worked[id(row)] = worked
 			row.shift_hours = shift_hours.get(row.shift) or default_hours
 
 			row.early_in_hours = 0
@@ -1381,9 +1402,13 @@ class BulkOvertime(Document):
 			elif row.status not in UNPAYABLE:
 				grouped.setdefault(key, []).append(row)
 
+		base = weekly_base_hours(self.company)
 		for key, days in grouped.items():
 			days.sort(key=lambda r: getdate(r.overtime_date))
 			week = weeks[key]
+			if base:
+				self.settle_week_over_base(week, days, base, typed.get(key, 0.0))
+				continue
 			settled = engine.settle_week(
 				max(week.requested - week.elsewhere - typed.get(key, 0.0), 0),
 				[flt(r.requested_hours) for r in days],
@@ -1392,6 +1417,78 @@ class BulkOvertime(Document):
 			for row, (hours, status) in zip(days, settled, strict=True):
 				row.approved_hours, row.status = hours, status
 
+	def settle_week_over_base(self, week, days, base, typed):
+		"""Pay one employee's Week request on the week rather than the day.
+
+		Every hour worked in the Monday-to-Sunday week past the weekly base is
+		overtime, put on the last days worked. The week is counted whole even
+		where the payroll period cuts the request short, and the request is paid
+		what lands on its own dates, so each period pays the hours worked in it.
+		A public holiday is not part of that count: it is overtime on its own
+		date, every hour worked, and is paid first. The request's total is the
+		most paid.
+		"""
+		employee = days[0].employee
+		monday = add_days(getdate(week.from_date), -getdate(week.from_date).weekday())
+		sunday = add_days(monday, 6)
+		day_types = _DayTypes(monday, sunday)
+		holidays = [r for r in days if r.day_type == engine.PUBLIC_HOLIDAY]
+		others = [r for r in days if r.day_type != engine.PUBLIC_HOLIDAY]
+
+		# hours worked on the week's non-holiday days, this batch's own figure
+		# where it has the day, else the attendance's
+		worked = {}
+		for row in others:
+			if not row.manual_biometric_hours:
+				worked[getdate(row.overtime_date)] = self._worked.get(id(row), 0.0)
+		typed_days = {getdate(r.overtime_date) for r in others if r.manual_biometric_hours}
+		for record in frappe.get_all(
+			"Attendance",
+			filters={
+				"employee": employee,
+				"attendance_date": ["between", [monday, sunday]],
+				"docstatus": 1,
+				"status": "Present",
+			},
+			fields=["attendance_date", "working_hours"],
+		):
+			date = getdate(record.attendance_date)
+			if date in typed_days or day_types.get(employee, date) == engine.PUBLIC_HOLIDAY:
+				continue
+			worked.setdefault(date, flt(record.working_hours))
+
+		dates = sorted(worked)
+		over_base = dict(
+			zip(
+				dates,
+				engine.spread_from_last(
+					engine.over_weekly_base(sum(worked.values()), base), [worked[d] for d in dates]
+				),
+				strict=True,
+			)
+		)
+		overtime = [
+			flt(r.biometric_hours) if r.manual_biometric_hours else over_base.get(getdate(r.overtime_date), 0.0)
+			for r in others
+		]
+		supported = round(sum(flt(r.biometric_hours) for r in holidays) + sum(overtime), 2)
+		payable = max(min(week.requested, supported) - week.elsewhere - typed, 0.0)
+
+		if supported > week.requested:
+			status = engine.CAPPED
+		elif supported == week.requested:
+			status = engine.MATCHED
+		else:
+			status = engine.WORKED_LESS
+
+		for row in holidays:
+			paid = round(min(flt(row.biometric_hours), payable), 2)
+			payable = max(round(payable - paid, 2), 0.0)
+			row.approved_hours, row.status = paid, status
+
+		for row, hours, paid in zip(others, overtime, engine.spread_from_last(payable, overtime), strict=True):
+			row.biometric_hours, row.approved_hours, row.status = hours, paid, status
+
 	def weekly_allowances(self, rows) -> dict:
 		"""``{(request, employee): {requested, elsewhere}}`` for the rows that
 		come from a Week request: the week's total and what other live batches
@@ -1399,15 +1496,19 @@ class BulkOvertime(Document):
 		requests = {row.overtime_request for row in rows}
 		if not requests:
 			return {}
-		week_requests = frappe.get_all(
-			"Overtime Request",
-			filters={
-				"name": ["in", list(requests)],
-				"request_for": WEEK,
-				"request_mode": ["!=", HOURS_BUDGET],
-			},
-			pluck="name",
-		)
+		periods = {
+			r.name: r
+			for r in frappe.get_all(
+				"Overtime Request",
+				filters={
+					"name": ["in", list(requests)],
+					"request_for": WEEK,
+					"request_mode": ["!=", HOURS_BUDGET],
+				},
+				fields=["name", "overtime_date", "to_date"],
+			)
+		}
+		week_requests = list(periods)
 		if not week_requests:
 			return {}
 
@@ -1417,7 +1518,16 @@ class BulkOvertime(Document):
 			filters={"parenttype": "Overtime Request", "parent": ["in", week_requests]},
 			fields=["parent", "employee", "requested_hours"],
 		):
-			week = weeks.setdefault((line.parent, line.employee), frappe._dict(requested=0.0, elsewhere=0.0))
+			period = periods[line.parent]
+			week = weeks.setdefault(
+				(line.parent, line.employee),
+				frappe._dict(
+					requested=0.0,
+					elsewhere=0.0,
+					from_date=period.overtime_date,
+					to_date=period.to_date or period.overtime_date,
+				),
+			)
 			week.requested += flt(line.requested_hours)
 
 		for paid in frappe.db.sql(

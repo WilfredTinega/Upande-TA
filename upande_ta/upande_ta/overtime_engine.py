@@ -24,6 +24,12 @@ A Week request carries a weekly total rather than hours per day;
 :func:`split_across_working_days` turns it into the per-day hours step 2 reads,
 and :func:`settle_week` then pays the week against that total rather than day
 by day, so a short day is made up by a long one.
+
+Where a weekly base is set (Biometric Setting's Weekly Hours Before
+Overtime, e.g. 46), a Week request is measured against the week instead of
+each day: only the hours worked in the week past the base are overtime
+(:func:`over_weekly_base`), and they are put on the last days worked
+(:func:`spread_from_last`).
 """
 
 from __future__ import annotations
@@ -43,10 +49,12 @@ __all__ = [
 	"WORKING_DAY",
 	"biometric_overtime",
 	"hours_before_shift",
+	"over_weekly_base",
 	"settle",
 	"settle_week",
 	"shift_length_hours",
 	"split_across_working_days",
+	"spread_from_last",
 	"swapped_rest_days",
 ]
 
@@ -238,3 +246,24 @@ def swapped_rest_days(week) -> dict:
 		elif day_type == WORKING_DAY and off and not worked:
 			days_off.append(date)
 	return dict(zip(rest_worked, days_off, strict=False))
+
+
+def over_weekly_base(worked_in_week, base_hours) -> float:
+	"""Overtime of a week measured against a weekly base: every hour worked
+	in the week past ``base_hours`` (46 worked against a 46-hour base is
+	none; 50 is 4)."""
+	return round(max(float(worked_in_week or 0) - float(base_hours or 0), 0.0), 2)
+
+
+def spread_from_last(total, caps) -> list[float]:
+	"""Put ``total`` hours on the days of a week, last day first, each day
+	taking no more than its cap (the hours worked that day): the hours past a
+	weekly base are the ones worked last. One figure per entry of ``caps``,
+	in the same order."""
+	left = max(float(total or 0), 0.0)
+	shares = [0.0] * len(caps)
+	for index in range(len(caps) - 1, -1, -1):
+		share = round(min(max(float(caps[index] or 0), 0.0), left), 2)
+		shares[index] = share
+		left = max(round(left - share, 2), 0.0)
+	return shares

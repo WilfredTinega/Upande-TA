@@ -52,6 +52,18 @@ MIN_CLOSED_GAP = 10 * 60
 # today's behaviour for anyone not deliberately restricted.
 # ─────────────────────────────────────────────────────────────────────────────
 
+def rest_days(employees, start, end) -> dict:
+	"""{employee: {date: "Weekly Off" | holiday name}} from the Holiday List
+	Assignment in force on each date, the company's filling the gaps — as HRMS
+	resolves rest days on v16. Employee.holiday_list is not read: HRMS ignores
+	it and it goes stale when a week off is changed. ``employees`` are rows
+	with ``employee`` and ``company``."""
+	from upande_ta.upande_ta.api.canteen_analysis import _off_days
+
+	rows = [frappe._dict(employee=e["employee"], company=e["company"]) for e in employees if e.get("company")]
+	return {str(emp): {str(d): desc for d, desc in days.items()} for emp, days in _off_days(rows, start, end).items()}
+
+
 def get_allowed_companies():
 	"""Companies the current user may see/act on, or None for unrestricted."""
 	user = frappe.session.user
@@ -443,28 +455,14 @@ def attendance_dashboard_data():
 
 	# ── per-day OFF ──────────────────────────────────────────────────────────────
 	off_by_day = {}
-	off1 = frappe.db.sql("""
-		SELECT h.holiday_date AS day, COUNT(DISTINCT e.name) AS n
-		FROM `tabEmployee` e
-		INNER JOIN `tabHoliday` h ON h.parent = e.holiday_list
-		WHERE e.status = 'Active' AND IFNULL(e.holiday_list, '') != '' {econd}
-		  AND h.holiday_date BETWEEN %(from_date)s AND %(to_date)s
-		GROUP BY h.holiday_date""".replace("{econd}", econd), params, as_dict=1)
-	for o1 in off1:
-		dk = str(o1["day"])
-		off_by_day[dk] = off_by_day.get(dk, 0) + o1["n"]
-
-	off2 = frappe.db.sql("""
-		SELECT h.holiday_date AS day, COUNT(DISTINCT e.name) AS n
-		FROM `tabEmployee` e
-		INNER JOIN `tabCompany` co ON co.name = e.company
-		INNER JOIN `tabHoliday` h ON h.parent = co.default_holiday_list
-		WHERE e.status = 'Active' AND IFNULL(e.holiday_list, '') = '' {econd}
-		  AND h.holiday_date BETWEEN %(from_date)s AND %(to_date)s
-		GROUP BY h.holiday_date""".replace("{econd}", econd), params, as_dict=1)
-	for o2 in off2:
-		dk = str(o2["day"])
-		off_by_day[dk] = off_by_day.get(dk, 0) + o2["n"]
+	off_emps = frappe.db.sql(
+		"SELECT e.name AS employee, e.company AS company FROM `tabEmployee` e WHERE e.status = 'Active'" + econd,
+		params,
+		as_dict=1,
+	)
+	for o_days in rest_days(off_emps, start_d, end_d).values():
+		for dk in o_days:
+			off_by_day[dk] = off_by_day.get(dk, 0) + 1
 
 	# ── assemble the daily series ────────────────────────────────────────────────
 	daily = []
@@ -1263,11 +1261,14 @@ def attendance_register():
 		leave_map = {r.employee: r.leave_type for r in leave_rows}
 
 		step = "holiday"
-		off_lists = frappe.db.sql("""
-			SELECT DISTINCT h.parent AS holiday_list, h.weekly_off
-			FROM `tabHoliday` h WHERE h.holiday_date = %(reg_date)s
-		""", {"reg_date": reg_date}, as_dict=True)
-		off_list_map = {r.holiday_list: r.weekly_off for r in off_lists}
+		# each employee's rest day on reg_date, from their Holiday List Assignment
+		off_today = {
+			emp: days.get(str(reg_date))
+			for emp, days in rest_days(
+				[{"employee": e.name, "company": e.company} for e in all_employees], reg_date, reg_date
+			).items()
+			if days.get(str(reg_date))
+		}
 
 		step = "bucket_loop"
 		present = []
@@ -1394,9 +1395,9 @@ def attendance_register():
 			# 4) weekly off / holiday. Also checked BEFORE the night carry-over
 			# so a guard who worked Thu night does not show Present on his
 			# Friday off; the carry-over annotation keeps the work visible.
-			elif emp.holiday_list and emp.holiday_list in off_list_map:
+			elif emp.name in off_today:
 				row = base(emp)
-				off_type = "Weekly Off" if off_list_map[emp.holiday_list] else "Holiday"
+				off_type = "Weekly Off" if off_today[emp.name] == "Weekly Off" else "Holiday"
 				if is_night and night_bio and night_bio.arrival_time:
 					row["worked_night"] = str(night_bio.arrival_time)
 					if night_bio.departure_time:
@@ -1465,13 +1466,13 @@ def attendance_register():
 			for lr in frappe.db.sql("SELECT employee AS e, leave_type AS lt FROM `tabLeave Application` WHERE employee IN %(ids)s AND docstatus = 0 AND %(d)s BETWEEN from_date AND to_date", {"ids": tuple(absent_ids), "d": reg_date}, as_dict=True):
 				if lr["e"] not in pend_map:
 					pend_map[lr["e"]] = lr["lt"]
-			for hr in frappe.db.sql("SELECT emp.name AS e FROM `tabEmployee` emp INNER JOIN `tabHoliday` h ON h.parent = emp.holiday_list WHERE emp.name IN %(ids)s AND h.holiday_date = %(d)s AND h.weekly_off = 1", {"ids": tuple(absent_ids), "d": reg_date}, as_dict=True):
-				off_ids.add(hr["e"])
+			# an Absent auto-marked on their rest day (weekly off or holiday)
+			off_ids = {e for e in absent_ids if e in off_today}
 		for r in absent:
 			if r["name"] in pend_map:
 				r["flag"] = "Pending: " + str(pend_map[r["name"]])
 			elif r["name"] in off_ids:
-				r["flag"] = "Week Off (unmarked)"
+				r["flag"] = ("Week Off" if off_today[r["name"]] == "Weekly Off" else "Holiday") + " (unmarked)"
 			else:
 				r["flag"] = ""
 
@@ -1494,7 +1495,7 @@ def attendance_register():
 			for r in moved:
 				r.pop("flag", None)
 				r.pop("night_note", None)
-				r["off_type"] = "Weekly Off"
+				r["off_type"] = "Weekly Off" if off_today[r["name"]] == "Weekly Off" else "Holiday"
 				r["att_status"] = r.get("att_status") or None
 				off.append(r)
 
@@ -2006,20 +2007,9 @@ def attendance_employee_history():
 		  AND la.from_date <= %(h_to)s AND la.to_date >= %(h_from)s
 		ORDER BY la.from_date ASC
 	""", p, as_dict=True)
-	weekoff_days = frappe.db.sql("""
-		SELECT COUNT(*)
-		FROM `tabHoliday` h
-		JOIN `tabEmployee` e2 ON e2.holiday_list = h.parent
-		WHERE e2.name = %(emp_id)s AND h.weekly_off = 1
-		  AND h.holiday_date BETWEEN %(h_from)s AND %(h_to)s
-	""", p)[0][0]
-	holiday_days = frappe.db.sql("""
-		SELECT COUNT(*)
-		FROM `tabHoliday` h
-		JOIN `tabEmployee` e2 ON e2.holiday_list = h.parent
-		WHERE e2.name = %(emp_id)s AND IFNULL(h.weekly_off, 0) = 0
-		  AND h.holiday_date BETWEEN %(h_from)s AND %(h_to)s
-	""", p)[0][0]
+	h_rest = rest_days([{"employee": emp_id, "company": emp_meta.company}], h_from, h_to).get(str(emp_id), {})
+	weekoff_days = sum(1 for desc in h_rest.values() if desc == "Weekly Off")
+	holiday_days = len(h_rest) - weekoff_days
 	# Night workers: their shift STARTS in the evening and runs past midnight, so a
 	# calendar day with no scan is not an absence — the scan for that shift sits in the
 	# previous evening. Detect a night shift and, for those employees, count a day absent
@@ -2041,8 +2031,8 @@ def attendance_employee_history():
 	# minus approved-leave days) on which the employee has no check-in at all.
 	# Counted only up to today, since future days can't be absent yet. ──
 	p["is_night"] = 1 if is_night_emp else 0
-	absent_days = frappe.db.sql("""
-		SELECT COUNT(*) FROM (
+	absent_dates = frappe.db.sql("""
+		SELECT z.dt FROM (
 			SELECT d.dt
 			FROM (
 				SELECT DATE(%(h_from)s) + INTERVAL (n.num) DAY AS dt
@@ -2068,15 +2058,13 @@ def attendance_employee_history():
 								 AND ec.`time` >= (d.dt - INTERVAL 1 DAY) + INTERVAL 12 HOUR
 								 AND ec.`time` <  d.dt + INTERVAL 12 HOUR ) ))
 			  AND NOT EXISTS (
-					SELECT 1 FROM `tabHoliday` h
-					JOIN `tabEmployee` e2 ON e2.holiday_list = h.parent
-					WHERE e2.name = %(emp_id)s AND h.holiday_date = d.dt)
-			  AND NOT EXISTS (
 					SELECT 1 FROM `tabLeave Application` la
 					WHERE la.employee = %(emp_id)s AND la.docstatus = 1
 					  AND d.dt BETWEEN la.from_date AND la.to_date)
 		) z
-	""", p)[0][0]
+	""", p, pluck=True)
+	# rest days from the Holiday List Assignment in force on each date
+	absent_days = sum(1 for dt in absent_dates if str(dt) not in h_rest)
 	kpi["absent_days"] = int(absent_days or 0)
 	kpi["leave_days"] = int(leave_days or 0)
 	kpi["weekoff_days"] = int(weekoff_days or 0)
@@ -2160,11 +2148,29 @@ def attendance_mark():
 		if o_emps:
 			o_where += " AND FIND_IN_SET(a.employee, %(o_emps)s)"
 			o_params["o_emps"] = o_emps
-		# weekly_off = 1 is the rest day; public holidays (weekly_off = 0) are only
-		# included when asked for, because those are a separate policy question
-		o_off = " AND h.weekly_off = 1"
-		if o_holidays:
-			o_off = ""
+		# Rest days come from the Holiday List Assignment in force on each date.
+		# The weekly off is the rest day; public holidays are only included when
+		# asked for, because those are a separate policy question.
+		o_cands = frappe.db.sql("""
+			SELECT a.name AS name, a.employee AS employee, a.attendance_date AS d,
+				   COALESCE(e.company, '') AS company
+			FROM `tabAttendance` a
+			JOIN `tabEmployee` e ON e.name = a.employee
+			WHERE a.docstatus = 1
+			  AND a.status = 'Absent'
+			  AND a.attendance_date BETWEEN %(o_from)s AND %(o_to)s
+		""" + o_where, o_params, as_dict=True)
+		o_rest = rest_days(
+			list({r["employee"]: {"employee": r["employee"], "company": r["company"]} for r in o_cands}.values()),
+			o_from,
+			o_to,
+		)
+		o_hits = {}
+		for r in o_cands:
+			o_desc = o_rest.get(str(r["employee"]), {}).get(str(r["d"]))
+			if o_desc and (o_holidays or o_desc == "Weekly Off"):
+				o_hits[r["name"]] = o_desc
+		o_params["o_names"] = tuple(o_hits) or ("",)
 
 		# count=1: sizing only — how many rest-day Absents exist, grouped by month
 		# and company, so a cleanup can be scoped before anything is cancelled
@@ -2178,12 +2184,7 @@ def attendance_mark():
 								THEN 1 ELSE 0 END) AS with_scan
 				FROM `tabAttendance` a
 				JOIN `tabEmployee` e ON e.name = a.employee
-				JOIN `tabHoliday` h ON h.parent = e.holiday_list
-								   AND h.holiday_date = a.attendance_date
-				WHERE a.docstatus = 1
-				  AND a.status = 'Absent'
-				  AND a.attendance_date BETWEEN %(o_from)s AND %(o_to)s
-			""" + o_off + o_where + """
+				WHERE a.name IN %(o_names)s
 				GROUP BY ym, company
 				ORDER BY ym ASC, company ASC
 			""", o_params, as_dict=True)
@@ -2209,16 +2210,10 @@ def attendance_mark():
 				   a.out_time AS out_time, a.creation AS creation, a.owner AS owner,
 				   COALESCE(e.company, '') AS company,
 				   COALESCE(NULLIF(TRIM(e.custom_farm), ''), '') AS farm,
-				   COALESCE(e.employment_type, '') AS employment_type,
-				   h.description AS holiday, h.weekly_off AS weekly_off
+				   COALESCE(e.employment_type, '') AS employment_type
 			FROM `tabAttendance` a
 			JOIN `tabEmployee` e ON e.name = a.employee
-			JOIN `tabHoliday` h ON h.parent = e.holiday_list
-							   AND h.holiday_date = a.attendance_date
-			WHERE a.docstatus = 1
-			  AND a.status = 'Absent'
-			  AND a.attendance_date BETWEEN %(o_from)s AND %(o_to)s
-		""" + o_off + o_where + """
+			WHERE a.name IN %(o_names)s
 			ORDER BY a.attendance_date ASC, a.employee ASC
 			LIMIT %(o_limit)s
 		""", o_params, as_dict=True)
@@ -2229,8 +2224,8 @@ def attendance_mark():
 						   "employee_name": r["employee_name"], "date": str(r["d"]),
 						   "shift": r["shift"] or "", "company": r["company"],
 						   "farm": r["farm"], "employment_type": r["employment_type"],
-						   "holiday": r["holiday"] or "",
-						   "weekly_off": frappe.utils.cint(r["weekly_off"]),
+						   "holiday": o_hits[r["name"]],
+						   "weekly_off": 1 if o_hits[r["name"]] == "Weekly Off" else 0,
 						   "had_scan": 1 if (r["in_time"] or r["out_time"]) else 0,
 						   "created": str(r["creation"])[:19], "owner": r["owner"]})
 
@@ -2403,13 +2398,12 @@ def attendance_mark():
 			scan_set[str(r["emp"]) + "|" + str(r["d"])] = 1
 
 		hol_set = {}
-		for r in frappe.db.sql("""
-			SELECT e.name AS emp, h.holiday_date AS d
-			FROM `tabEmployee` e
-			JOIN `tabHoliday` h ON h.parent = e.holiday_list
-			WHERE e.name IN %(ids)s AND h.holiday_date BETWEEN %(f)s AND %(t)s
-		""", p, as_dict=True):
-			hol_set[str(r["emp"]) + "|" + str(r["d"])] = 1
+		g_emps = frappe.db.sql(
+			"SELECT name AS employee, company FROM `tabEmployee` WHERE name IN %(ids)s", p, as_dict=True
+		)
+		for g_emp, g_days in rest_days(g_emps, g_from, g_to).items():
+			for g_d in g_days:
+				hol_set[g_emp + "|" + g_d] = 1
 
 		leave_rows = frappe.db.sql("""
 			SELECT la.employee AS emp, la.from_date AS fd, la.to_date AS td
@@ -2597,13 +2591,15 @@ def attendance_mark():
 	# so those pairs are skipped unless allow_off=1 is passed explicitly. ──
 	off_map = {}
 	if mark_dates:
-		for r in frappe.db.sql("""
-			SELECT e.name AS emp, h.holiday_date AS d, IFNULL(h.weekly_off, 0) AS wo
-			FROM `tabEmployee` e
-			JOIN `tabHoliday` h ON h.parent = e.holiday_list
-			WHERE e.name IN %(ids)s AND h.holiday_date IN %(dates)s
-		""", {"ids": tuple(emp_ids), "dates": tuple(mark_dates)}, as_dict=True):
-			off_map[str(r["emp"]) + "|" + str(r["d"])] = int(r["wo"] or 0)
+		m_emps = frappe.db.sql(
+			"SELECT name AS employee, company FROM `tabEmployee` WHERE name IN %(ids)s",
+			{"ids": tuple(emp_ids)},
+			as_dict=True,
+		)
+		for m_emp, m_days in rest_days(m_emps, min(mark_dates), max(mark_dates)).items():
+			for m_d, m_desc in m_days.items():
+				if m_d in mark_dates:
+					off_map[m_emp + "|" + m_d] = 1 if m_desc == "Weekly Off" else 0
 
 	results = list(denied_results)
 
@@ -2908,7 +2904,8 @@ def workforce_audit(from_date, to_date, company=None, farm=None, employment_type
 		where.append("e.custom_farm = %(farm)s")
 		params["farm"] = farm
 	if employment_type:
-		where.append("e.employment_type = %(emptype)s")
+		# the page sends one type or a group ("Contract,Permanent")
+		where.append("FIND_IN_SET(e.employment_type, %(emptype)s)")
 		params["emptype"] = employment_type
 	where.append("(e.date_of_joining IS NULL OR e.date_of_joining <= %(to)s)")
 	where.append(
