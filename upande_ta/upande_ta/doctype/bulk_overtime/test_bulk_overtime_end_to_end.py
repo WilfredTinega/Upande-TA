@@ -451,6 +451,80 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		doc = self.make_bulk_overtime()
 		self.assertEqual(len(self.own_rows(doc)), 1)
 
+	def test_a_week_is_paid_on_the_hours_past_the_weekly_base(self):
+		"""Worked 25.5h on the week's other days against a 20h base -> 5.5h
+		overtime; the 5h on the public holiday count on their own date. Of
+		the 8h requested the holiday is paid first, the 3h left on the last
+		day worked."""
+		from frappe.utils import getdate
+
+		self.make_range_request(self.from_date, self.to_date, 1)
+		doc = self.make_bulk_overtime()
+		doc.refresh_entries()
+		rows = self.rows_by_date(doc)
+		days = [rows[d] for d in (self.working_day, self.rest_day, self.public_holiday, self.short_day)]
+		week = frappe._dict(requested=8.0, elsewhere=0.0, from_date=self.from_date, to_date=self.to_date)
+
+		doc.settle_week_over_base(week, days, 20, 0.0)
+
+		self.assertEqual(
+			{getdate(r.overtime_date): r.approved_hours for r in days},
+			{self.working_day: 0, self.rest_day: 0, self.public_holiday: 5, self.short_day: 3},
+		)
+		self.assertEqual({r.status for r in days}, {"Capped at Request"})
+
+	def test_a_week_cut_by_the_payroll_period_is_counted_whole(self):
+		"""Each half of a week the payroll period splits is paid only what
+		lands on its own dates, out of the whole week's hours past the base,
+		so the two halves pay what the uncut week would."""
+		from frappe.utils import add_days, getdate
+
+		monday = add_days(self.working_day, -getdate(self.working_day).weekday())
+		sunday = add_days(monday, 6)
+		self.make_range_request(monday, sunday, 1)
+		doc = self.make_bulk_overtime()
+		doc.from_date, doc.to_date = monday, sunday
+		doc.refresh_entries()
+
+		def settle(start, end):
+			days = [r for d, r in sorted(self.rows_by_date(doc).items()) if start <= d <= end]
+			if not days:
+				return {}
+			week = frappe._dict(requested=100.0, elsewhere=0.0, from_date=start, to_date=end)
+			doc.settle_week_over_base(week, days, 1, 0.0)
+			return {getdate(r.overtime_date): r.approved_hours for r in days}
+
+		whole = settle(monday, sunday)
+		first = settle(monday, self.working_day)
+		second = settle(add_days(self.working_day, 1), sunday)
+
+		self.assertTrue(sum(whole.values()) > 0)
+		self.assertEqual({**first, **second}, whole)
+
+	def test_the_weekly_base_is_the_companys_own(self):
+		from upande_ta.upande_ta.doctype.bulk_overtime.bulk_overtime import weekly_base_hours
+
+		settings = frappe.get_single("Biometric Setting")
+		before = (settings.enable_weekly_overtime, [r.as_dict() for r in settings.weekly_overtime_companies])
+		try:
+			settings.enable_weekly_overtime = 1
+			settings.set("weekly_overtime_companies", [{"company": self.company, "weekly_hours": 46}])
+			settings.save(ignore_permissions=True)
+			self.assertEqual(weekly_base_hours(self.company), 46)
+			self.assertEqual(weekly_base_hours("_No Such Company"), 0)
+
+			settings.enable_weekly_overtime = 0
+			settings.save(ignore_permissions=True)
+			self.assertEqual(weekly_base_hours(self.company), 0)
+		finally:
+			settings.reload()
+			settings.enable_weekly_overtime = before[0]
+			settings.set(
+				"weekly_overtime_companies",
+				[{"company": r.company, "weekly_hours": r.weekly_hours} for r in before[1]],
+			)
+			settings.save(ignore_permissions=True)
+
 	def test_hours_and_day_types_across_the_period(self):
 		self.make_request(
 			{

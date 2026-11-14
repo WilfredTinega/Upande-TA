@@ -239,6 +239,7 @@ class BiometricSetting(Document):
 		self._block_removing_devices_with_links()
 		self._validate_attendance_request_approvers()
 		self._validate_overtime_edit_companies()
+		self._validate_weekly_overtime_companies()
 
 	def _default_device_companies(self):
 		"""A device with no Company takes the one company its farms belong to,
@@ -268,6 +269,23 @@ class BiometricSetting(Document):
 					)
 				)
 			seen.add(row.company)
+
+	def _validate_weekly_overtime_companies(self):
+		seen = set()
+		for row in self.get("weekly_overtime_companies") or []:
+			if row.company in seen:
+				frappe.throw(
+					_("Row #{0}: {1} is already listed under Weekly Overtime.").format(
+						row.idx, frappe.bold(row.company)
+					)
+				)
+			seen.add(row.company)
+			if not row.weekly_hours or row.weekly_hours <= 0:
+				frappe.throw(
+					_("Row #{0}: set the Weekly Hours Before Overtime for {1}.").format(
+						row.idx, frappe.bold(row.company)
+					)
+				)
 
 	def _validate_attendance_request_approvers(self):
 		"""One approver per Company and Unit/Division — a blank Unit/Division

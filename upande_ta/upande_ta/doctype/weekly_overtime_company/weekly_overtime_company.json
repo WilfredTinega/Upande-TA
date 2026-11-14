@@ -1,0 +1,45 @@
+{
+ "actions": [],
+ "creation": "2026-11-14 13:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "weekly_hours"
+ ],
+ "fields": [
+  {
+   "columns": 4,
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "ignore_user_permissions": 1,
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "columns": 3,
+   "fieldname": "weekly_hours",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Weekly Hours Before Overtime",
+   "non_negative": 1,
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-11-14 13:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Upande TA",
+ "name": "Weekly Overtime Company",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
