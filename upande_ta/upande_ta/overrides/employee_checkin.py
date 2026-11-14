@@ -29,23 +29,22 @@ def prevent_duplicate(doc, method=None):
 	if not doc.employee or not doc.time:
 		return
 
+	# One punch per employee per instant, whatever its direction. The IN/OUT
+	# normalizer relabels stored punches, so a re-polled copy of a punch that
+	# was flipped to OUT arrives as IN; matching on log_type let every
+	# scheduled ATTLOG poll re-insert the day's latest punch.
 	filters = {
 		"employee": doc.employee,
 		"time":     doc.time,
 	}
-	if doc.log_type:
-		filters["log_type"] = doc.log_type
-	else:
-		filters["log_type"] = ["in", ["", None]]
 	if not doc.is_new():
 		filters["name"] = ["!=", doc.name]
 
 	existing = frappe.db.get_value("Employee Checkin", filters, "name")
 	if existing:
 		frappe.throw(
-			_("Duplicate Check-in: {0} already has a {1} entry at {2} ({3}).").format(
+			_("Duplicate Check-in: {0} already has a punch at {1} ({2}).").format(
 				frappe.bold(doc.employee),
-				frappe.bold(doc.log_type or "no log type"),
 				frappe.bold(frappe.utils.format_datetime(doc.time)),
 				frappe.utils.get_link_to_form("Employee Checkin", existing)
 			),
