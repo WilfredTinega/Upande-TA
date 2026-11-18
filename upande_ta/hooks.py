@@ -145,6 +145,9 @@ doc_events = {
 		"before_insert": "upande_ta.upande_ta.api.attendance_request_flow.set_approver",
 		"on_submit": "upande_ta.upande_ta.api.attendance_request_flow.copy_marking_reason",
 	},
+	"Shift Assignment": {
+		"on_submit": "upande_ta.upande_ta.overrides.shift_assignment.restamp_checkins_on_submit",
+	},
 	"Holiday List Assignment": {
 		"on_submit": "upande_ta.upande_ta.overrides.holiday_list_assignment.cancel_auto_absent_on_week_off",
 	},
