@@ -64,7 +64,12 @@ from frappe.model.workflow import get_workflow, get_workflow_name
 from frappe.utils import add_days, cint, date_diff, flt, get_link_to_form, getdate, today
 
 from upande_ta.upande_ta import overtime_engine as engine
-from upande_ta.upande_ta.doctype.overtime_request.overtime_request import HOURS_BUDGET, WEEK, budget_scope
+from upande_ta.upande_ta.doctype.overtime_request.overtime_request import (
+	HOURS_BUDGET,
+	WEEK,
+	budget_scope,
+	parse_dates,
+)
 
 #: Isolates one employee's Overtime Slip from the next, so every failure can be
 #: collected and reported together before the submit is rolled back.
@@ -680,7 +685,8 @@ class BulkOvertime(Document):
 			f"""
 			select req.name as request, req.overtime_date,
 				coalesce(req.to_date, req.overtime_date) as request_to_date,
-				req.overtime_type, row.employee, row.employee_name, row.requested_hours
+				req.overtime_type, row.employee, row.employee_name, row.requested_hours,
+				row.already_requested_dates
 			from `tabOvertime Request` req
 			join `tabOvertime Request Employee` row
 				on row.parent = req.name and row.parenttype = 'Overtime Request'
@@ -733,9 +739,14 @@ class BulkOvertime(Document):
 			is_range = getdate(request.request_to_date) > getdate(request.overtime_date)
 
 			shares = by_date.get(request.request)
+			# dates another request already asks for are that request's to pay
+			left_off = parse_dates(request.get("already_requested_dates"))
 
 			date = start
 			while date <= end:
+				if date in left_off:
+					date = add_days(date, 1)
+					continue
 				hours = request.requested_hours
 				if shares is not None:
 					hours = shares.get((request.employee, date), 0)

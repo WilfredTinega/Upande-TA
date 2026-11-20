@@ -637,6 +637,12 @@ class IntegrationTestBulkOvertimeEndToEnd(_TestCase):
 		second = self.make_bulk_overtime()
 		self.assertEqual(len(self.own_rows(second)), 0)
 
+	def test_a_range_leaves_a_day_already_requested_to_the_other_request(self):
+		first = self.make_request({self.working_day: 2})[0]
+		self.make_range_request(self.from_date, self.to_date, 1)
+		rows = [r for r in self.own_rows(self.make_bulk_overtime()) if r.overtime_date == self.working_day]
+		self.assertEqual([(r.overtime_request, r.requested_hours) for r in rows], [(first, 2)])
+
 	def test_cancel_unwinds_the_slip_and_the_additional_salary(self):
 		self.make_request({self.working_day: 2})
 		doc = self.make_bulk_overtime()
