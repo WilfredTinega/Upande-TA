@@ -321,8 +321,7 @@ class IntegrationTestOvertimeRequest(_TestCase):
 		self._request("Single Day", overtime_date=end)
 		after = self._request("Single Day", overtime_date=add_days(end, 1))
 		self.assertTrue(after.name)
-		if end.weekday():
-			self._refused_this_week("Single Day", overtime_date=add_days(end, -1))
+		self._refused_this_week("Single Day", overtime_date=end)
 
 	def test_a_month_runs_first_to_last(self):
 		doc = self._request("Month", month="2030-11")
@@ -390,9 +389,20 @@ class IntegrationTestOvertimeRequest(_TestCase):
 		overlapping = self._request(
 			"Date Range", overtime_date="2030-05-19", to_date="2030-05-22", ignore_weekly_limit=True
 		)
+		overlapping.submit()
+		self.assertEqual({row.already_requested_dates for row in overlapping.employees}, {"2030-05-19"})
+		self.assertEqual(overlapping.total_requested_hours, 2 * 3 * len(self.employees))
+
+	def test_an_approval_with_every_date_taken_is_refused(self):
+		week = self._request("Week", week="Week 20", week_year=2030)
+		week.submit()
+
+		inside = self._request(
+			"Date Range", overtime_date="2030-05-14", to_date="2030-05-15", ignore_weekly_limit=True
+		)
 		with self.assertRaises(frappe.ValidationError) as caught:
-			overlapping.submit()
-		self.assertIn("Already approved", frappe.utils.strip_html(str(caught.exception)))
+			inside.submit()
+		self.assertIn("already requested", frappe.utils.strip_html(str(caught.exception)))
 
 	# ──────────────────────────────────────────────────────────────────────
 	# One request per employee per week
@@ -401,11 +411,16 @@ class IntegrationTestOvertimeRequest(_TestCase):
 	def _refused_this_week(self, request_for, **kwargs):
 		with self.assertRaises(frappe.ValidationError) as caught:
 			self._request(request_for, **kwargs)
-		self.assertIn("one Overtime Request per week", frappe.utils.strip_html(str(caught.exception)))
+		self.assertIn("already requested", frappe.utils.strip_html(str(caught.exception)))
 
-	def test_a_second_day_in_the_same_week_is_refused(self):
+	def test_a_second_day_in_the_same_week_is_allowed(self):
 		self._request("Single Day", overtime_date="2031-03-04")  # a Tuesday
-		self._refused_this_week("Single Day", overtime_date="2031-03-07")  # that Friday
+		friday = self._request("Single Day", overtime_date="2031-03-07")
+		self.assertFalse(any(row.already_requested_dates for row in friday.employees))
+
+	def test_the_same_day_again_is_refused(self):
+		self._request("Single Day", overtime_date="2031-03-04")
+		self._refused_this_week("Single Day", overtime_date="2031-03-04")
 
 	def test_a_draft_already_holds_the_week(self):
 		"""Refused on save, not on approval: the draft is enough."""
@@ -417,9 +432,20 @@ class IntegrationTestOvertimeRequest(_TestCase):
 		monday = self._request("Single Day", overtime_date="2031-03-10")  # Monday, week 11
 		self.assertTrue(monday.name)
 
-	def test_a_range_touching_the_week_counts(self):
-		self._request("Single Day", overtime_date="2031-04-02")  # Wednesday, week 14
-		self._refused_this_week("Date Range", overtime_date="2031-03-26", to_date="2031-03-31")
+	def test_a_range_leaves_off_the_day_already_requested(self):
+		self._request("Single Day", overtime_date="2031-04-02")  # Wednesday
+		week = self._request("Date Range", overtime_date="2031-03-31", to_date="2031-04-04")
+		self.assertEqual({row.already_requested_dates for row in week.employees}, {"2031-04-02"})
+		self.assertEqual(week.total_requested_hours, 2 * 4 * len(self.employees))
+
+	def test_a_week_shares_its_hours_over_the_days_left(self):
+		self._request("Single Day", overtime_date="2031-04-15")  # Tuesday, week 16
+		week = self._request("Week", week="Week 16", week_year=2031)
+		self.assertNotIn(
+			frappe.utils.getdate("2031-04-15"),
+			{frappe.utils.getdate(row.overtime_date) for row in week.daily_hours},
+		)
+		self.assertEqual(week.total_requested_hours, 2 * len(self.employees))
 
 	def test_another_employee_is_not_affected(self):
 		self._request("Single Day", overtime_date="2031-05-06", employees=[{"employee": self.employees[0], "requested_hours": 2}])

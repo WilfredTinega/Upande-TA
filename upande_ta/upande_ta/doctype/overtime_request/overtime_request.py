@@ -88,6 +88,8 @@ class OvertimeRequest(Document):
 	def before_submit(self):
 		if not self.is_budget():
 			self.validate_not_already_requested()
+			self.set_daily_hours()
+			self.set_totals()
 
 	def on_submit(self):
 		self.queue_bulk_overtime()
@@ -339,102 +341,94 @@ class OvertimeRequest(Document):
 		)
 
 	def validate_one_request_per_week(self):
-		"""An employee is on one request per ISO week, Monday to Sunday, within
-		a payroll period: a second day of overtime in a week belongs on that
-		week's request, but the days after the payroll period closes start
-		afresh.
-
-		Checked on save, against every request not rejected or cancelled —
-		drafts and those awaiting approval included — so the clash shows when
-		the request is raised rather than when it is approved.
-		"""
+		"""A date already on another request — not rejected or cancelled,
+		drafts included — is left off this one for that employee rather than
+		refused: the other request already asks for it. Only an employee whose
+		every date here is already asked for is refused. A Week request's dates
+		stop at the payroll period's end, so the week is compared within the
+		payroll period."""
 		if self.flags.ignore_weekly_limit or not (self.overtime_date and self.to_date and self.employees):
 			return
+		self.leave_out_dates_already_requested(approved_only=False)
 
-		monday, sunday = self.week_window()
+	def validate_not_already_requested(self):
+		"""On approval, against the approved requests only: Bulk Overtime pays
+		a day once, so a date another approval already holds is left off this
+		one, and an employee with no date left is refused."""
+		self.leave_out_dates_already_requested(approved_only=True)
 
+	def leave_out_dates_already_requested(self, approved_only: bool):
+		taken = self.dates_requested_elsewhere(approved_only)
+		own = [getdate(add_days(self.overtime_date, offset)) for offset in range(self.number_of_days_in_range())]
+
+		full = []
+		for row in self.employees:
+			held = taken.get(row.employee, {})
+			if own and all(date in held for date in own):
+				full.append((row, sorted({held[date] for date in own})))
+				continue
+			row.already_requested_dates = ", ".join(str(date) for date in own if date in held) or None
+
+		if not full:
+			return
+		lines = "<br>".join(
+			"{0}: {1}".format(
+				frappe.bold(row.employee_name or row.employee),
+				", ".join(get_link_to_form("Overtime Request", name) for name in names),
+			)
+			for row, names in full[:20]
+		)
+		frappe.throw(
+			_("Every date from {0} to {1} is already requested for:<br>{2}").format(
+				frappe.bold(frappe.format(self.overtime_date, "Date")),
+				frappe.bold(frappe.format(self.to_date, "Date")),
+				lines,
+			),
+			title=_("Already Requested"),
+		)
+
+	def dates_requested_elsewhere(self, approved_only: bool) -> dict:
+		"""``{employee: {date: request}}`` for the dates of this request that
+		other requests already ask for, less the dates those requests left off
+		themselves."""
 		Request = frappe.qb.DocType("Overtime Request")
 		Row = frappe.qb.DocType("Overtime Request Employee")
+		# to_date is empty on requests saved before ranges existed
 		other_end = Coalesce(Request.to_date, Request.overtime_date)
 		query = (
 			frappe.qb.from_(Row)
 			.join(Request)
 			.on(Request.name == Row.parent)
-			.select(Row.employee, Row.employee_name, Request.name, Request.overtime_date, other_end.as_("end_date"))
+			.select(
+				Row.employee,
+				Row.already_requested_dates,
+				Request.name,
+				Request.overtime_date,
+				other_end.as_("end_date"),
+			)
 			.where(
-				(Request.docstatus < 2)
-				& (Request.overtime_date <= sunday)
-				& (other_end >= monday)
+				(Request.overtime_date <= self.to_date)
+				& (other_end >= self.overtime_date)
 				& (Row.parenttype == "Overtime Request")
 				& (Row.employee.isin([row.employee for row in self.employees]))
 			)
 		)
+		query = query.where(Request.docstatus == 1) if approved_only else query.where(Request.docstatus < 2)
 		if not self.is_new():
 			query = query.where(Request.name != self.name)
-		if frappe.db.has_column("Overtime Request", "workflow_state"):
+		if not approved_only and frappe.db.has_column("Overtime Request", "workflow_state"):
 			query = query.where(Coalesce(Request.workflow_state, "") != "Rejected")
 
-		clashes = query.run(as_dict=True)
-		if not clashes:
-			return
-
-		lines = "<br>".join(
-			"{0}: {1} ({2} to {3})".format(
-				frappe.bold(c.employee_name or c.employee),
-				get_link_to_form("Overtime Request", c.name),
-				frappe.format(c.overtime_date, "Date"),
-				frappe.format(c.end_date, "Date"),
-			)
-			for c in clashes[:20]
-		)
-		frappe.throw(
-			_("An employee can be on one Overtime Request per week. Already requested in the same week:<br>{0}").format(
-				lines
-			),
-			title=_("Already Requested This Week"),
-		)
-
-	def validate_not_already_requested(self):
-		"""One approved request per employee per day: Bulk Overtime pays a day
-		once, so a second approval covering the same day would be ambiguous.
-		Ranges clash when they overlap by even one day."""
-		Request = frappe.qb.DocType("Overtime Request")
-		Row = frappe.qb.DocType("Overtime Request Employee")
-		# to_date is empty on requests saved before ranges existed
-		other_end = Coalesce(Request.to_date, Request.overtime_date)
-		clashes = (
-			frappe.qb.from_(Row)
-			.join(Request)
-			.on(Request.name == Row.parent)
-			.select(Row.employee, Row.employee_name, Request.name, Request.overtime_date, other_end.as_("end_date"))
-			.where(
-				(Request.docstatus == 1)
-				& (Request.overtime_date <= self.to_date)
-				& (other_end >= self.overtime_date)
-				& (Request.name != self.name)
-				& (Row.parenttype == "Overtime Request")
-				& (Row.employee.isin([row.employee for row in self.employees]))
-			)
-			.run(as_dict=True)
-		)
-		if clashes:
-			lines = "<br>".join(
-				"{0} ({1} to {2}): {3}".format(
-					frappe.bold(c.employee_name or c.employee),
-					frappe.format(c.overtime_date, "Date"),
-					frappe.format(c.end_date, "Date"),
-					get_link_to_form("Overtime Request", c.name),
-				)
-				for c in clashes[:20]
-			)
-			frappe.throw(
-				_("Already approved for overtime within {0} to {1}. Remove them or cancel the other request:<br>{2}").format(
-					frappe.bold(frappe.format(self.overtime_date, "Date")),
-					frappe.bold(frappe.format(self.to_date, "Date")),
-					lines,
-				),
-				title=_("Already Requested"),
-			)
+		start, end = getdate(self.overtime_date), getdate(self.to_date)
+		taken = {}
+		for other in query.run(as_dict=True):
+			left_off = parse_dates(other.already_requested_dates)
+			date = max(getdate(other.overtime_date), start)
+			while date <= min(getdate(other.end_date), end):
+				if date not in left_off:
+					taken.setdefault(other.employee, {}).setdefault(date, other.name)
+				date = add_days(date, 1)
+		return taken
 
 	def set_daily_hours(self):
 		"""Share each employee's weekly hours out over their working days.
@@ -454,12 +448,14 @@ class OvertimeRequest(Document):
 
 		no_working_day = []
 		for row in self.employees:
-			kinds = [day_types.get(row.employee, date) for date in dates]
+			left_off = parse_dates(row.already_requested_dates)
+			free = [date for date in dates if getdate(date) not in left_off]
+			kinds = [day_types.get(row.employee, date) for date in free]
 			if engine.WORKING_DAY not in kinds:
 				no_working_day.append(row.employee_name or row.employee)
 				continue
 			shares = engine.split_across_working_days(row.requested_hours, kinds)
-			for date, kind, hours in zip(dates, kinds, shares):
+			for date, kind, hours in zip(free, kinds, shares, strict=True):
 				self.append(
 					"daily_hours",
 					{
@@ -487,14 +483,28 @@ class OvertimeRequest(Document):
 			return
 
 		self.number_of_employees = len(self.employees)
-		hours = sum(flt(row.requested_hours) for row in self.employees)
-		# a week's hours are already the whole week's
-		self.total_requested_hours = hours if self.request_for == WEEK else hours * self.number_of_days
+		# a week's hours are already the whole week's; a range's are per day,
+		# on the days not already requested elsewhere
+		self.total_requested_hours = sum(
+			flt(row.requested_hours)
+			* (
+				1
+				if self.request_for == WEEK
+				else max(self.number_of_days - len(parse_dates(row.already_requested_dates)), 0)
+			)
+			for row in self.employees
+		)
 
 
 # ──────────────────────────────────────────────────────────────────────────
 # Weeks are picked by ISO number and year; months by the browser's own picker
 # ──────────────────────────────────────────────────────────────────────────
+
+
+def parse_dates(value) -> set:
+	"""The dates an Overtime Request Employee row leaves off, as stored in
+	its Already Requested Dates: ISO dates, comma separated."""
+	return {getdate(part.strip()) for part in str(value or "").split(",") if part.strip()}
 
 
 def payroll_period(company, on_date) -> tuple:
