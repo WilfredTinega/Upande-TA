@@ -274,6 +274,50 @@ class IntegrationTestShiftChange(_TestCase):
 		self.assertEqual(self._on("2030-04-01"), DAY)
 		self.assertTrue(first["created"])
 
+	def _change_open(self, from_date, shift_type=NIGHT):
+		from upande_ta.upande_ta.shift_change import change_shift
+
+		return change_shift(self.employee, from_date, None, shift_type, open_ended=1)
+
+	def test_an_open_change_has_no_end_date(self):
+		result = self._change_open("2030-03-08")
+
+		self.assertEqual(self._on("2030-03-07"), DAY)
+		self.assertEqual(self._on("2030-03-08"), NIGHT)
+		self.assertEqual(self._on("2031-06-30"), NIGHT)
+		self.assertEqual(self._hrms_on("2031-06-30", "20:00:00"), NIGHT)
+		self.assertIsNone(result["restored_to"])
+		self.assertEqual(result["trimmed"], [self.base])
+		new = frappe.get_all(
+			"Shift Assignment",
+			filters={"employee": self.employee, "shift_type": NIGHT, "docstatus": 1},
+			fields=["start_date", "end_date"],
+		)
+		self.assertEqual([(str(r.start_date), r.end_date) for r in new], [("2030-03-08", None)])
+
+	def test_an_open_change_replaces_later_entries(self):
+		self._change("2030-04-01", "2030-04-14")
+		result = self._change_open("2030-03-08")
+
+		self.assertEqual(self._on("2030-04-20"), NIGHT)
+		self.assertTrue(result["cancelled"])
+		active = frappe.get_all(
+			"Shift Assignment",
+			filters={"employee": self.employee, "docstatus": 1, "start_date": [">", "2030-03-08"]},
+			pluck="name",
+		)
+		self.assertEqual(active, [])
+
+	def test_the_same_open_shift_again_is_refused(self):
+		with self.assertRaises(frappe.ValidationError):
+			self._change_open("2030-03-08", DAY)
+
+	def test_an_open_change_takes_no_rotation(self):
+		from upande_ta.upande_ta.shift_change import change_shift
+
+		with self.assertRaises(frappe.ValidationError):
+			change_shift(self.employee, "2030-03-08", None, NIGHT, rotation=[DAY], open_ended=1)
+
 	def test_the_same_shift_again_is_refused(self):
 		with self.assertRaises(frappe.ValidationError):
 			self._change("2030-03-08", "2030-03-24", DAY)

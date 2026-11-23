@@ -906,6 +906,15 @@ frappe.provide("frappe.views");
 				return;
 			}
 			const shift_type = dialog.get_value("shift_type");
+			const $preview = dialog.get_field("rotation_preview").$wrapper;
+			if (dialog.get_value("open_ended")) {
+				$preview.html(
+					from_date && shift_type
+						? rotationPreviewHtml([{ from: from_date, to: "", shift: shift_type }], null)
+						: "",
+				);
+				return;
+			}
 			const to_date = dialog.get_value("to_date");
 			const blocks = rotationBlocks(
 				from_date,
@@ -915,7 +924,6 @@ frappe.provide("frappe.views");
 					? Math.max(cint(dialog.get_value("weeks_per_shift")) || 1, 1)
 					: 9999,
 			);
-			const $preview = dialog.get_field("rotation_preview").$wrapper;
 			$preview.html(rotationPreviewHtml(blocks, afterCache[to_date]));
 			if (!blocks.length || to_date in afterCache) return;
 
@@ -964,6 +972,7 @@ frappe.provide("frappe.views");
 
 		const resetEntry = () => {
 			dialog.set_value("shift_type", "");
+			dialog.set_value("open_ended", 0);
 			const rotation = dialog.get_field("rotation");
 			rotation.df.data = [];
 			rotation.grid.refresh();
@@ -1014,13 +1023,20 @@ frappe.provide("frappe.views");
 					},
 				},
 				{
+					fieldtype: "Check",
+					fieldname: "open_ended",
+					label: __("Open (no end date)"),
+					change: schedulePreview,
+				},
+				{
 					fieldtype: "Date",
 					fieldname: "to_date",
 					label: __("End Date"),
-					reqd: 1,
+					depends_on: "eval:!doc.open_ended",
+					mandatory_depends_on: "eval:!doc.open_ended",
 					change: schedulePreview,
 				},
-				{ fieldtype: "Section Break" },
+				{ fieldtype: "Section Break", depends_on: "eval:!doc.open_ended" },
 				{
 					fieldtype: "Table",
 					fieldname: "rotation",
@@ -1046,7 +1062,7 @@ frappe.provide("frappe.views");
 					fieldname: "weeks_per_shift",
 					label: __("Weeks per Shift"),
 					default: 1,
-					depends_on: "eval:(doc.rotation || []).some((r) => r.shift_type)",
+					depends_on: "eval:!doc.open_ended && (doc.rotation || []).some((r) => r.shift_type)",
 					change: schedulePreview,
 				},
 				{ fieldtype: "HTML", fieldname: "rotation_preview" },
@@ -1054,12 +1070,15 @@ frappe.provide("frappe.views");
 			primary_action_label: __("Change Shift"),
 			primary_action(values) {
 				if (saving) return;
-				const rotation = (values.rotation || []).map((r) => r.shift_type).filter(Boolean);
+				const open_ended = values.open_ended ? 1 : 0;
+				const rotation = open_ended
+					? []
+					: (values.rotation || []).map((r) => r.shift_type).filter(Boolean);
 				if (!values.shift_type && !rotation.length) {
 					dialog.get_field("shift_type").$input.focus();
 					return;
 				}
-				if (values.to_date < values.from_date) {
+				if (!open_ended && values.to_date < values.from_date) {
 					frappe.msgprint(__("End Date cannot be before {0}.", [day(values.from_date)]));
 					return;
 				}
@@ -1072,10 +1091,11 @@ frappe.provide("frappe.views");
 						args: {
 							employee: row.employee,
 							from_date: values.from_date,
-							to_date: values.to_date,
+							to_date: open_ended ? "" : values.to_date,
 							shift_type: values.shift_type || "",
 							rotation: JSON.stringify(rotation),
 							weeks_per_shift: values.weeks_per_shift || 1,
+							open_ended,
 						},
 					})
 					.then((r) => {
@@ -1083,12 +1103,18 @@ frappe.provide("frappe.views");
 						changed = true;
 						const lines = [
 							...(result.blocks || []).map((b) =>
-								__("{0}: {1} from {2} to {3}.", [
-									who,
-									frappe.utils.escape_html(b.shift_type),
-									day(b.from_date),
-									day(b.to_date),
-								]),
+								b.to_date
+									? __("{0}: {1} from {2} to {3}.", [
+											who,
+											frappe.utils.escape_html(b.shift_type),
+											day(b.from_date),
+											day(b.to_date),
+										])
+									: __("{0}: {1} from {2}, no end date.", [
+											who,
+											frappe.utils.escape_html(b.shift_type),
+											day(b.from_date),
+										]),
 							),
 							result.restored_to &&
 								__("Back on {0} from {1}.", [

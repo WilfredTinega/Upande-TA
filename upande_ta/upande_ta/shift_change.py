@@ -10,6 +10,9 @@ inside the window is cancelled. Whatever ran past the window carries on the
 day after it, as a new assignment for the rest of its period, so the employee
 goes back to the shift they would otherwise have been on.
 
+An open-ended change has no end date: the shift chosen owns every day from
+the date on, so nothing is carried over and anything later gives way.
+
 The old assignment is end-dated and, once that end date has passed, set
 Inactive, so only one shift marks the employee's attendance. One whose end is
 still ahead stays Active until then: HRMS skips an Inactive assignment for
@@ -86,15 +89,20 @@ def get_shift_schedule(employee: str, from_date: str | None = None, days: int = 
 def change_shift(
 	employee: str,
 	from_date: str,
-	to_date: str,
+	to_date: str | None = None,
 	shift_type: str | None = None,
 	rotation=None,
 	weeks_per_shift: int = 1,
+	open_ended: int = 0,
 ) -> dict:
 	"""``shift_type`` is the employee's shift from ``from_date`` to
 	``to_date``. With ``rotation`` — more shifts, in order — they take turns
 	with it by calendar week (Monday to Sunday), ``weeks_per_shift`` weeks
-	each, the first turn running to the end of the week ``from_date`` is in."""
+	each, the first turn running to the end of the week ``from_date`` is in.
+	``open_ended`` gives ``shift_type`` every day from ``from_date`` on, with
+	no end date."""
+	if cint(open_ended):
+		return _change_shift_open(employee, from_date, shift_type, rotation)
 	start, end = _window(employee, from_date, to_date)
 	shifts = [name for name in (shift_type, *_shift_list(rotation)) if name]
 	if not shifts:
@@ -162,6 +170,64 @@ def change_shift(
 	for a, b, shift in blocks:
 		for key, dates in _clear_absent(employee, a, b, shift).items():
 			result[key].extend(dates)
+	return result
+
+
+def _change_shift_open(employee, from_date, shift_type, rotation) -> dict:
+	start, _end = _window(employee, from_date, from_date)
+	if _shift_list(rotation):
+		frappe.throw(_("A rotation needs an End Date."))
+	if not shift_type:
+		frappe.throw(_("Pick a Shift Type."))
+	if not frappe.db.exists("Shift Type", shift_type):
+		frappe.throw(_("Shift Type {0} not found.").format(frappe.bold(shift_type)))
+
+	later = _in_force_rows(employee, start, add_days(start, 10 * MAX_WINDOW_DAYS))
+	covering = [row for row in later if getdate(row.start_date) <= start]
+	if (
+		len(later) == 1
+		and covering
+		and covering[0].shift_type == shift_type
+		and not covering[0].end_date
+		and covering[0].status == "Active"
+	):
+		frappe.throw(
+			_("{0} is already their shift from {1} with no end date.").format(
+				frappe.bold(shift_type), frappe.format(start, "Date")
+			)
+		)
+
+	trimmed, cancelled = [], []
+	for row in later:
+		doc = frappe.get_doc("Shift Assignment", row.name)
+		if getdate(doc.start_date) < start:
+			doc.end_date = add_days(start, -1)
+			if getdate(doc.end_date) < getdate(today()):
+				doc.status = "Inactive"
+			doc.flags.ignore_permissions = True
+			doc.save()
+			trimmed.append(doc.name)
+		else:
+			doc.flags.ignore_permissions = True
+			doc.flags.ignore_links = True
+			_cancel(doc)
+			cancelled.append(doc.name)
+
+	created = _submit(_new_assignment(employee, shift_type, start, None)).name
+	until = max(start, getdate(today()))
+	result = {
+		"shift_type": shift_type,
+		"blocks": [{"from_date": start, "to_date": None, "shift_type": shift_type}],
+		"restored_to": None,
+		"created": [get_link_to_form("Shift Assignment", created)],
+		"trimmed": trimmed,
+		"cancelled": cancelled,
+		"checkins_moved": _restamp_checkins(employee, start, until),
+		"absent_removed": [],
+		"attendance_on_other_shift": [],
+	}
+	for key, dates in _clear_absent(employee, start, until, shift_type).items():
+		result[key].extend(dates)
 	return result
 
 
