@@ -1362,14 +1362,16 @@ def run_flip_last_in():
 	if not settings.enable_flip:
 		return {"skipped": True, "reason": "enable_flip is off"}
 	from upande_ta.upande_ta.overrides.employee_checkin import normalize_checkin_directions
+	from upande_ta.upande_ta.security_checkin import normalize_security_checkin_directions
 
 	# How far back this run re-scans, from Biometric Setting. The function
 	# itself falls back to one day when both are unset, so an existing site
 	# that has never filled these in does not suddenly scan nothing.
-	return normalize_checkin_directions(
-		days=int(settings.flip_lookback_days or 0),
-		hours=int(settings.flip_lookback_hours or 0),
-	)
+	days = int(settings.flip_lookback_days or 0)
+	hours = int(settings.flip_lookback_hours or 0)
+	result = normalize_checkin_directions(days=days, hours=hours)
+	result["security"] = normalize_security_checkin_directions(days=days, hours=hours)
+	return result
 
 
 @frappe.whitelist()
@@ -1382,7 +1384,10 @@ def flip_checkins_for_date(date=None):
 	flipped to IN. Middle scans are left intact. Defaults to today."""
 	frappe.only_for(("System Manager", "HR Manager"))
 	from upande_ta.upande_ta.overrides.employee_checkin import normalize_checkin_directions
+	from upande_ta.upande_ta.security_checkin import normalize_security_checkin_directions
 
 	day = getdate(date) if date else getdate(nowdate())
-	return normalize_checkin_directions(target_date=day, days=1)
+	result = normalize_checkin_directions(target_date=day, days=1)
+	result["security"] = normalize_security_checkin_directions(target_date=day, days=1)
+	return result
 	
