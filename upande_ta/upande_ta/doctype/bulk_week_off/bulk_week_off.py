@@ -94,6 +94,27 @@ def create_linked_holiday_list_assignment(
         return None
 
 
+FARM_FIELD = "custom_farm"
+
+
+def employee_has_farm():
+    """Sites that track an employee's farm carry it as Employee.custom_farm;
+    on others the Farm filter is hidden and ignored."""
+    return frappe.get_meta("Employee").has_field(FARM_FIELD)
+
+
+@frappe.whitelist()
+def get_farms(company=None):
+    """The farms set on active employees (of ``company`` when given), for the
+    Farm filter. None when employees have no farm field."""
+    if not employee_has_farm():
+        return None
+    filters = {"status": "Active", FARM_FIELD: ["is", "set"]}
+    if company:
+        filters["company"] = company
+    return sorted(set(frappe.get_all("Employee", filters=filters, pluck=FARM_FIELD)))
+
+
 class BulkWeekOff(Document):
 
     def validate(self):
@@ -387,6 +408,8 @@ class BulkWeekOff(Document):
 
         if self.employee:
             filters.append(["Employee", "name", "=", self.employee])
+        if self.farm and employee_has_farm():
+            filters.append(["Employee", FARM_FIELD, "=", self.farm])
         if self.department:
             filters.append(["Employee", "department", "=", self.department])
         if self.designation:

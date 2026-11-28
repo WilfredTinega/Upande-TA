@@ -11,6 +11,7 @@ frappe.ui.form.on("Bulk Week Off", {
         frm.set_query("employee", function () {
             var filters = { status: "Active" };
             if (frm.doc.company) filters.company = frm.doc.company;
+            if (frm.doc.farm && frm._has_farm) filters.custom_farm = frm.doc.farm;
             if (frm.doc.department) filters.department = frm.doc.department;
             if (frm.doc.designation) filters.designation = frm.doc.designation;
             return { filters: filters };
@@ -22,6 +23,29 @@ frappe.ui.form.on("Bulk Week Off", {
         frm._fetch_employees_debounced = frappe.utils.debounce(function () {
             frm.events.fetch_employees(frm);
         }, 400);
+    },
+
+    refresh: function (frm) {
+        frm.events.load_farms(frm);
+    },
+
+    /** Fill the Farm filter with the farms set on this company's employees;
+     * hide it on sites whose employees have no farm. */
+    load_farms: function (frm) {
+        frappe.call({
+            method: "upande_ta.upande_ta.doctype.bulk_week_off.bulk_week_off.get_farms",
+            args: { company: frm.doc.company || null },
+        }).then(function (r) {
+            var farms = r && r.message;
+            frm._has_farm = Array.isArray(farms);
+            // a Select with no fixed options: the farms come from the employees
+            frm.set_df_property("farm", "options", [""].concat(frm._has_farm ? farms : []));
+            frm.toggle_display("farm", frm._has_farm);
+        });
+    },
+
+    farm: function (frm) {
+        if (frm._fetch_employees_debounced) frm._fetch_employees_debounced();
     },
 
     /** Before submitting, show what the new assignments would replace, which
@@ -55,12 +79,15 @@ frappe.ui.form.on("Bulk Week Off", {
     },
 
     clear_filters: function (frm) {
+        frm.set_value("farm", "");
         frm.set_value("department", "");
         frm.set_value("designation", "");
         frm.set_value("employee", "");
     },
 
     company: function (frm) {
+        frm.set_value("farm", "");
+        frm.events.load_farms(frm);
         frm.set_value("department", "");
         frm.set_value("designation", "");
         frm.set_value("employee", "");
